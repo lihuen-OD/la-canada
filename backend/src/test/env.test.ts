@@ -27,4 +27,30 @@ describe('loadEnv', () => {
     expect(env).not.toHaveProperty('SOME_UNRELATED_VAR');
     expect(Object.keys(env)).toEqual(expect.arrayContaining(['NODE_ENV', 'PORT', 'FRONTEND_URL']));
   });
+
+  it('acepta las variables conceptuales de Object Storage como opcionales (módulo de archivos no implementado todavía)', () => {
+    const env = loadEnv({ FRONTEND_URL: 'http://localhost:5173' });
+    expect(env.OBJECT_STORAGE_ENDPOINT).toBeUndefined();
+    expect(env.OBJECT_STORAGE_BUCKET).toBeUndefined();
+
+    const withStorage = loadEnv({
+      FRONTEND_URL: 'http://localhost:5173',
+      OBJECT_STORAGE_ENDPOINT: 'https://example-storage.neon.tech',
+      OBJECT_STORAGE_REGION: 'us-east-1',
+      OBJECT_STORAGE_BUCKET: 'la-canada-uploads',
+      OBJECT_STORAGE_ACCESS_KEY_ID: 'test-key',
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: 'test-secret',
+    });
+    expect(withStorage.OBJECT_STORAGE_BUCKET).toBe('la-canada-uploads');
+  });
+
+  it('ya no declara ninguna variable de Google Drive', () => {
+    const env = loadEnv({ FRONTEND_URL: 'http://localhost:5173' }) as unknown as Record<
+      string,
+      unknown
+    >;
+    expect(env).not.toHaveProperty('GOOGLE_DRIVE_FOLDER_ID');
+    expect(env).not.toHaveProperty('GOOGLE_SERVICE_ACCOUNT_EMAIL');
+    expect(env).not.toHaveProperty('GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY');
+  });
 });

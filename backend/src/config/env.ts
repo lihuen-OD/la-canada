@@ -1,9 +1,11 @@
 import { z } from 'zod';
 
 /**
- * Variables previstas para etapas futuras (Neon, JWT, Google Drive) se dejan
- * opcionales a propósito: no deben bloquear el arranque del backend en esta
- * etapa, en la que todavía no se usan.
+ * Variables previstas para etapas futuras (Neon, JWT, Object Storage) se
+ * dejan opcionales a propósito: no deben bloquear el arranque del backend
+ * en esta etapa, en la que todavía no se usan. Cuando se implemente el
+ * módulo de archivos, esta validación deberá poder volver obligatorias las
+ * variables de `OBJECT_STORAGE_*` (hoy opcionales).
  */
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -17,9 +19,15 @@ const envSchema = z.object({
   JWT_REFRESH_SECRET: z.string().optional(),
   ACCESS_TOKEN_TTL: z.string().optional(),
   REFRESH_TOKEN_TTL: z.string().optional(),
-  GOOGLE_DRIVE_FOLDER_ID: z.string().optional(),
-  GOOGLE_SERVICE_ACCOUNT_EMAIL: z.string().optional(),
-  GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: z.string().optional(),
+
+  // Neon Object Storage (interfaz S3) — reemplaza a Google Drive, ver
+  // docs/ARCHITECTURE.md, "Object Storage". Backend local usa únicamente la
+  // rama/bucket `demo`; Render (producción) usa únicamente `production`.
+  OBJECT_STORAGE_ENDPOINT: z.string().optional(),
+  OBJECT_STORAGE_REGION: z.string().optional(),
+  OBJECT_STORAGE_BUCKET: z.string().optional(),
+  OBJECT_STORAGE_ACCESS_KEY_ID: z.string().optional(),
+  OBJECT_STORAGE_SECRET_ACCESS_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

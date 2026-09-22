@@ -207,3 +207,25 @@ Estas constantes son configuración de interfaz/presentación, no catálogos de 
 | Todo lo demás (mascotas, empleados, hijos, clínicos, recolecciones, consumos, PINs, destinos reales) | No hay literales — dato vivo solo en Supabase actual, no observable desde el HTML |
 
 Esta tabla es clave para `docs/MIGRATION_PLAN.md`: el futuro seed de Neon debe cubrir explícitamente todo lo marcado ❌, porque el prototipo nunca lo hizo por sí solo.
+
+## 16. Actualización — Etapa 2: estado del nuevo seed (`backend/prisma/seed.ts`)
+
+El seed escrito en la Etapa 2 (Prisma, **no ejecutado todavía** — ver `docs/SEED_MANIFEST.md` para el manifiesto exacto) cubre explícitamente todo lo que `seedData()` dejaba afuera:
+
+| Dato | ¿El seed de la Etapa 2 lo cubre? |
+|---|---|
+| Personas → `Employee` + `User` (4) | ✅ Sí (más una cuenta `User` `PENDING_ACTIVATION` por cada una, no solo el empleado) |
+| Tareas → `Task` (10) | ✅ Sí |
+| Stock → `StockItem` (14) + saldo inicial vía `StockMovement` | ✅ Sí |
+| Categorías de stock → `StockCategory` (13) | ✅ Sí — corrige la omisión del prototipo |
+| Novedades → `NewsReport` (2) | ✅ Sí — corrige la omisión del prototipo (con la salvedad de la fecha, ver abajo) |
+| Eventos literales → `Event` (2 de 3) | ✅ Sí para "Revisión bomba de agua" y "Visita familia O'Dwyer"; el evento de cumpleaños de Benjamín **no se siembra** (fecha contradictoria, ver `docs/BUSINESS_RULES.md` §14) |
+| Cumpleaños familiares → `RecurringBirthday` (2 de 3) | ✅ Sí para Vicky y Felicitas (con recurrencia calculada dinámicamente, no una fecha fija); Benjamín omitido por la misma razón |
+| Tipos de mascota → `AnimalType` (9) | ✅ Sí — corrige la omisión del prototipo |
+| Destino "Ajuste de inventario" | ❌ No se siembra — ya no hace falta: `StockMovementType` (enum) reemplaza estructuralmente ese pseudo-destino, ver `docs/DATABASE.md` |
+| Cantidad de gallinas → `ChickenCoop` | ❌ No se siembra a propósito — sin valor comprobado, ver `docs/SEED_MANIFEST.md` |
+| Todo lo demás (mascotas, datos de empleados, hijos, registros clínicos, recolecciones, consumos no-apertura, PINs) | ❌ No se siembra — sigue sin haber literales reales en el HTML para estas entidades |
+
+Diferencia de fondo respecto a la tabla anterior: el prototipo nunca tuvo código que sembrara novedades/eventos/tipos de mascota/categorías en Supabase (columna ❌ arriba). El seed de la Etapa 2 sí los cubre — pero **todavía no se ejecutó contra ninguna base** (Etapa 2 es solo diseño + escritura del seed, no su ejecución).
+
+**Corrección — conteo exacto (revisión correctiva de la Etapa 2).** La entrega original de la Etapa 2 resumía el seed como "61 filas" sin distinguir que ese número ya excluía los movimientos de apertura de stock, generando una lectura ambigua. Conteo correcto, documentado con detalle en `docs/SEED_MANIFEST.md`: **61 entidades maestras** (la suma de la columna "Dato" de arriba, contando cada fila de catálogo/registro una sola vez) **+ 14 `StockMovement` de apertura** (una por cada `StockItem`, no son una entidad maestra nueva, son una fila hija) **= 75 filas potenciales en total** si el seed se ejecutara contra una base vacía. Verificado con tests (`backend/src/test/seed-data.test.ts`, describe "Conteo total del seed").

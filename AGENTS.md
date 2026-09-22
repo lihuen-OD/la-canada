@@ -10,7 +10,7 @@ Este documento rige el comportamiento de cualquier agente (humano o IA) que trab
 - **Backend:** Node.js + TypeScript + Express, desplegado en Render.
 - **ORM:** Prisma.
 - **Base de datos:** PostgreSQL en Neon.
-- **Fotografías:** Google Drive, integrado a través del backend (nunca directo desde el frontend).
+- **Fotografías:** Neon Object Storage (interfaz compatible con S3, buckets privados), integrado a través del backend (nunca directo desde el frontend).
 
 El detalle completo está en `docs/`. Este archivo no repite ese contenido: define **reglas de trabajo**.
 

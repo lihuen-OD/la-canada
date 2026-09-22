@@ -91,6 +91,6 @@ La reconstrucción prevista (no iniciada) es:
 - **Backend:** Node.js + TypeScript + Express → desplegado en **Render**.
 - **ORM:** Prisma.
 - **Base de datos:** PostgreSQL en **Neon**.
-- **Fotografías:** Google Drive, integrado *a través del backend* (el frontend nunca sube directo a Drive ni a la base de datos).
+- **Fotografías:** Neon Object Storage (interfaz compatible con S3, buckets privados separados por rama/entorno), integrado *a través del backend* (el frontend nunca sube directo al almacenamiento ni a la base de datos). **Actualización**: reemplaza a Google Drive, evaluado inicialmente y descartado antes de conectar Neon — ver `docs/ARCHITECTURE.md`, "Object Storage".
 
 El diseño visual actual (paleta de colores en `:root`, tipografías, layout de cards/chips/navegación) se conserva; el objetivo de la reconstrucción es de arquitectura y seguridad, no estético. Ver `docs/ARCHITECTURE.md` y `docs/MIGRATION_PLAN.md` para el detalle etapa por etapa.

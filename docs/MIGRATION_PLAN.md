@@ -1,106 +1,94 @@
 # MIGRATION_PLAN.md — Plan de migración por etapas
 
-> Este documento **planifica** etapas; no las ejecuta. Cada etapa requiere autorización humana explícita antes de comenzar (ver `AGENTS.md`, regla 3). El orden es secuencial pero no rígido: si en una etapa surge información que cambia el plan, se ajusta este documento antes de continuar, no se improvisa en silencio.
+> Este documento **planifica** etapas; no las ejecuta más allá de lo ya autorizado. Cada etapa requiere autorización humana explícita antes de comenzar (ver `AGENTS.md`, regla 3). El orden es secuencial pero no rígido: si en una etapa surge información que cambia el plan, se ajusta este documento antes de continuar, no se improvisa en silencio.
+>
+> **Nota de numeración**: la numeración de etapas de este documento se ajustó para reflejar cómo se ejecutó realmente el trabajo (el usuario autorizó "Preservar el prototipo" y "Crear la estructura profesional" juntas como una única Etapa 1, y "Diseñar Prisma" y "Crear el seed" juntas como una única Etapa 2). Las etapas futuras (antes 5-10) se renumeraron a 3-8 en consecuencia.
 
-## Etapa 0 — Documentación (esta etapa)
+## Etapa 0 — Documentación ✅ completada
 
 - **Objetivo**: auditar `index.html` sin modificarlo y producir la documentación base (`AGENTS.md` + `docs/*.md`).
-- **Estado**: completada por este documento y sus acompañantes.
-- **Validación de cierre**: ver el resumen ejecutivo entregado al usuario al finalizar esta auditoría.
+- **Resultado**: `AGENTS.md` y 7 documentos en `docs/` (`PROJECT_CONTEXT.md`, `BUSINESS_RULES.md`, `DATA_INVENTORY.md`, `ARCHITECTURE.md`, `DATABASE.md`, `SECURITY.md`, `MIGRATION_PLAN.md`). `index.html` sin modificar (confirmado por checksum).
 
-## Etapa 1 — Preservar el prototipo
+## Etapa 1 — Preservar el prototipo + crear la estructura profesional ✅ completada
 
-- **Objetivo**: asegurar que `index.html` quede resguardado como referencia inmutable antes de tocar nada más.
+- **Objetivo**: resguardar `index.html` como referencia inmutable y armar el andamiaje de monorepo (frontend + backend) sin lógica de negocio.
+- **Resultado**:
+  - `legacy/index.original.html` — copia exacta de `index.html` (mismo checksum), nunca importada ni servida por el backend.
+  - Monorepo con npm workspaces: `frontend/` (React + TypeScript + Vite) y `backend/` (Node + TypeScript + Express), con TypeScript estricto, ESLint (config compartida en `eslint.config.js`), Prettier, Vitest, `concurrently`.
+  - Backend con Helmet, CORS restringido a `FRONTEND_URL` (403 estructurado para orígenes no autorizados, corregido en un cierre correctivo posterior), rate limiting general, manejo centralizado de errores, endpoint `GET /api/v1/health`.
+  - `.env.example` centralizado en la raíz (`docs/ARCHITECTURE.md` §11 tiene el detalle completo por variable y por plataforma de despliegue).
+  - Repositorio Git inicializado, con un commit base (`chore: establish professional monorepo foundation`) y un cierre correctivo posterior (fix de CORS + revisión de variables de entorno).
+- **No incluyó**: ninguna pantalla ni endpoint de negocio, ninguna conexión a Neon ni a Supabase.
+
+## Etapa 2 — Diseñar Prisma + crear el seed con datos reales ✅ completada
+
+- **Objetivo**: convertir el borrador de `docs/DATABASE.md` en un `schema.prisma` real, y escribir (sin ejecutar) un seed idempotente con los datos reales identificados en `docs/DATA_INVENTORY.md`.
+- **Resultado**:
+  - `backend/prisma/schema.prisma` — modelo completo (22 modelos, 11 enums) cubriendo identidad/seguridad, tareas, inventario, novedades/eventos, archivos, gallinero, mascotas y configuración. Detalle completo en `docs/DATABASE.md`, sección "Modelo definitivo (Etapa 2)".
+  - `backend/prisma.config.ts` — configuración de Prisma 7 (reemplaza `datasource.url` en el schema, ya no soportado en esta versión — ver `docs/ARCHITECTURE.md` §10).
+  - `backend/prisma/seed.ts` + `backend/prisma/seed-data/*.ts` + `backend/prisma/seed-lib/` — seed idempotente (patrón "crear si no existe, nunca pisar"), con los datos reales del HTML separados de la lógica de ejecución. Manifiesto exacto en `docs/SEED_MANIFEST.md`.
+  - Datos deliberadamente omitidos (documentados, no inventados): cumpleaños de Benjamín (fecha contradictoria), cantidad de gallinas (sin valor comprobado), administrador inicial, y cualquier historial operativo sin evidencia real en el HTML (ejecuciones, consumos no-apertura, animales, fotos, sesiones, auditoría).
+- **No incluyó**: ninguna migración contra Neon, ningún `db push`, ninguna ejecución del seed, ninguna conexión a Supabase ni a Neon.
+
+## Etapa 3 — Implementar autenticación
+
+- **Objetivo**: reemplazar el PIN comparado en el cliente por autenticación real del lado del backend, sobre el modelo `User`/`Session` ya definido en la Etapa 2.
 - **Alcance sugerido**:
-  - Inicializar control de versiones si aún no existe (se detectó que el proyecto no tiene `git` inicializado).
-  - Primer commit conteniendo únicamente `index.html` + la documentación de la Etapa 0, sin ningún otro cambio.
-  - Definir la convención de que `index.html` no se edita salvo pedido explícito del usuario (ya establecido en `AGENTS.md`).
-- **No incluye**: mover el archivo, renombrarlo, ni tocar su contenido.
-
-## Etapa 2 — Crear la estructura profesional
-
-- **Objetivo**: andamiaje de carpetas y configuración base para frontend y backend, sin lógica de negocio todavía.
-- **Alcance sugerido**:
-  - `frontend/` — proyecto Vite + React + TypeScript vacío/base.
-  - `backend/` — proyecto Node + TypeScript + Express vacío/base, con estructura de carpetas (rutas, controladores, servicios) a definir.
-  - Configuración de linting/formato, `tsconfig`, scripts de desarrollo.
-  - `.env.example` en cada proyecto (sin valores reales) documentando las variables previstas en `docs/ARCHITECTURE.md` §10.
-- **No incluye**: implementar ninguna pantalla ni endpoint todavía.
-
-## Etapa 3 — Diseñar Prisma
-
-- **Objetivo**: convertir el borrador de `docs/DATABASE.md` en un `schema.prisma` real, resolviendo junto con el usuario las dudas marcadas ahí (FK real vs. texto libre para categorías/tipos, modelo de `periodo` en ejecuciones, columna `tipo` estructurada en movimientos de stock, soft-delete uniforme, si se agrega auditoría transversal, si se agrega `tareas.activa`).
-- **Alcance sugerido**:
-  - Resolver cada duda de `docs/DATABASE.md` con el usuario antes de escribir el schema final.
-  - Escribir `schema.prisma` con todos los modelos de las 18 entidades identificadas.
-  - Generar la migración inicial de Prisma contra una base Neon (de desarrollo, no producción) recién creada para este proyecto.
-- **No incluye**: ejecutar migraciones contra ninguna base ya en uso; no se reutiliza ni se toca el proyecto Supabase actual.
-
-## Etapa 4 — Crear el seed con datos reales
-
-- **Objetivo**: poblar la base nueva con toda la información real identificada en `docs/DATA_INVENTORY.md`.
-- **Alcance sugerido**:
-  - Seed de personas, tareas, stock (casa + jardín) — igual que hace hoy `seedData()` en el prototipo.
-  - Seed de lo que el prototipo **no** siembra hoy pero sí declara como dato real: categorías de stock, tipos de mascota, destino "Ajuste de inventario", novedades iniciales, cumpleaños familiares (Vicky, Felicitas sin duda; Benjamín una vez resuelta la inconsistencia de fecha con el usuario).
-  - Confirmar con el usuario, antes de sembrar: la fecha correcta de cumpleaños de Benjamín (19/02 vs. 16/09), si los eventos "Revisión bomba de agua" y "Visita familia O'Dwyer" siguen vigentes, y la cantidad real actual de gallinas activas (no hay valor real declarado en el código).
-- **No incluye**: inventar datos que no estén en `index.html` ni confirmados por el usuario.
-
-## Etapa 5 — Implementar autenticación
-
-- **Objetivo**: reemplazar el PIN comparado en el cliente por autenticación real del lado del backend.
-- **Alcance sugerido**:
-  - Definir con el usuario si se mantiene el esquema de PIN (ahora verificado server-side, con hashing y límite de intentos) o se migra a un esquema distinto.
-  - Sesión gestionada por el backend (cookie httpOnly o JWT de corta duración — decisión a tomar en esta etapa, ver `docs/ARCHITECTURE.md` §5-6).
+  - Definir con el usuario el mecanismo real de activación de los 4 `User` `PENDING_ACTIVATION` ya sembrados (invitación por link, contraseña temporal, u otro).
+  - Sesión gestionada por el backend (cookie httpOnly o JWT de corta duración con refresh vía `Session.refreshTokenHash` — decisión a tomar en esta etapa, ver `docs/ARCHITECTURE.md` §5-6).
   - Autorización real por rol (`ADMIN`/`EMPLOYEE`) verificada en cada endpoint, no solo ocultada en la UI.
-  - Decidir, con el usuario, cómo se resuelve la identidad del admin (hoy no se distingue *qué* admin actuó — ver `docs/BUSINESS_RULES.md` §4 y `docs/ARCHITECTURE.md` §8).
+  - Proceso seguro para crear el administrador inicial (variable de entorno o comando administrativo — nunca datos inventados en el seed, ya excluido a propósito en la Etapa 2).
 - **No incluye**: exponer ningún secreto en el frontend (regla 8 de `AGENTS.md`).
 
-## Etapa 6 — Reconstruir el frontend sin alterar el diseño
+## Etapa 4 — Reconstruir el frontend sin alterar el diseño
 
 - **Objetivo**: recrear en React + TypeScript las 14 pantallas identificadas en `docs/PROJECT_CONTEXT.md` §3, preservando la paleta de colores, tipografías (Fraunces/Karla), layout mobile-first con navegación inferior/sidebar, y componentes visuales (cards, chips, modales tipo bottom-sheet, badges de estado).
 - **Alcance sugerido**:
   - Extraer el sistema de diseño (`:root` de `index.html`) a tokens reutilizables (CSS variables o equivalente en el stack elegido).
-  - Reconstruir componentes visuales genéricos primero (Card, Chip, Modal, Badge, Avatar, KPI) y luego las pantallas.
-  - El frontend consume **solo** la API del backend (nunca Supabase directo) — corrige el hallazgo central de `docs/SECURITY.md`.
+  - Reconstruir componentes visuales genéricos primero (Card, Chip, Modal, Badge, Avatar, KPI) y luego las pantallas, reemplazando la pantalla técnica temporal de la Etapa 1.
+  - El frontend consume **solo** la API del backend (nunca Prisma/Postgres directo) — corrige el hallazgo central de `docs/SECURITY.md`.
 - **No incluye**: rediseñar la interfaz; cualquier cambio visual respecto al original requiere pedido explícito del usuario (regla 6 de `AGENTS.md`).
 
-## Etapa 7 — Implementar módulos gradualmente
+## Etapa 5 — Implementar módulos gradualmente
 
-- **Objetivo**: portar la lógica de negocio de `docs/BUSINESS_RULES.md` al backend, módulo por módulo, en lugar de todo de una vez.
-- **Orden sugerido** (a confirmar con el usuario, ajustable): Personas → Tareas (incluyendo el fix del bug de `activa`/desempeño) → Stock (incluyendo categorías, destinos, consumos, reportes) → Novedades → Eventos (incluyendo cumpleaños automáticos, ya resueltos los conflictos de fecha) → Gallinero (incluyendo el fix del bug `DIAS_ES` y el problema de fila singleton) → Mascotas (incluyendo registros clínicos y tipos) → Empleados/Mi perfil/Hijos → Fotos (como paso previo a la Etapa 8) → Clima.
-- Cada módulo migrado se valida contra las reglas ya documentadas en `docs/BUSINESS_RULES.md`, corrigiendo — no reproduciendo — los bugs verificados ahí (desempeño roto, `DIAS_ES` indefinido, permisos inconsistentes de fotos, etc.), salvo que el usuario pida explícitamente mantener algún comportamiento tal cual está.
+- **Objetivo**: portar la lógica de negocio de `docs/BUSINESS_RULES.md` al backend, módulo por módulo, en lugar de todo de una vez, usando los modelos ya definidos en la Etapa 2.
+- **Orden sugerido** (a confirmar con el usuario, ajustable): Empleados/Usuarios → Tareas (con `Task.active` y `TaskExecution` ya modelados) → Inventario (con `StockMovementType` ya reemplazando el hack de prefijos de texto) → Novedades → Eventos y cumpleaños recurrentes (ya resuelta la ambigüedad de origen del campo `nota`) → Gallinero (singleton por convención, ya documentado) → Mascotas (con `AnimalType` ya normalizado) → Datos de empleados/hijos → Fotos (como paso previo a la Etapa 6) → Clima (usando `PropertyLocation`).
+- Cada módulo migrado se valida contra las reglas ya documentadas en `docs/BUSINESS_RULES.md`, corrigiendo — no reproduciendo — los bugs verificados ahí (desempeño roto, `DIAS_ES` indefinido, permisos inconsistentes de fotos ya resueltos a favor de admin-only, etc.), salvo que el usuario pida explícitamente mantener algún comportamiento tal cual está.
 - **No incluye**: adelantar módulos fuera de orden sin acuerdo, ni mezclar el fix de un bug con la migración de un módulo no relacionado.
 
-## Etapa 8 — Integrar Google Drive
+## Etapa 6 — Integrar Neon Object Storage (fotografías y archivos)
 
-- **Objetivo**: reemplazar el almacenamiento de fotos como base64 en Postgres por archivos en Google Drive, gestionados desde el backend.
+- **Objetivo**: conectar `FileAsset` (ya modelado en la Etapa 2, adaptado a Neon Object Storage en la Etapa 2.2) con el Object Storage real de Neon, gestionado desde el backend.
 - **Alcance sugerido**:
-  - Backend recibe el archivo, lo sube a Drive con credenciales de servicio (nunca en el cliente), y persiste en Postgres solo la referencia.
-  - Definir con el usuario la estructura de carpetas en Drive y los permisos de acceso (especialmente considerando que puede haber fotos de menores de edad, ver `docs/SECURITY.md` §7).
-  - Migrar las fotos ya existentes en Supabase (si las hay) de base64 a Drive, como parte de esta etapa o de una etapa de migración de datos legada a definir con el usuario.
-- **No incluye**: subir archivos directo desde el frontend a Drive.
+  - Backend recibe el archivo, valida tipo MIME real/tamaño/permisos, genera un `objectKey` (UUID, ver estrategia en `docs/ARCHITECTURE.md` §9.2), lo sube al bucket privado correspondiente al entorno (`demo`/`production`) con credenciales de servicio (nunca en el cliente), y persiste en Postgres solo la referencia (`FileAsset.bucket` + `objectKey`, etc.).
+  - Decidir la estrategia de lectura (URL temporal firmada vs. proxy vía backend — ver `docs/ARCHITECTURE.md` §9.5).
+  - Implementar la compensación de fallos parciales (registro sin subida confirmada, o subida sin registro) y la detección de objetos huérfanos.
+  - Implementar el flujo de eliminación lógica → física controlada, exclusivo de `ADMIN`.
+  - Considerar que puede haber fotos de menores de edad (ver `docs/SECURITY.md` §7) al definir permisos de acceso.
+- **No incluye**: subir archivos directo desde el frontend al Object Storage.
 
-## Etapa 9 — Probar
+## Etapa 7 — Probar
 
 - **Objetivo**: validar funcionalmente que el sistema reconstruido reproduce (o mejora deliberadamente, cuando así se acordó) el comportamiento documentado en `docs/BUSINESS_RULES.md`.
 - **Alcance sugerido**:
-  - Tests automatizados de backend (lógica de negocio: períodos, estados de stock, desempeño, permisos por rol).
+  - Tests automatizados de backend (lógica de negocio: períodos, estados de stock, desempeño, permisos por rol) — sobre la base de los tests ya existentes de infraestructura (health, CORS, entorno, inventario del seed).
+  - Ejecutar el seed real contra una base de desarrollo por primera vez, y verificar que es efectivamente idempotente corriéndolo dos veces.
   - Pruebas manuales de UI en mobile y escritorio, cubriendo los 14 módulos.
   - Checklist específico contra cada hallazgo de `docs/SECURITY.md` (confirmar que ya no aplica en la nueva arquitectura).
 - **No incluye**: pruebas contra el proyecto Supabase actual (no se usa en la nueva arquitectura).
 
-## Etapa 10 — Desplegar
+## Etapa 8 — Desplegar
 
 - **Objetivo**: publicar frontend en Netlify, backend en Render, base en Neon.
 - **Alcance sugerido**:
-  - Variables de entorno de producción configuradas en cada plataforma (nunca commiteadas).
-  - Configuración de CORS entre Netlify y Render.
-  - Plan de rollback y de baja del proyecto Supabase actual (una vez confirmado que ya no se usa — recordar: "la conexión actual con Supabase será eliminada más adelante", no en esta etapa de documentación).
+  - Primera migración real (`prisma migrate deploy`) contra Neon, y primera ejecución real del seed.
+  - Variables de entorno de producción configuradas en cada plataforma (nunca commiteadas) — configuración esperada ya documentada en `docs/ARCHITECTURE.md` §11.
+  - Plan de rollback y de baja del proyecto Supabase actual (una vez confirmado que ya no se usa — recordar: "la conexión actual con Supabase será eliminada más adelante").
 - **No incluye**: eliminar el proyecto Supabase actual sin confirmación explícita del usuario de que la migración de datos está completa y verificada.
 
 ---
 
-## Validaciones obligatorias de esta etapa (Etapa 0)
+## Validaciones obligatorias de la Etapa 0
 
 - [x] Leído `index.html` completo (líneas 1 a 4206), no solo fragmentos.
 - [x] Buscadas todas las referencias a Supabase (`SB_URL`, `SB_KEY`, `sbFetch`/`sbGet`/`sbPost`/`sbPatch`/`sbDel`/`sbUpsert`, y llamadas `fetch` crudas contra `rest/v1/`) — 18 tablas identificadas y documentadas en `docs/DATABASE.md`.
@@ -110,3 +98,47 @@
 - [x] Confirmados todos los módulos y pantallas — 14 pantallas (`div.pg`) listadas en `docs/PROJECT_CONTEXT.md` §3.
 - [x] Confirmado que no se modificó `index.html` (ver confirmación explícita en el resumen final entregado al usuario).
 - [x] Confirmado que no se creó código funcional nuevo — solo se crearon `AGENTS.md` y los 7 archivos de `docs/`, todos documentación en Markdown.
+
+## Validaciones obligatorias de la Etapa 2
+
+- [x] Schema Prisma formateado y validado estáticamente (`prisma format`, `prisma validate`), sin conexión a base.
+- [x] Cliente Prisma generado sin conexión a base (`prisma generate`).
+- [x] `npm run build`, `npm run typecheck`, `npm run lint`, `npm run test`, `npm run format:check` — todos en verde sobre el monorepo completo.
+- [x] Tests específicos del inventario del seed corridos y en verde, sin PostgreSQL (`backend/src/test/seed-data.test.ts`, `seed-source-guards.test.ts`).
+- [x] Búsqueda de credenciales/PIN/secretos y de `deleteMany` en el seed — sin coincidencias reales (los falsos positivos iniciales, por menciones en comentarios explicativos, se corrigieron en los propios tests).
+- [x] Confirmado que no hubo conexión a Supabase ni a Neon, y que el seed no se ejecutó.
+- [x] Checksum de `index.html` verificado sin cambios.
+
+### Revisión correctiva de la Etapa 2 (antes de conectar Neon)
+
+Antes de dar por cerrada la Etapa 2 se hizo una segunda pasada correctiva, sin avanzar a la Etapa 3, que corrigió:
+
+- [x] Conteo del seed corregido y diferenciado: 61 entidades maestras + 14 movimientos de apertura = 75 filas potenciales (antes se informaba "61" de forma ambigua).
+- [x] `TaskExecution.assignedEmployeeId` — snapshot obligatorio del empleado asignado en el momento de crear la ejecución, separado de `completedByEmployeeId`, para que reasignar una tarea no reinterprete el historial.
+- [x] `PropertyLocation` y `ChickenCoop` — singleton reforzado con `code String @unique`, en vez de depender solo de convención.
+- [x] `FileAsset.newsReportId` eliminado (auditado contra el HTML: sin evidencia funcional de fotos vinculadas a novedades); `taskId`/`animalId` confirmados y documentados.
+- [x] `StockMovement.reference` — clave natural única para que el movimiento de apertura de cada producto sea idempotente por restricción real de base, no solo por texto descriptivo.
+- [x] Matriz de invariantes que Prisma no puede expresar, con nivel de enforcement (Prisma / SQL futuro / servicio), agregada a `docs/DATABASE.md`.
+- [x] Todas las validaciones (`prisma format/validate/generate`, build, typecheck, lint, test, format:check) vueltas a correr en verde, sin conexión a ninguna base.
+- [x] Sin commit — Etapa 2 y esta revisión correctiva quedan juntas, sin commitear, para revisión conjunta.
+
+### Etapa 2.2 — Reemplazo de Google Drive por Neon Object Storage (antes de conectar Neon)
+
+Segunda revisión arquitectónica, autorizada explícitamente por el usuario antes de conectar Neon y antes del commit de las Etapas 2/2.1. Decisión definitiva:
+
+> Neon Object Storage privado reemplaza a Google Drive como almacenamiento de fotografías y archivos, usando su interfaz compatible con S3, con buckets privados separados por rama/entorno (`demo`/`production`) dentro del mismo proyecto de Neon que aloja Postgres.
+
+Cambios de esta revisión:
+
+- [x] `FileAsset` — `externalId` reemplazado por `bucket` + `objectKey` (identificación técnica principal); restricción única compuesta `@@unique([bucket, objectKey])` (antes `@@unique([provider, externalId])`); campo nuevo `etag` (opcional).
+- [x] `FileProvider` — `GOOGLE_DRIVE` reemplazado por `NEON_OBJECT_STORAGE` (único valor, justificado en `docs/DATABASE.md`).
+- [x] `FileStatus` ampliado de 2 a 5 valores (`PENDING_UPLOAD`, `AVAILABLE`, `UPLOAD_FAILED`, `PENDING_DELETION`, `DELETED`) para representar el ciclo de vida completo de una subida futura — sin implementar ningún workflow todavía. Default pasa de `ACTIVE` a `PENDING_UPLOAD`.
+- [x] `docs/ARCHITECTURE.md` §9 reescrita: proveedor y modelo de datos, estrategia de object keys (documentada, no implementada), buckets y ambientes (`demo`/`production`, credenciales separadas, Netlify nunca recibe credenciales de almacenamiento), flujos de escritura/lectura futuros, principios de la integración (backend único con credenciales, bucket siempre privado, eliminación lógica antes que física exclusiva de `ADMIN`, detección de huérfanos, validación de MIME real, límites de tamaño).
+- [x] `docs/DATABASE.md` — enum `FileProvider` actualizado en la tabla de enums; nueva sección "Object Storage reemplaza Google Drive"; matriz de invariantes ampliada con 6 filas nuevas (12-17: unicidad `bucket`+`objectKey`, `sizeBytes` no negativo, `objectKey` válida para archivos disponibles, archivos eliminados sin nuevas URLs firmadas, credenciales exclusivas del backend, buckets `demo`/`production` sin mezclar) y una cuarta columna de clasificación ("Configuración operativa").
+- [x] `docs/SECURITY.md` §7 actualizada con la decisión de Object Storage.
+- [x] `.env.example`, `backend/src/config/env.ts`, `README.md`, `AGENTS.md`, `docs/PROJECT_CONTEXT.md` — variables `GOOGLE_DRIVE_FOLDER_ID`/`GOOGLE_SERVICE_ACCOUNT_EMAIL`/`GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` reemplazadas por `OBJECT_STORAGE_ENDPOINT`/`OBJECT_STORAGE_REGION`/`OBJECT_STORAGE_BUCKET`/`OBJECT_STORAGE_ACCESS_KEY_ID`/`OBJECT_STORAGE_SECRET_ACCESS_KEY` (todas opcionales todavía, ninguna con prefijo `VITE_`, sin valores reales).
+- [x] Tests actualizados/agregados (`backend/src/test/schema-static.test.ts`, `env.test.ts`, nuevo `env-example.test.ts`) — cubren: `FileProvider` sin `GOOGLE_DRIVE`, `FileAsset` con `bucket`/`objectKey` y sin `externalId`, restricción única compuesta, ausencia de URL firmada/pública y de credenciales en el schema, `.env.example` sin variables de Google y con las variables conceptuales de Object Storage, ninguna con prefijo `VITE_`.
+- [x] Búsqueda exhaustiva de referencias a Google Drive en el proyecto — sin instrucciones activas restantes (se conserva mención histórica en `docs/ARCHITECTURE.md` §9 y `docs/DATABASE.md` solo por trazabilidad).
+- [x] El seed (`backend/prisma/seed.ts`) no crea ningún `FileAsset` — sin cambios, conteo de 61 entidades maestras + 14 movimientos de apertura = 75 filas potenciales sin alterar.
+- [x] Sin conexión a Neon, sin migración, sin `db push`, sin ejecución del seed, sin creación de buckets, sin subida real de archivos, sin implementación de SDK S3 ni de endpoints — todo lo relativo a esta etapa es solo modelo de datos y documentación.
+- [x] Commit único de las Etapas 2, 2.1 y 2.2 realizado tras validar todo en verde (ver reporte de cierre entregado al usuario).

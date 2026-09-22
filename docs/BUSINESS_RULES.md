@@ -54,6 +54,8 @@ Cada combinación tarea+período tiene a lo sumo una fila en `ejecuciones` (`get
 - El campo `compPid` (completado por) y `nota` quedan en la fila de `ejecuciones`. En el listado de tareas e historial se muestra "✓ por <Nombre>" cuando `compPid` difiere del asignado original (líneas 1248-1252, 1301-1305).
 - **⚠️ DUDA** — Si `currentRole==='admin'` y no hay `currentUser` (login como Administrador, sin persona asociada), `compPid` se guarda como `null` (línea 1899: `currentUser ? currentUser.id : null`). No queda registrado *qué admin* completó la tarea, solo que "fue completada" — no hay identidad individual para el rol admin.
 
+**Actualización Etapa 2 (revisión correctiva)**: el prototipo solo guarda `compPid` ("quién completó"), sin registrar por separado "a quién estaba asignada la tarea en ese momento" — un dato que se pierde apenas se reasigna la tarea (`Task.pid` cambia y no hay rastro de la asignación anterior). El nuevo modelo (`backend/prisma/schema.prisma`, `TaskExecution`) corrige esto agregando `assignedEmployeeId` (snapshot obligatorio e inmutable de a quién estaba asignada la tarea al crear la ejecución) **separado** de `completedByEmployeeId` (equivalente al `compPid` del prototipo). Detalle completo en `docs/DATABASE.md`, "Historial de asignación de tareas".
+
 ## 5. Historial
 
 - Historial semanal (`rndHistorial()`, línea 1261) muestra únicamente tareas de frecuencia `diaria` y `semanal` (las mensuales/urgentes/únicas no aparecen ahí).
@@ -73,6 +75,7 @@ Cada combinación tarea+período tiene a lo sumo una fila en `ejecuciones` (`get
   - La lista de "tareas más incumplidas" siempre está vacía (el filtro `t.activa` la vacía antes de llegar al filtro de incumplimiento).
   - El **ranking** y la **estrella de la semana** sí funcionan, porque no dependen de `t.activa`.
   - Esto debe tratarse como un defecto del prototipo a corregir en la reconstrucción, **no** como una regla de negocio real ("cumplimiento siempre 0%" no es una regla intencional).
+- **Actualización Etapa 2**: `backend/prisma/schema.prisma` ya define `Task.active` (`Boolean @default(true)`) — el campo que el prototipo esperaba pero nunca tuvo. Esto resuelve la causa estructural del bug a nivel de modelo de datos; el desempeño en sí (cálculo de racha, % de cumplimiento) se **recalculará desde `TaskExecution` reales** cuando se implemente el servicio correspondiente (Etapa 5), no se porta la lógica rota del prototipo.
 
 ## 7. Stock — mínimo, estados y cálculo
 
@@ -136,6 +139,8 @@ Tres orígenes distintos de eventos tipo `cumple`, todos automáticos:
 4. **Mascotas** — al cargar fecha de nacimiento de una mascota (`autoAddCumpleMascota`, línea 2613/2620).
 
 **⚠️ INCONSISTENCIA VERIFICADA — dato de cumpleaños duplicado y contradictorio para "Benjamín".** El array literal inicial `eventos` (línea 995-999) incluye `{titulo:'Cumpleaños de Benjamín', fecha:'2026-02-19', tipo:'cumple', nota:''}`. Pero `addFamilyBirthdays()` calcula la fecha de Benjamín como **16 de septiembre** (mes 9, día 16), con título `'🎂 Cumpleaños de Benjamín'` (con emoji) y nota `'familia'`. Son dos fechas de nacimiento distintas para la misma persona, en dos lugares distintos del código, con formato de título distinto (con/sin emoji) que además evita que se reconozcan como duplicados entre sí (la deduplicación compara por título exacto). **Se requiere una decisión humana**: ¿cuál es la fecha real de cumpleaños de Benjamín — 19/02 o 16/09? Ver también `docs/DATA_INVENTORY.md`.
+
+**Actualización Etapa 2**: se modeló `RecurringBirthday` (mes+día, recurrencia calculada dinámicamente, nunca una fecha con año fijo) para los cumpleaños familiares sin entidad propia en el sistema — Vicky y Felicitas ya están sembrados ahí (`backend/prisma/seed-data/recurringBirthdays.ts`). **Benjamín sigue sin sembrarse, en ninguna de las dos fechas**, hasta que esta inconsistencia se resuelva con una persona — la omisión está documentada explícitamente en el código (`OMITTED_BENJAMIN_BIRTHDAY`) y en `docs/SEED_MANIFEST.md`. Los cumpleaños de empleados e hijos (orígenes 2 y 3 de esta lista) no necesitan un `RecurringBirthday` propio: se calculan directamente desde `EmployeeProfile.birthDate` / `EmployeeChild.birthDate`, ya modelados. El de mascotas (origen 4) se calculará desde `Animal.birthDate` cuando exista.
 
 ## 15. Empleados (ficha de datos)
 

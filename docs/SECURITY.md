@@ -53,7 +53,8 @@
 - Se suben como `data:` URL base64 directamente al campo `src` de la tabla `fotos`, sin validación de tipo MIME real más allá del atributo `accept="image/*"` del `<input>` (que es solo una sugerencia de UI, no una validación de seguridad — un archivo con otra extensión/contenido podría subirse igual si se manipula el input).
 - Sin límite de tamaño de archivo validado en el cliente ni, presumiblemente, en Supabase (no verificable desde el HTML).
 - Cualquier persona logueada (no solo admin) puede eliminar cualquier foto (`verFoto()`, botón sin gate de `isAdmin()` — ver `docs/BUSINESS_RULES.md` §1 y §18).
-- Las fotos pueden incluir menores de edad (hijos de empleados) o personas identificables sin que el código tenga ningún control de consentimiento/privacidad — dato a tener en cuenta para la etapa de integración con Google Drive (permisos de la carpeta/archivos, quién puede verlos).
+- Las fotos pueden incluir menores de edad (hijos de empleados) o personas identificables sin que el código tenga ningún control de consentimiento/privacidad — dato a tener en cuenta para la etapa del módulo de fotografías (permisos de acceso, quién puede verlas).
+- **Actualización — decisión de Object Storage (previa a conectar Neon)**: Google Drive fue descartado como destino de almacenamiento; se reemplaza por Neon Object Storage (interfaz S3), con bucket privado por entorno (`demo`/`production`) y credenciales exclusivas del backend — nunca en el frontend. El modelo (`FileAsset`) no persiste URL pública, URL firmada temporal, ni credenciales; ver `docs/ARCHITECTURE.md`, sección 9, para el detalle completo de buckets, ambientes y los flujos de escritura/lectura futuros. La eliminación de fotografías sigue siendo exclusiva de `ADMIN` (corrigiendo la inconsistencia del prototipo señalada en la sección 1 de este documento).
 
 ## 8. Manejo de sesiones
 

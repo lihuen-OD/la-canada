@@ -1,18 +1,859 @@
-// Etapa 1 — estructura base únicamente.
+// ─────────────────────────────────────────────────────────────────────────
+// La Cañada — modelo de datos (Etapa 2)
 //
-// Este archivo TODAVÍA NO define el modelo de datos definitivo. Los modelos
-// (Person, Task, StockItem, etc.) se diseñarán en la Etapa 3 del plan de
-// migración, junto con la primera migración real y el seed de datos reales.
-// Ver docs/DATABASE.md (propuesta preliminar) y docs/MIGRATION_PLAN.md.
+// Diseñado a partir de la auditoría del prototipo (`index.html`, `legacy/`)
+// documentada en `docs/DATABASE.md` y `docs/DATA_INVENTORY.md`. Nombres en
+// inglés (convención Prisma/TS); mapeados a tablas/columnas en snake_case
+// vía @@map/@map para una base Postgres idiomática. El detalle de cada
+// decisión de normalización, y su justificación, está en docs/DATABASE.md.
 //
-// No se ejecutó `prisma generate`, `prisma migrate` ni `prisma db push`
-// contra ninguna base en esta etapa — no hay modelos que generar todavía.
+// IMPORTANTE — Etapa 2: este schema NO se migró contra ninguna base. No se
+// ejecutó `prisma migrate`, `prisma db push` ni `prisma db seed`. Solo se
+// corrieron comandos estáticos (`validate`, `format`, `generate`) que no
+// requieren conexión.
+// ─────────────────────────────────────────────────────────────────────────
 
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ENUMS
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Rol del sistema. Mapeo directo de los roles actuales del prototipo
+/// (admin/"equipo de trabajo") — ver docs/ARCHITECTURE.md §7.
+enum SystemRole {
+  ADMIN
+  EMPLOYEE
+}
+
+/// Ciclo de vida de una cuenta de usuario. PENDING_ACTIVATION es el estado
+/// inicial de los 4 usuarios sembrados en esta etapa (sin contraseña ni PIN
+/// asignados todavía) — ver docs/BUSINESS_RULES.md y la sección "Usuarios
+/// pendientes de activación" de docs/ARCHITECTURE.md.
+enum UserStatus {
+  PENDING_ACTIVATION
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+/// Frecuencia de una tarea. Traducción directa de los 5 valores literales
+/// usados en el prototipo (diaria/semanal/mensual/urgente/unica).
+enum TaskFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  URGENT
+  ONE_TIME
+}
+
+/// Área física a la que pertenece un ítem/categoría de stock. `BOTH` solo
+/// tiene sentido para StockCategory (una categoría puede aplicar a ambas
+/// áreas, ej. "Alimentos"); un StockItem individual siempre es CASA o
+/// JARDIN en la práctica — esa restricción no es exigible a nivel de schema
+/// con Prisma puro, se documenta como invariante de aplicación (ver
+/// docs/DATABASE.md).
+enum StockArea {
+  HOUSE
+  GARDEN
+  BOTH
+}
+
+/// Tipo de movimiento de inventario — reemplaza el hack de prefijos de
+/// texto en `motivo` ("[Ingreso] ", "Ajuste a la baja: ...") del prototipo
+/// por una columna estructurada. Ver docs/DATABASE.md, riesgo de `consumos`.
+enum StockMovementType {
+  /// Carga del saldo inicial migrado desde el prototipo (seed). Nunca se
+  /// genera desde la operación normal de la app.
+  OPENING_BALANCE
+  INCOME
+  CONSUMPTION
+  ADJUSTMENT_INCREASE
+  ADJUSTMENT_DECREASE
+}
+
+/// Tipo de destino de un movimiento de inventario (vehiculo/sector).
+enum DestinationType {
+  VEHICLE
+  SECTOR
+}
+
+/// Tipo de evento de calendario. BIRTHDAY existe para un evento puntual de
+/// cumpleaños cargado a mano (no recurrente); los cumpleaños recurrentes
+/// reales (familia) usan el modelo `RecurringBirthday`, no `Event` — ver
+/// docs/BUSINESS_RULES.md §14 y la sección "Estrategia de recurrencia" de
+/// docs/DATABASE.md.
+enum EventType {
+  VISIT
+  BIRTHDAY
+  MAINTENANCE
+  OTHER
+}
+
+/// Tipo de registro clínico de un animal.
+enum MedicalRecordType {
+  VACCINE
+  WEIGHT
+  DEWORMING
+  CHECKUP
+  CLINICAL_EVENT
+}
+
+/// Categoría de una fotografía/archivo (tarea vs. recuerdo — mapeo directo
+/// de `fotos.tipo` en el prototipo).
+enum PhotoCategory {
+  TASK_EVIDENCE
+  MEMORY
+}
+
+/// Proveedor de almacenamiento de un archivo. Un único valor hoy porque Neon
+/// Object Storage (interfaz compatible con S3, bucket privado) es el único
+/// proveedor decidido para fotografías y archivos — no se inventan
+/// proveedores adicionales no solicitados. Reemplaza a `GOOGLE_DRIVE`
+/// (decisión revertida antes de conectar Neon — ver docs/ARCHITECTURE.md,
+/// "Object Storage"). Se prefiere un valor explícito
+/// (`NEON_OBJECT_STORAGE`) a uno genérico (`S3`): el proyecto usa
+/// exactamente un proveedor S3-compatible concreto (el de Neon, con
+/// credenciales y buckets propios por rama/entorno), y un valor genérico
+/// sugeriría un soporte multi-proveedor que no existe ni está previsto.
+enum FileProvider {
+  NEON_OBJECT_STORAGE
+}
+
+/// Estado de un archivo a lo largo de su ciclo de vida de subida y
+/// eliminación — soporta las 5 etapas necesarias para el flujo futuro del
+/// módulo de fotografías (backend valida → sube a Object Storage → confirma
+/// disponibilidad; eliminación lógica antes que física, exclusiva de
+/// ADMIN). Ningún workflow está implementado todavía en esta etapa: el enum
+/// solo declara los estados posibles.
+enum FileStatus {
+  /// Fila creada por el backend (bucket + objectKey ya generados) mientras
+  /// la subida a Object Storage todavía no se confirmó.
+  PENDING_UPLOAD
+  /// Subida confirmada — el objeto existe en el bucket privado y puede
+  /// solicitarse (vía URL firmada o proxy, decisión pendiente para la etapa
+  /// del módulo de fotografías).
+  AVAILABLE
+  /// La subida falló (red, validación del proveedor, límite de tamaño,
+  /// etc.) — el objeto no debe considerarse recuperable desde este registro.
+  UPLOAD_FAILED
+  /// Eliminación lógica solicitada, pendiente del flujo controlado de
+  /// borrado físico (ver docs/ARCHITECTURE.md, "Eliminación").
+  PENDING_DELETION
+  DELETED
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// IDENTIDAD Y SEGURIDAD
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Cuenta de acceso al sistema. Separada de `Employee` a propósito: no todo
+/// User tiene por qué corresponder a un empleado doméstico (ej. un admin
+/// externo futuro), y un Employee puede existir sin cuenta todavía (recién
+/// creado, pendiente de invitar). Ver docs/ARCHITECTURE.md, "Separación
+/// User/Employee".
+model User {
+  id           String     @id @default(uuid()) @db.Uuid
+  /// Normalizado (minúsculas, sin acentos, solo [a-z0-9._-]) — ver
+  /// backend/prisma/seed-data/users.ts para la función de normalización.
+  username     String     @unique
+  role         SystemRole
+  status       UserStatus @default(PENDING_ACTIVATION)
+  /// Nullable: es null mientras status=PENDING_ACTIVATION (todavía no se
+  /// definió contraseña). Nunca contiene un PIN ni un hash inventado —
+  /// la activación real (Etapa 3) es la única que puede setear esto.
+  passwordHash String?    @map("password_hash")
+
+  /// Un Employee puede estar vinculado como máximo a un User (constraint
+  /// @unique acá, del lado de User → Employee.userId no existe, evitando
+  /// duplicarla en ambos sentidos).
+  employeeId String?   @unique @map("employee_id") @db.Uuid
+  employee   Employee? @relation(fields: [employeeId], references: [id])
+
+  sessions  Session[]
+  auditLogs AuditLog[] @relation("AuditActor")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([employeeId])
+  @@map("users")
+}
+
+/// Registro básico de un empleado (identidad operativa: nombre a mostrar,
+/// rol funcional, color de avatar). Los datos personales sensibles viven
+/// aparte, en `EmployeeProfile` — ver "los datos personales deben estar
+/// separados del registro básico del empleado".
+model Employee {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// Clave natural estable para el seed idempotente (slug interno, ej.
+  /// "coke", "pablo") — no visible en la UI, distinta del nombre a mostrar.
+  code        String  @unique
+  displayName String  @map("display_name")
+  /// Rol funcional en texto libre (Doméstica/Parque/Otro en el prototipo,
+  /// sin enum cerrado allí tampoco — se preserva como texto libre).
+  role        String
+  colorHex    String  @map("color_hex")
+  active      Boolean @default(true)
+
+  user     User?
+  profile  EmployeeProfile?
+  children EmployeeChild[]
+
+  assignedTasks           Task[]                @relation("TaskAssignee")
+  assignedTaskExecutions  TaskExecution[]       @relation("TaskExecutionAssignedTo")
+  completedTaskExecutions TaskExecution[]       @relation("TaskExecutionCompletedBy")
+  authoredNewsReports     NewsReport[]
+  stockMovements          StockMovement[]
+  eggCollections          EggCollection[]
+  animalMedicalRecords    AnimalMedicalRecord[]
+  uploadedFiles           FileAsset[]           @relation("FileUploadedByEmployee")
+  taggedFiles             FileAsset[]           @relation("FileTaggedEmployee")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("employees")
+}
+
+/// Datos personales del empleado — separados de `Employee` (que es
+/// identidad operativa liviana) por sensibilidad de la información
+/// (docs/SECURITY.md §6). Relación 1:1.
+model EmployeeProfile {
+  id         String   @id @default(uuid()) @db.Uuid
+  employeeId String   @unique @map("employee_id") @db.Uuid
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  fullLegalName         String?   @map("full_legal_name")
+  birthDate             DateTime? @map("birth_date") @db.Date
+  maritalStatus         String?   @map("marital_status")
+  phone                 String?
+  taxId                 String?   @map("tax_id")
+  healthInsurance       String?   @map("health_insurance")
+  emergencyContactName  String?   @map("emergency_contact_name")
+  emergencyContactPhone String?   @map("emergency_contact_phone")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("employee_profiles")
+}
+
+/// Hijo/a de un empleado (dato personal, ver docs/SECURITY.md §6 — datos de
+/// menores).
+model EmployeeChild {
+  id         String   @id @default(uuid()) @db.Uuid
+  employeeId String   @map("employee_id") @db.Uuid
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  name      String
+  birthDate DateTime? @map("birth_date") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([employeeId])
+  @@map("employee_children")
+}
+
+/// Sesión de autenticación revocable. El refresh token nunca se guarda en
+/// texto plano — solo su hash. No implementado todavía (Etapa 3); el
+/// modelo existe para que el diseño de datos esté completo.
+model Session {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  user   User   @relation(fields: [userId], references: [id])
+
+  refreshTokenHash String    @map("refresh_token_hash")
+  ipAddress        String?   @map("ip_address")
+  userAgent        String?   @map("user_agent")
+  expiresAt        DateTime  @map("expires_at")
+  /// Null = sesión activa. Revocar = setear esta fecha, nunca borrar la fila.
+  revokedAt        DateTime? @map("revoked_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+/// Bitácora de auditoría transversal — no existía en el prototipo (ver
+/// docs/ARCHITECTURE.md §8), es una entidad nueva. `action` es String (no
+/// enum) deliberadamente: el catálogo de acciones auditables va a crecer
+/// con cada módulo futuro, y un enum obligaría a migrar el schema cada vez
+/// — ver docs/DATABASE.md para la justificación completa de esta decisión.
+/// `entityType`/`entityId` referencian la entidad afectada por nombre/id de
+/// forma laxa (no FK real): es el único lugar del schema donde se acepta
+/// esto, porque el propósito del log es registrar cambios sobre *cualquier*
+/// entidad futura sin acoplar AuditLog a cada tabla del dominio.
+model AuditLog {
+  id String @id @default(uuid()) @db.Uuid
+
+  actorUserId String? @map("actor_user_id") @db.Uuid
+  actor       User?   @relation("AuditActor", fields: [actorUserId], references: [id])
+
+  action        String
+  entityType    String  @map("entity_type")
+  entityId      String  @map("entity_id")
+  previousState Json?   @map("previous_state")
+  newState      Json?   @map("new_state")
+  ipAddress     String? @map("ip_address")
+  userAgent     String? @map("user_agent")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([actorUserId])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TAREAS
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Tarea recurrente o puntual. `active` reemplaza el campo que el
+/// prototipo esperaba pero nunca tuvo (ver docs/BUSINESS_RULES.md §6 — el
+/// bug de Desempeño). Reasignar `employeeId` no reescribe el historial: cada
+/// `TaskExecution` ya pasada conserva su propio snapshot `assignedEmployeeId`
+/// (a quién estaba asignada la tarea en ese momento) además de
+/// `completedByEmployeeId` (quién la completó realmente) — ver el modelo
+/// `TaskExecution` para el detalle completo de por qué son dos conceptos
+/// separados.
+model Task {
+  id          String        @id @default(uuid()) @db.Uuid
+  description String
+  employeeId  String        @map("employee_id") @db.Uuid
+  employee    Employee      @relation("TaskAssignee", fields: [employeeId], references: [id])
+  frequency   TaskFrequency
+  active      Boolean       @default(true)
+
+  executions TaskExecution[]
+  files      FileAsset[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  /// Clave natural para el seed idempotente: un mismo empleado no debería
+  /// tener dos tareas con la descripción exactamente igual.
+  @@unique([employeeId, description])
+  @@index([employeeId])
+  @@map("tasks")
+}
+
+/// Una ejecución = el estado de cumplimiento de una tarea para un período
+/// dado. Estrategia de períodos (ver docs/DATABASE.md para el detalle):
+///  - DAILY:   periodKey = fecha del día,           'YYYY-MM-DD'
+///  - WEEKLY:  periodKey = fecha del lunes de esa semana, 'YYYY-MM-DD'
+///  - MONTHLY: periodKey = primer día del mes,       'YYYY-MM-01'
+///  - URGENT / ONE_TIME: no recurren — periodKey es el string fijo
+///    'URGENT' / 'ONE_TIME' (una sola ejecución posible en toda la vida de
+///    la tarea, igual que en el prototipo).
+/// El `@@unique([taskId, periodKey])` impide duplicar una ejecución del
+/// mismo período (y, para urgente/única, impide más de una ejecución en
+/// total, porque periodKey es constante para esas tareas).
+///
+/// Dos conceptos distintos, deliberadamente separados (ver "Historial de
+/// asignación de tareas" en docs/DATABASE.md):
+///  - `assignedEmployeeId` — snapshot **obligatorio**, copiado del
+///    `Task.employeeId` vigente en el momento de crear la ejecución. Fija
+///    "quién tenía la tarea asignada en ese período", para siempre — no se
+///    recalcula ni se actualiza si más adelante se reasigna la tarea.
+///  - `completedByEmployeeId` — **nullable** (null hasta que se completa),
+///    quién efectivamente marcó la tarea como hecha, que puede ser el mismo
+///    empleado asignado u otro (ver docs/BUSINESS_RULES.md §4, flujo "¿Quién
+///    completa esta tarea?").
+/// Reasignar `Task.employeeId` después de creada una ejecución NUNCA
+/// modifica `assignedEmployeeId` de ejecuciones ya existentes — el snapshot
+/// es inmutable una vez escrito. El seed de la Etapa 2 no crea ninguna
+/// `TaskExecution` (sin evidencia real de ejecuciones en el prototipo).
+model TaskExecution {
+  id     String @id @default(uuid()) @db.Uuid
+  taskId String @map("task_id") @db.Uuid
+  task   Task   @relation(fields: [taskId], references: [id])
+
+  periodKey   String    @map("period_key")
+  completed   Boolean   @default(false)
+  completedAt DateTime? @map("completed_at")
+
+  /// Snapshot obligatorio de `Task.employeeId` al momento de crear esta
+  /// ejecución — ver el comentario del modelo. Nunca se reescribe.
+  assignedEmployeeId String   @map("assigned_employee_id") @db.Uuid
+  assignedEmployee   Employee @relation("TaskExecutionAssignedTo", fields: [assignedEmployeeId], references: [id])
+
+  /// Quién completó realmente la tarea, si difiere del empleado asignado
+  /// (ver docs/BUSINESS_RULES.md §4, flujo "¿Quién completa esta tarea?").
+  completedByEmployeeId String?   @map("completed_by_employee_id") @db.Uuid
+  completedByEmployee   Employee? @relation("TaskExecutionCompletedBy", fields: [completedByEmployeeId], references: [id])
+
+  note String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([taskId, periodKey])
+  @@index([taskId])
+  @@index([assignedEmployeeId])
+  @@index([completedByEmployeeId])
+  @@map("task_executions")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// INVENTARIO
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Categoría de stock normalizada (antes texto libre sin FK real — ver
+/// docs/DATABASE.md, duda resuelta a favor de una entidad real). Una
+/// categoría puede aplicar a un área específica o a ambas (`BOTH`).
+model StockCategory {
+  id     String    @id @default(uuid()) @db.Uuid
+  name   String
+  area   StockArea
+  active Boolean   @default(true)
+
+  items StockItem[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  /// "Alimentos"/"Varios" existen como filas separadas para casa y jardín
+  /// en el inventario auditado — ver docs/DATA_INVENTORY.md §5.
+  @@unique([name, area])
+  @@map("stock_categories")
+}
+
+/// Ítem de stock (producto). `currentQuantity` es un saldo desnormalizado
+/// mantenido junto a cada StockMovement dentro de una misma transacción —
+/// ver "Estrategia transaccional" en docs/DATABASE.md.
+model StockItem {
+  id   String    @id @default(uuid()) @db.Uuid
+  name String
+  /// Siempre HOUSE o GARDEN en la práctica para un ítem individual (nunca
+  /// BOTH) — invariante de aplicación, no exigible por Prisma puro.
+  area StockArea
+
+  categoryId String        @map("category_id") @db.Uuid
+  category   StockCategory @relation(fields: [categoryId], references: [id])
+
+  unit            String
+  minimumQuantity Decimal @map("minimum_quantity") @db.Decimal(10, 2)
+  currentQuantity Decimal @default(0) @map("current_quantity") @db.Decimal(10, 2)
+  active          Boolean @default(true)
+
+  movements StockMovement[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([area, name])
+  @@index([categoryId])
+  @@map("stock_items")
+}
+
+/// Movimiento de inventario — reemplaza el prefijo de texto en `motivo`
+/// del prototipo por un `type` estructurado (ver enum StockMovementType).
+/// `quantity` siempre es positiva; el signo de su efecto sobre el saldo lo
+/// determina `type`. Los OPENING_BALANCE del seed no tienen `employeeId`
+/// ni `destinationId` (no hay evidencia de quién cargó el saldo inicial).
+///
+/// `reference` es una clave natural **opcional** y **única** para
+/// idempotencia: el seed la usa únicamente en los movimientos
+/// OPENING_BALANCE (`"<área>::<nombre>::OPENING_BALANCE"`, derivada de la
+/// clave natural del propio `StockItem` — nunca de su UUID, que todavía no
+/// existe en el momento de la escritura anidada) para garantizar, con una
+/// restricción real de base, que nunca pueda existir más de un movimiento
+/// de apertura para el mismo producto — no depende únicamente de texto
+/// descriptivo en `reason`, que es frágil. Postgres permite múltiples
+/// `NULL` en una columna `@unique`, así que el resto de los movimientos
+/// (INCOME/CONSUMPTION/ADJUSTMENT_*, sin necesidad de esta protección) dejan
+/// `reference` en `null` sin conflicto.
+model StockMovement {
+  id          String            @id @default(uuid()) @db.Uuid
+  stockItemId String            @map("stock_item_id") @db.Uuid
+  stockItem   StockItem         @relation(fields: [stockItemId], references: [id])
+  type        StockMovementType
+
+  quantity      Decimal  @db.Decimal(10, 2)
+  effectiveDate DateTime @map("effective_date") @db.Date
+
+  employeeId String?   @map("employee_id") @db.Uuid
+  employee   Employee? @relation(fields: [employeeId], references: [id])
+
+  destinationId String?                 @map("destination_id") @db.Uuid
+  destination   ConsumptionDestination? @relation(fields: [destinationId], references: [id])
+
+  reason    String?
+  reference String? @unique
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([stockItemId])
+  @@index([employeeId])
+  @@index([destinationId])
+  @@map("stock_movements")
+}
+
+/// Destino de un consumo/movimiento (vehículo o sector). Ninguno se siembra
+/// en esta etapa: el prototipo no declara destinos reales, solo el
+/// pseudo-destino técnico "Ajuste de inventario" — que ya no hace falta
+/// porque `StockMovementType.ADJUSTMENT_*` cumple esa función de forma
+/// estructurada (ver docs/DATABASE.md).
+model ConsumptionDestination {
+  id     String          @id @default(uuid()) @db.Uuid
+  name   String          @unique
+  type   DestinationType
+  active Boolean         @default(true)
+
+  movements StockMovement[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("consumption_destinations")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// NOVEDADES Y EVENTOS
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Novedad/aviso operativo. Sin `title`: el prototipo nunca tuvo título,
+/// solo texto libre + autor + fecha (ver docs/DATABASE.md, `novedades`).
+model NewsReport {
+  id         String   @id @default(uuid()) @db.Uuid
+  employeeId String   @map("employee_id") @db.Uuid
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  text String
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  /// Clave natural para el seed idempotente.
+  @@unique([employeeId, text])
+  @@index([employeeId])
+  @@map("news_reports")
+}
+
+/// Evento de calendario puntual (visita, mantenimiento, u otro — o un
+/// cumpleaños puntual no recurrente). Los cumpleaños familiares recurrentes
+/// reales van en `RecurringBirthday`, no acá — ver ese modelo.
+model Event {
+  id    String    @id @default(uuid()) @db.Uuid
+  title String
+  date  DateTime  @db.Date
+  type  EventType
+  note  String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  /// Clave natural para el seed idempotente (título + fecha + tipo).
+  @@unique([title, date, type])
+  @@map("events")
+}
+
+/// Cumpleaños recurrente de una persona sin entidad propia en el sistema
+/// (familiares del hogar — no son Employee ni Animal, que ya calculan su
+/// propio próximo cumpleaños desde su propio `birthDate`). Solo se guarda
+/// mes y día: la próxima ocurrencia anual se calcula dinámicamente en la
+/// capa de aplicación, nunca se persiste una fecha con año fijo como si
+/// fuera permanente — ver docs/BUSINESS_RULES.md §14.
+model RecurringBirthday {
+  id   String @id @default(uuid()) @db.Uuid
+  /// Clave natural estable para el seed idempotente (ej. "vicky").
+  slug String @unique
+
+  personLabel  String  @map("person_label")
+  month        Int
+  day          Int
+  relationship String?
+  active       Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("recurring_birthdays")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ARCHIVOS
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Metadatos de un archivo (foto) alojado en Neon Object Storage —
+/// almacenamiento privado compatible con S3, con buckets separados por
+/// rama/entorno (`demo`/`production`) — ver docs/ARCHITECTURE.md, "Object
+/// Storage". Reemplaza la decisión previa de Google Drive, revertida antes
+/// de conectar Neon. Nunca se guarda el binario, base64, una URL pública ni
+/// una URL firmada temporal como fuente de verdad — ver más abajo.
+///
+/// **Identificación técnica principal: `bucket + objectKey`** (no
+/// `provider + externalId`, diseño anterior pensado para Google Drive).
+/// `objectKey` es una clave generada por el backend (UUID), nunca derivada
+/// del nombre original ni provista por el usuario — ver la estrategia de
+/// object keys en docs/ARCHITECTURE.md. `@@unique([bucket, objectKey])`
+/// impide registrar dos veces el mismo objeto dentro del mismo bucket.
+///
+/// **Qué NO se guarda acá** (ver docs/ARCHITECTURE.md y docs/SECURITY.md):
+/// URL pública, URL firmada temporal, credenciales del proveedor, contenido
+/// base64, binarios, ni rutas locales. Las URLs de acceso se generan en el
+/// backend bajo demanda, recién en la etapa del módulo de fotografías —
+/// nunca se persisten como verdad permanente.
+///
+/// Vinculación con otras entidades: se usan columnas FK explícitas y
+/// nullable en vez de una relación polimórfica genérica
+/// (`attachableType`/`attachableId`). Se documenta la decisión porque se
+/// pidió explícitamente contrastarla:
+///  - Rechazado — polimorfismo genérico: `attachableType: String` +
+///    `attachableId: String` sin FK real. Desventajas: Postgres/Prisma no
+///    pueden validar referencialmente que `attachableId` exista en la
+///    tabla que indica `attachableType`; un borrado en cascada real es
+///    imposible de expresar; los índices son menos eficientes; el tipado
+///    de Prisma Client no puede resolver la relación de forma segura.
+///  - Elegido — FKs nullable explícitas (`taskId`, `animalId`, más
+///    `employeeId`/`taggedEmployeeId`). Desventaja real: si en el futuro un
+///    archivo necesitara adjuntarse a más de un tipo de entidad
+///    *simultáneamente*, o a entidades nuevas muy frecuentemente, esto
+///    obliga a agregar una columna nullable por cada tipo nuevo. Se acepta
+///    esa desventaja porque, tanto en el prototipo como en el pedido de
+///    esta etapa, un archivo se adjunta a lo sumo a una entidad a la vez.
+///
+/// **Auditado contra el HTML — sin relación con `NewsReport`.** El
+/// prototipo (`fotos`: id, titulo, tipo, persona_id, src, created_at) no
+/// tiene ningún campo que vincule una foto a una novedad, y ninguna
+/// pantalla de Novedades permite adjuntar ni muestra fotos. Se evaluó
+/// agregar `newsReportId` por anticipación (así lo pedía el modelo mínimo
+/// original de la Etapa 2) y se revirtió: sin evidencia funcional en el
+/// HTML, no se agrega. `taskId`/`animalId` sí quedan (evidencia: `fotos.tipo
+/// = 'tarea'` como categoría, y el pedido explícito de esta corrección de
+/// soportar "fotografía de animal").
+///
+/// Un archivo puede no vincularse a ninguna entidad (foto general/recuerdo,
+/// con `taskId`/`animalId` ambos `null`) y de todas formas conservar su
+/// `category` y `taggedEmployeeId`. Invariante para el servicio futuro: un
+/// `FileAsset` **no debe** tener `taskId` y `animalId` simultáneamente no
+/// nulos (una foto es evidencia de tarea O de un animal, no de ambos a la
+/// vez) — Prisma no puede expresar esto de forma declarativa; ver la matriz
+/// de invariantes en `docs/DATABASE.md` para el nivel de enforcement.
+model FileAsset {
+  id String @id @default(uuid()) @db.Uuid
+
+  provider FileProvider
+
+  /// Nombre del bucket de Neon Object Storage donde vive el objeto (p. ej.
+  /// "la-canada-uploads"). Aunque el nombre sea igual en ambos entornos, son
+  /// buckets separados por rama (`demo`/`production`) con credenciales
+  /// propias — nunca se comparten ni se mezclan entre sí.
+  bucket String
+
+  /// Clave estable del objeto dentro del bucket (S3 "key"). Generada por el
+  /// backend (UUID), nunca a partir del nombre original ni de datos
+  /// provistos por el usuario — ver la estrategia de object keys en
+  /// docs/ARCHITECTURE.md. Nunca se reutiliza una object key eliminada.
+  objectKey String @map("object_key")
+
+  originalFilename String  @map("original_filename")
+  mimeType         String  @map("mime_type")
+  sizeBytes        Int     @map("size_bytes")
+  checksum         String?
+
+  /// ETag devuelto por el proveedor S3-compatible al confirmar la subida —
+  /// nullable porque no está disponible mientras el archivo sigue en
+  /// `PENDING_UPLOAD` (o si el proveedor no lo expone para una operación
+  /// dada).
+  etag String?
+
+  category  PhotoCategory
+  status    FileStatus    @default(PENDING_UPLOAD)
+  deletedAt DateTime?     @map("deleted_at")
+
+  uploadedByEmployeeId String?   @map("uploaded_by_employee_id") @db.Uuid
+  uploadedByEmployee   Employee? @relation("FileUploadedByEmployee", fields: [uploadedByEmployeeId], references: [id])
+
+  /// Persona con la que se etiqueta la foto (equivalente al `persona_id`
+  /// opcional del prototipo) — puede diferir de quién la subió.
+  taggedEmployeeId String?   @map("tagged_employee_id") @db.Uuid
+  taggedEmployee   Employee? @relation("FileTaggedEmployee", fields: [taggedEmployeeId], references: [id])
+
+  taskId String? @map("task_id") @db.Uuid
+  task   Task?   @relation(fields: [taskId], references: [id])
+
+  animalId String? @map("animal_id") @db.Uuid
+  animal   Animal? @relation(fields: [animalId], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  /// Identificación técnica principal del archivo — impide registrar dos
+  /// veces el mismo objeto dentro del mismo bucket.
+  @@unique([bucket, objectKey])
+  @@index([taskId])
+  @@index([animalId])
+  @@index([uploadedByEmployeeId])
+  @@map("file_assets")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// GALLINERO
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Configuración del gallinero. Sin fila sembrada en esta etapa a
+/// propósito: no hay una cantidad de gallinas comprobada en el prototipo
+/// (ver docs/DATA_INVENTORY.md §11). La primera fila debe crearse mediante
+/// una configuración real futura, no mediante el seed.
+///
+/// Singleton reforzado con clave natural: `code` es obligatorio y `@unique`
+/// — el negocio actual tiene un solo establecimiento y un gallinero
+/// principal, así que el servicio futuro siempre debe hacer
+/// `findUnique({ where: { code: "main" } })` (creando la fila si falta) en
+/// vez de `findFirst()`/"tomar el primer registro" — eso es exactamente lo
+/// que causaba el bug de fila-inexistente del prototipo (ver
+/// docs/DATABASE.md, duda de diseño de `gallinero`). El modelo admite
+/// técnicamente más de un establecimiento en el futuro con solo agregar más
+/// filas con otro `code` — la restricción de "uno solo" es una decisión de
+/// negocio de hoy, no una limitación del schema.
+model ChickenCoop {
+  id              String  @id @default(uuid()) @db.Uuid
+  /// Clave natural estable del singleton. El gallinero principal usa "main".
+  code            String  @unique
+  activeHensCount Int     @map("active_hens_count")
+  notes           String?
+
+  eggCollections EggCollection[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("chicken_coops")
+}
+
+/// Recolección diaria de huevos. Sin filas sembradas (el prototipo no
+/// declara recolecciones reales).
+model EggCollection {
+  id            String       @id @default(uuid()) @db.Uuid
+  chickenCoopId String?      @map("chicken_coop_id") @db.Uuid
+  chickenCoop   ChickenCoop? @relation(fields: [chickenCoopId], references: [id])
+
+  collectionDate  DateTime @map("collection_date") @db.Date
+  goodEggsCount   Int      @map("good_eggs_count")
+  brokenEggsCount Int      @map("broken_eggs_count")
+
+  employeeId String?   @map("employee_id") @db.Uuid
+  employee   Employee? @relation(fields: [employeeId], references: [id])
+
+  notes String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([chickenCoopId])
+  @@index([employeeId])
+  @@map("egg_collections")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// MASCOTAS Y ANIMALES
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Tipo de animal normalizado (antes texto libre comparado por igualdad —
+/// ver docs/DATABASE.md, `tipos_mascota`). `icon` preserva el emoji real
+/// asociado a cada tipo en el prototipo (dato declarado real, no inventado
+/// — ver TIPO_ICONS en index.html).
+model AnimalType {
+  id     String  @id @default(uuid()) @db.Uuid
+  name   String  @unique
+  icon   String?
+  active Boolean @default(true)
+
+  animals Animal[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("animal_types")
+}
+
+/// Animal/mascota. Sin filas sembradas: el prototipo no declara animales
+/// reales precargados (`mascotas = []`) — solo se siembra el catálogo de
+/// tipos (`AnimalType`).
+model Animal {
+  id           String     @id @default(uuid()) @db.Uuid
+  name         String
+  animalTypeId String     @map("animal_type_id") @db.Uuid
+  animalType   AnimalType @relation(fields: [animalTypeId], references: [id])
+
+  breed     String?
+  birthDate DateTime? @map("birth_date") @db.Date
+  active    Boolean   @default(true)
+
+  medicalRecords AnimalMedicalRecord[]
+  photos         FileAsset[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([animalTypeId])
+  @@map("animals")
+}
+
+/// Registro clínico de un animal. `value` solo tiene sentido para
+/// type=WEIGHT (igual que en el prototipo) — sin filas sembradas.
+model AnimalMedicalRecord {
+  id       String @id @default(uuid()) @db.Uuid
+  animalId String @map("animal_id") @db.Uuid
+  animal   Animal @relation(fields: [animalId], references: [id])
+
+  type        MedicalRecordType
+  recordDate  DateTime          @map("record_date") @db.Date
+  description String?
+  /// Solo poblado para type=WEIGHT (kg).
+  value       Decimal?          @db.Decimal(6, 2)
+
+  employeeId String?   @map("employee_id") @db.Uuid
+  employee   Employee? @relation(fields: [employeeId], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([animalId])
+  @@map("animal_medical_records")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// CONFIGURACIÓN
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Ubicación de la propiedad, usada por el módulo de Clima (coordenadas
+/// reales hardcodeadas en el prototipo — ver docs/DATA_INVENTORY.md §14).
+/// No es una tabla de configuración genérica: es una entidad tipada y
+/// acotada a un único parámetro global real (deliberado — ver instrucción
+/// de no usar configuración genérica como sustituto de entidades).
+///
+/// Singleton reforzado con clave natural: `code` (obligatorio, `@unique`)
+/// es la clave estable que el seed y el servicio futuro usan para
+/// encontrar/crear la fila ("main") — no se depende de "tomar el primer
+/// registro". `label` sigue siendo el nombre legible ("Villa Elisa, Entre
+/// Ríos"), separado de la clave técnica. El modelo admitiría varios
+/// establecimientos en el futuro con solo usar otro `code` — hoy el negocio
+/// tiene una única propiedad.
+model PropertyLocation {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// Clave natural estable del singleton. La propiedad principal usa "main".
+  code      String  @unique
+  label     String  @unique
+  latitude  Decimal @db.Decimal(9, 6)
+  longitude Decimal @db.Decimal(9, 6)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("property_locations")
 }

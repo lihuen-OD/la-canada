@@ -9,3 +9,8 @@ coverage
 .vscode/settings.json
 backend/prisma/*.db
 *.tsbuildinfo
+
+# Cliente de Prisma generado (Prisma 7 lo genera como código fuente TS local,
+# no dentro de node_modules) — se regenera con `prisma generate` (ver
+# backend/package.json, script "postinstall").
+backend/src/generated

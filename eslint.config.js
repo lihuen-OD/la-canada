@@ -17,6 +17,7 @@ export default tseslint.config(
       'legacy/**',
       'index.html',
       'docs/**',
+      'backend/src/generated/**',
     ],
   },
   js.configs.recommended,
@@ -46,7 +47,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['backend/src/**/*.ts'],
+    files: ['backend/src/**/*.ts', 'backend/prisma/**/*.ts'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
