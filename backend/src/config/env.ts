@@ -14,7 +14,15 @@ const envSchema = z.object({
     .string({ message: 'FRONTEND_URL es obligatoria (la usa CORS para aceptar un único origen).' })
     .url({ message: 'FRONTEND_URL debe ser una URL válida, ej: http://localhost:5173' }),
 
+  // DATABASE_URL (pooled) — runtime de la app y del seed. DIRECT_URL
+  // (directa) — exclusiva de Prisma Migrate (ver backend/prisma.config.ts).
+  // Ambas opcionales acá: el servidor Express no falla al arrancar sin
+  // ellas todavía (ningún endpoint usa Prisma en esta etapa); el cliente
+  // Prisma (`backend/src/lib/prisma.ts`) valida DATABASE_URL por su cuenta,
+  // con un error claro y sin revelar su contenido, recién cuando se
+  // instancia.
   DATABASE_URL: z.string().optional(),
+  DIRECT_URL: z.string().optional(),
   JWT_ACCESS_SECRET: z.string().optional(),
   JWT_REFRESH_SECRET: z.string().optional(),
   ACCESS_TOKEN_TTL: z.string().optional(),

@@ -17,6 +17,8 @@ export const config = {
   nodeEnv: env.NODE_ENV,
   port: env.PORT,
   frontendUrl: env.FRONTEND_URL,
+  /** Pooled — única variable de conexión que debe usar el runtime de la app (nunca DIRECT_URL, exclusiva de Prisma Migrate). */
+  databaseUrl: env.DATABASE_URL,
   isProduction: env.NODE_ENV === 'production',
   isTest: env.NODE_ENV === 'test',
 } as const;

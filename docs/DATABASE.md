@@ -423,7 +423,7 @@ Ninguna de estas se implementa todavía (no hay migración ni servicios en esta 
 Chequeo explícito de los puntos pedidos, con resultado:
 
 - **Relaciones sin lado inverso**: ninguna — `prisma validate` falla si falta un lado inverso, y el schema actual valida limpio.
-- **`onDelete` peligrosos / cascadas que borren historial**: ninguna relación declara `onDelete` explícito. El comportamiento por defecto de Prisma con `relationMode="foreignKeys"` (el default para `postgresql`) es la acción por defecto de Postgres — sin una cláusula `ON DELETE` explícita, Postgres rechaza (`NO ACTION`) el borrado de una fila referenciada mientras existan dependientes. Efecto práctico: **no puede borrarse físicamente por accidente** un `Employee`/`Task`/`StockItem`/etc. que tenga historial dependiente — consistente con la decisión de "no debe utilizarse borrado físico" para esas entidades. No se agregó ningún `Cascade`.
+- **`onDelete` peligrosos / cascadas que borren historial**: ninguna relación declara `onDelete` explícito en `schema.prisma`. **Corrección (Etapa 3A, verificado contra la migración real aplicada a `demo`)**: la suposición original de esta revisión — que sin `onDelete` explícito Postgres usaría el default implícito `NO ACTION`, sin ninguna cláusula en el SQL — era incorrecta. Prisma 7 sí genera una cláusula `ON DELETE` explícita para cada FK, inferida de la nulabilidad del campo: `ON DELETE RESTRICT` para relaciones obligatorias (ej. `tasks.employee_id`), `ON DELETE SET NULL` para relaciones opcionales (ej. `file_assets.task_id`). Verificado en el SQL generado y confirmado contra `information_schema`/`pg_constraint` de Postgres real: **cero** ocurrencias de `ON DELETE CASCADE` en las 23 FK de la migración inicial. El efecto práctico documentado originalmente sigue siendo correcto (no puede borrarse físicamente por accidente un `Employee`/`Task`/`StockItem`/etc. con historial dependiente) — solo cambia el mecanismo exacto (`RESTRICT`/`SET NULL` explícitos, no un `NO ACTION` implícito).
 - **Campos nullable sin justificación**: todos los `String?`/`DateTime?`/relaciones opcionales tienen un comentario `///` explicando por qué (dato no siempre presente, relación 0-o-1, etc.) — revisados uno por uno al escribir cada modelo.
 - **Índices faltantes**: se agregó `@@index([assignedEmployeeId])` en `TaskExecution` en esta revisión (faltaba desde que se agregó el campo). El resto de las FKs consultables ya tenían índice.
 - **Restricciones únicas demasiado agresivas / claves naturales que impedirían casos legítimos**: revisadas — `@@unique([employeeId, description])` en `Task`, `@@unique([title, date, type])` en `Event`, etc., se consideran razonables para el volumen y la naturaleza de estos datos; sin cambios.
@@ -433,11 +433,16 @@ Chequeo explícito de los puntos pedidos, con resultado:
 - **Timestamps faltantes**: `AuditLog` y `Session` tienen solo `createdAt` — **decisión deliberada, no un olvido**: ambos representan un hecho puntual e inmutable (un log no se edita; una sesión se revoca seteando `revokedAt`, no se "actualiza"). El resto de los modelos de negocio mutables tiene `createdAt` + `updatedAt`.
 - **Soft delete inconsistente**: la mayoría usa `active: Boolean`; `FileAsset` usa `status: FileStatus` + `deletedAt` en su lugar — deliberado, no inconsistente: un archivo tiene un ciclo de vida de eliminación real (con fecha), distinto de "activo/inactivo" en el sentido de las demás entidades.
 
-### Qué queda pendiente para la Etapa 3 en adelante
+### Etapa 3A — migración inicial aplicada a `demo`
 
-- Migración real contra Neon (`prisma migrate dev`) — no ejecutada.
-- Los `CHECK` constraints de la matriz de invariantes (filas 1, 3, 4, 5, 13) — se agregan a mano en la migración SQL generada, Prisma no los declara en `schema.prisma`.
-- Enforcement a nivel de servicio de las filas 2, 6, 9, 11, 14, 15 de la matriz.
+**Actualización**: la migración real contra Neon ya se ejecutó — exclusivamente contra la rama `demo`, nunca `production`. `backend/prisma/migrations/20260922174631_init/migration.sql`, generada con `prisma migrate dev --create-only`, revisada a mano y aplicada con `prisma migrate deploy`. Contiene los 22 modelos, 11 enums, 23 FK (sin ninguna `ON DELETE CASCADE` — ver corrección más arriba) y 41 índices únicos del schema, más los 5 `CHECK` de la matriz de invariantes clasificados para SQL (filas 1, 3, 4, 5, 13) agregados a mano en esa misma migración. Verificado contra Postgres real (no solo releído del archivo) y probado con inserts inválidos dentro de transacciones con `ROLLBACK` — ver `docs/MIGRATION_PLAN.md`, "Etapa 3A", y `docs/ARCHITECTURE.md`, sección 13, para el detalle completo del proceso y del resultado.
+
+El seed (`backend/prisma/seed.ts`) también se ejecutó dos veces contra `demo`: 61 entidades maestras + 14 movimientos de apertura = 75 filas en la primera corrida, idénticas en la segunda (idempotencia confirmada, cero duplicados). Detalle por tabla en `docs/SEED_MANIFEST.md`.
+
+### Qué queda pendiente para la Etapa 3 (autenticación) en adelante
+
+- Enforcement a nivel de servicio de las filas 2, 6, 9, 11, 14, 15 de la matriz de invariantes.
 - Configuración operativa de las filas 16, 17 (credenciales de Object Storage exclusivas del backend, sin mezclar `demo`/`production`) — se confirma al configurar cada entorno, no en el schema.
 - Diseño de índices adicionales según patrones de consulta reales (los `@@index` actuales cubren las FKs más obvias, no un análisis de performance con datos reales).
 - Política de retención/expiración de `Session` y `AuditLog`.
+- Migración equivalente contra `production`, con su propia autorización explícita — no forma parte de esta etapa.

@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
@@ -11,5 +11,10 @@ export default defineConfig({
       FRONTEND_URL: 'http://localhost:5173',
       PORT: '4001',
     },
+    // Los tests de integración (contra Neon real) quedan fuera de la suite
+    // normal — requieren DATABASE_URL/DIRECT_URL y se corren explícitamente
+    // con `npm run test:integration` (ver docs/ARCHITECTURE.md, "Neon — rama
+    // demo"). `npm test` nunca debe depender de una conexión real.
+    exclude: [...configDefaults.exclude, 'src/test/integration/**'],
   },
 });

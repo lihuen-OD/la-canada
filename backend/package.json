@@ -10,8 +10,14 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mts",
     "format": "prettier --write \"src/**/*.ts\" \"prisma/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"prisma/**/*.ts\""
+    "format:check": "prettier --check \"src/**/*.ts\" \"prisma/**/*.ts\"",
+    "db:check": "tsx src/scripts/checkDbConnection.ts",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:migrate:status": "prisma migrate status",
+    "db:seed": "prisma db seed"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",

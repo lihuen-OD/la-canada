@@ -256,3 +256,52 @@ Implementado y verificado en la Etapa 1 (no es solo un plan): hay un único `.en
 - **Backend** → Render, servicio Node/Express. Ver configuración esperada en la sección 10.
 - **Base de datos y Object Storage** → Neon (Postgres administrado + Object Storage privado, mismo proyecto, ramas `demo`/`production` — ver sección 9.3). Functions, AI Gateway y Neon Auth quedan desactivados.
 - No se realizó ningún despliegue real en esta etapa — la configuración de la sección 10 es la referencia para cuando corresponda, no una confirmación de que ya se desplegó.
+
+## 13. Neon — conexión, migraciones y seed (Etapa 3A)
+
+Primera conexión real del proyecto a Neon — exclusivamente contra la rama `demo`, exclusivamente para desarrollo local. `production` no se toca en esta etapa (ni en ninguna etapa hasta que se autorice explícitamente el despliegue — ver sección 12).
+
+### 13.1 Dos conexiones, dos propósitos — nunca intercambiables
+
+| Variable | Tipo de conexión | Quién la usa | Nunca la usa |
+|---|---|---|---|
+| `DATABASE_URL` | Pooled (host con `-pooler`) | Runtime de la app (`backend/src/lib/prisma.ts`, cliente único) y el seed (`backend/prisma/seed.ts`) | Prisma Migrate |
+| `DIRECT_URL` | Directa (mismo host, sin `-pooler`) | Prisma Migrate exclusivamente (`backend/prisma.config.ts`, `datasource.url`) | El runtime de la app |
+
+Las migraciones no deben correr a través del pooler de Neon (PgBouncer en modo transacción no soporta bien ciertas operaciones de DDL/advisory locks que el Schema Engine necesita) — de ahí la separación. `backend/prisma.config.ts` carga el `.env` de la raíz explícitamente (la CLI de Prisma 7 ya no lo hace de forma automática para un `.env` fuera del directorio de `backend/`) antes de resolver `env('DIRECT_URL')`.
+
+### 13.2 Cliente Prisma único (`backend/src/lib/prisma.ts`)
+
+- `createPrismaClient(databaseUrl)` — fábrica pura, testeada con valores sintéticos (`backend/src/test/prisma-client-factory.test.ts`), que lanza un error claro (sin revelar ningún valor) si `DATABASE_URL` falta.
+- `export const prisma` — instancia única a nivel de módulo, vía `@prisma/adapter-pg`. Ningún servicio debe crear su propio `PrismaClient` — verificado con un test estático que falla si aparece más de un `new PrismaClient(` fuera de `src/generated` (`backend/src/test/prisma-client-static.test.ts`).
+- `disconnectPrisma()` — invocado desde el apagado ordenado del servidor (`server.ts`, junto con `server.close()`). Ningún endpoint usa el cliente todavía (eso es de la Etapa 5); el cierre ya queda contemplado para cuando lo hagan.
+- Sin dependencias nuevas: `@prisma/adapter-pg` y `pg` ya estaban instaladas desde la Etapa 2.
+
+### 13.3 Comprobación de conexión (`npm run db:check`)
+
+Script de solo lectura (`backend/src/scripts/checkDbConnection.ts`) que corre `SELECT 1` contra `DATABASE_URL` y reporta éxito/fallo — no modifica la base, no imprime la connection string ni datos de fila. Pensado para correr manualmente antes de cualquier migración o seed.
+
+### 13.4 Proceso de migración controlado
+
+1. `prisma format` / `prisma validate` / `prisma generate` (sin conexión).
+2. `prisma migrate dev --create-only --name <nombre>` (usa `DIRECT_URL`) — genera el SQL sin aplicarlo.
+3. Inspección manual completa del SQL generado, comparada contra la matriz de invariantes de `docs/DATABASE.md` — solo se agregan a mano los `CHECK` ya clasificados ahí para enforcement SQL (nunca una simulación incompleta de una regla que cruza tablas).
+4. `prisma validate` de nuevo.
+5. `prisma migrate deploy` (usa `DIRECT_URL`) — aplica solo migraciones ya creadas y revisadas, sin prompts interactivos, sin `db push`.
+6. Verificación posterior: `prisma migrate status` (drift), `_prisma_migrations` sin filas fallidas/revertidas, comparación 1:1 de tablas/enums/PK/FK/índices/checks contra `information_schema`/`pg_constraint`, y prueba de cada `CHECK` con un insert inválido dentro de una transacción con `ROLLBACK` explícito.
+
+Este proceso es idéntico para `demo` y (en su momento, con autorización separada) para `production` — la única diferencia es qué par `DATABASE_URL`/`DIRECT_URL` está configurado en el entorno donde se ejecuta.
+
+### 13.5 Cómo se evita ejecutar accidentalmente contra `production`
+
+- Las credenciales de `demo` viven únicamente en el `.env` local (gitignored, nunca commiteado).
+- Las credenciales de `production` nunca deben existir en un archivo local ni en este repositorio — se configuran directamente como variables de entorno en el dashboard de Render, igual que ya se documentó para el resto de las variables (sección 11).
+- Ningún script de este proyecto acepta un flag para "elegir" el ambiente: el destino lo determina exclusivamente qué `.env`/variables de entorno están cargadas en el proceso que ejecuta el comando — nunca un argumento de línea de comandos que pueda equivocarse.
+- Antes de cualquier migración o seed contra un entorno nuevo, correr primero `npm run db:check` (solo lectura) e inspeccionar manualmente que la base esté vacía de tablas de negocio si se espera que lo esté.
+- Neon no expone el nombre de la rama vía SQL estándar — la identificación del entorno depende enteramente de qué credencial se cargó, nunca de una consulta a la base. Ver `docs/MIGRATION_PLAN.md`, "Etapa 3A", para el razonamiento completo usado la primera vez.
+
+### 13.6 Resultado de esta etapa
+
+- Migración `20260922174631_init` aplicada a `demo`: 22 tablas, 11 enums, 23 FK, 41 índices únicos, 5 `CHECK` agregados a mano.
+- Seed ejecutado dos veces contra `demo`: 61 entidades maestras + 14 movimientos de apertura = 75 filas, idéntico en ambas corridas (idempotencia confirmada) — detalle completo en `docs/SEED_MANIFEST.md` y `docs/MIGRATION_PLAN.md`.
+- Ninguna credencial, real o de ejemplo, quedó documentada con su valor — todas las referencias en esta sección son conceptuales.

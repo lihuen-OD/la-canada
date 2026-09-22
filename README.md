@@ -8,9 +8,9 @@ El proyecto está en transición desde un prototipo de un único archivo (`index
 
 - **`index.html`/`legacy/index.original.html` (el prototipo original) fueron retirados del repositorio.** Contenían una URL y una API key reales de Supabase hardcodeadas en texto plano (ver `docs/SECURITY.md`); una vez confirmado que todo su contenido funcional, visual y de datos ya estaba migrado a `docs/`, al modelo Prisma y al seed, se eliminaron del árbol de trabajo **y de todo el historial de Git** (Etapa 2.3 — ver `docs/MIGRATION_PLAN.md`). La referencia de diseño y comportamiento del prototipo vive ahora exclusivamente en `docs/` (`PROJECT_CONTEXT.md`, `BUSINESS_RULES.md`, `DATABASE.md`, `DATA_INVENTORY.md`).
 - **Todavía no hay pantallas ni endpoints de negocio implementados** en `frontend/` ni en `backend/` — las Etapas 1 y 2 del plan de migración crearon la estructura profesional base y el modelo de datos + seed, sin lógica de negocio corriendo todavía.
-- **El modelo de datos ya está diseñado** (`backend/prisma/schema.prisma`, 22 modelos) y hay un seed idempotente escrito (`backend/prisma/seed.ts`) con los datos reales del prototipo — pero **todavía no hay conexión con Neon**: no se ejecutó ninguna migración, ningún `db push` ni el seed.
-- **Todavía no hay autenticación implementada.** El PIN del prototipo (y cualquier credencial encontrada en el HTML original) **no se copió** al código nuevo, y el archivo que las contenía ya fue retirado del repositorio (ver punto anterior). El modelo ya tiene `User`/`Session` listos para cuando se implemente (Etapa 3).
-- **Los datos reales** (personas, tareas, stock, catálogos, etc.) están descritos exactamente en `docs/SEED_MANIFEST.md` y listos para cargarse — la carga real contra una base ocurre recién en una etapa futura de despliegue, no antes.
+- **El modelo de datos ya está migrado contra Neon, rama `demo` exclusivamente** (Etapa 3A): `backend/prisma/schema.prisma` (22 modelos, 11 enums), la migración inicial aplicada, y el seed ya ejecutado dos veces (idempotencia confirmada). `production` no se toca en esta etapa — ver "Base de datos (Prisma + Neon)" más abajo.
+- **Todavía no hay autenticación implementada.** El PIN del prototipo (y cualquier credencial encontrada en el HTML original) **no se copió** al código nuevo, y el archivo que las contenía ya fue retirado del repositorio. El modelo ya tiene `User`/`Session` listos para cuando se implemente (Etapa 3) — ningún endpoint usa la base todavía.
+- **Los datos reales** (personas, tareas, stock, catálogos, etc.) ya están cargados en `demo`, exactamente como los describe `docs/SEED_MANIFEST.md` (61 entidades maestras + 14 movimientos de apertura = 75 filas).
 
 Ver `docs/PROJECT_CONTEXT.md`, `docs/ARCHITECTURE.md` y `docs/MIGRATION_PLAN.md` para el contexto completo y las próximas etapas.
 
@@ -73,8 +73,12 @@ Variables usadas en esta etapa:
 | `PORT` | Backend | No (default `4000`) |
 | `FRONTEND_URL` | Backend (CORS) | **Sí** — sin ella el backend no arranca |
 | `VITE_API_URL` | Frontend | Sí, para que el cliente HTTP sepa a qué backend llamar |
+| `DATABASE_URL` | Backend (runtime, pooled) y seed | Sí, para conectar a Neon — solo la rama `demo` en desarrollo local |
+| `DIRECT_URL` | Prisma Migrate exclusivamente (directa, sin pooler) | Sí, solo para correr migraciones — nunca la usa el runtime de la app |
 
-Variables previstas para etapas futuras (no se usan todavía, no hace falta completarlas para correr el health check local): `DATABASE_URL`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `ACCESS_TOKEN_TTL`, `REFRESH_TOKEN_TTL`, `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_REGION`, `OBJECT_STORAGE_BUCKET`, `OBJECT_STORAGE_ACCESS_KEY_ID`, `OBJECT_STORAGE_SECRET_ACCESS_KEY` (Neon Object Storage, reemplaza a Google Drive — ver `docs/ARCHITECTURE.md`).
+Ninguna de las dos apunta nunca a `production`: esas credenciales, cuando existan, se configuran directamente en Render, nunca en un `.env` de este repositorio (ver `docs/ARCHITECTURE.md`, sección 13).
+
+Variables previstas para etapas futuras (no se usan todavía, no hace falta completarlas para correr el health check local): `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `ACCESS_TOKEN_TTL`, `REFRESH_TOKEN_TTL`, `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_REGION`, `OBJECT_STORAGE_BUCKET`, `OBJECT_STORAGE_ACCESS_KEY_ID`, `OBJECT_STORAGE_SECRET_ACCESS_KEY` (Neon Object Storage, reemplaza a Google Drive — ver `docs/ARCHITECTURE.md`).
 
 Ninguna de estas variables tiene valores reales en `.env.example` ni en el código.
 
@@ -129,11 +133,13 @@ Responde `200` con:
 }
 ```
 
-No incluye estado de Neon todavía porque el backend no se conecta a ninguna base en esta etapa.
+No incluye estado de Neon todavía porque ningún endpoint de negocio usa la base en esta etapa (el módulo de conexión existe, pero nada lo llama desde un endpoint HTTP todavía).
 
-## Base de datos (Prisma)
+## Base de datos (Prisma + Neon)
 
-El modelo de datos está diseñado y listo (`backend/prisma/schema.prisma`, 22 modelos — ver `docs/DATABASE.md` para el detalle completo), pero **no está conectado a ninguna base todavía**. Comandos disponibles sin necesitar `DATABASE_URL` (no requieren conexión):
+El modelo de datos (`backend/prisma/schema.prisma`, 22 modelos, 11 enums — ver `docs/DATABASE.md`) ya está migrado contra Neon, rama `demo` exclusivamente (Etapa 3A). `production` no se toca en esta etapa.
+
+Comandos estáticos (sin conexión):
 
 ```bash
 cd backend
@@ -142,9 +148,25 @@ npx prisma validate    # valida el schema estáticamente
 npx prisma generate    # genera el cliente TS en src/generated/prisma/ (también corre solo, vía postinstall)
 ```
 
+Comandos que sí requieren conexión — usan `DATABASE_URL` (pooled) o `DIRECT_URL` (directa, solo Prisma Migrate) según corresponda (ver `docs/ARCHITECTURE.md`, sección 13):
+
+```bash
+npm run db:check           # SELECT 1 de solo lectura — confirma conectividad sin modificar nada
+npm run db:migrate:dev     # flujo interactivo de desarrollo (crear + aplicar migraciones)
+npm run db:migrate:deploy  # aplica migraciones ya creadas, sin prompts — usado en el proceso controlado de esta etapa
+npm run db:migrate:status  # estado de migraciones aplicadas / detecta drift
+npm run db:seed            # corre backend/prisma/seed.ts (registrado en prisma.config.ts)
+```
+
 `prisma generate` corre automáticamente después de `npm install` (script `postinstall` de `backend/package.json`) — la carpeta generada está en `.gitignore`, no se commitea.
 
-**Seed** (`backend/prisma/seed.ts` + `backend/prisma/seed-data/`): contiene los datos reales del prototipo (4 empleados, 4 usuarios pendientes de activación, 10 tareas, 14 productos de stock, categorías, novedades, eventos, cumpleaños recurrentes, tipos de mascota — **61 entidades maestras + 14 movimientos de apertura de stock = 75 filas potenciales en total**, manifiesto exacto en `docs/SEED_MANIFEST.md`). Es idempotente (se puede correr más de una vez sin duplicar nada, con claves naturales estables por entidad — nunca UUID adivinado) y **todavía no se ejecutó contra ninguna base** — eso requiere `DATABASE_URL` configurada y corresponde a una etapa futura de conexión real a Neon.
+**Migración inicial** (`backend/prisma/migrations/20260922174631_init/`): generada con `--create-only`, revisada a mano, y aplicada con `prisma migrate deploy` — nunca con `db push`. Incluye 5 restricciones `CHECK` agregadas a mano (las únicas filas de la matriz de invariantes de `docs/DATABASE.md` clasificadas para SQL). Detalle completo del proceso y de la verificación posterior en `docs/ARCHITECTURE.md` (sección 13) y `docs/MIGRATION_PLAN.md` ("Etapa 3A").
+
+**Seed** (`backend/prisma/seed.ts` + `backend/prisma/seed-data/`): contiene los datos reales del prototipo (4 empleados, 4 usuarios pendientes de activación, 10 tareas, 14 productos de stock, categorías, novedades, eventos, cumpleaños recurrentes, tipos de mascota — **61 entidades maestras + 14 movimientos de apertura de stock = 75 filas**, manifiesto exacto en `docs/SEED_MANIFEST.md`). Ya se ejecutó dos veces contra `demo`: los conteos coinciden exactamente, y la segunda corrida no duplicó ni modificó nada (idempotencia confirmada contra Postgres real, no solo por lectura del código).
+
+**Cliente Prisma único** (`backend/src/lib/prisma.ts`): una sola instancia reutilizable de `PrismaClient` (vía `@prisma/adapter-pg`, `DATABASE_URL`) — ningún servicio debe crear la suya propia. Sin endpoints que lo usen todavía (eso es de la Etapa 5); el cierre ordenado ya está conectado al apagado del servidor.
+
+**Tests de integración** (`backend/src/test/integration/`, `npm run test:integration`): corren contra Neon real (`demo`) — separados de la suite normal (`npm test`, que nunca requiere conexión). Prueban que los 5 `CHECK` de la migración inicial realmente rechazan la fila inválida, siempre dentro de una transacción con `ROLLBACK`.
 
 Prisma 7 movió la configuración de conexión fuera de `schema.prisma` a `backend/prisma.config.ts` — ver `docs/ARCHITECTURE.md` §10 para el detalle de este y otros cambios de la versión instalada.
 
@@ -155,3 +177,4 @@ Prisma 7 movió la configuración de conexión fuera de `schema.prisma` a `backe
 - CORS acepta únicamente el origen configurado en `FRONTEND_URL`, con credenciales habilitadas — nunca `origin: '*'` combinado con credenciales.
 - Helmet, compresión, rate limiting general (`/api`) y manejo centralizado de errores (sin stack trace en producción, ni siquiera en desarrollo para errores esperados como CORS/404) ya están activos, aunque todavía no hay endpoints de negocio que proteger.
 - El seed (`backend/prisma/seed.ts`) nunca crea un administrador, nunca inventa PIN/contraseña/hash, y nunca usa `deleteMany` ni resetea datos — verificado con tests dedicados (`backend/src/test/seed-source-guards.test.ts`), no solo por inspección manual.
+- `DATABASE_URL`/`DIRECT_URL` (Neon, rama `demo`) viven solo en el `.env` local, gitignored — nunca se commitean, nunca se imprimen en consola ni en documentación. `production` usa credenciales propias, configuradas directamente en Render, nunca en este repositorio ni en Netlify (ver `docs/ARCHITECTURE.md`, sección 13).

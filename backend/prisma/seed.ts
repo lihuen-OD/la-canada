@@ -305,20 +305,28 @@ async function seedPropertyLocation(db: Tx) {
 }
 
 async function run(prisma: PrismaClient) {
-  await prisma.$transaction(async (db) => {
-    const employeesByCode = await seedEmployees(db);
-    await seedUsers(db, employeesByCode);
-    await seedTasks(db, employeesByCode);
+  await prisma.$transaction(
+    async (db) => {
+      const employeesByCode = await seedEmployees(db);
+      await seedUsers(db, employeesByCode);
+      await seedTasks(db, employeesByCode);
 
-    const categoriesByKey = await seedStockCategories(db);
-    await seedStockItems(db, categoriesByKey);
+      const categoriesByKey = await seedStockCategories(db);
+      await seedStockItems(db, categoriesByKey);
 
-    await seedNewsReports(db, employeesByCode);
-    await seedEvents(db);
-    await seedRecurringBirthdays(db);
-    await seedAnimalTypes(db);
-    await seedPropertyLocation(db);
-  });
+      await seedNewsReports(db, employeesByCode);
+      await seedEvents(db);
+      await seedRecurringBirthdays(db);
+      await seedAnimalTypes(db);
+      await seedPropertyLocation(db);
+    },
+    // El timeout por defecto (5000 ms) alcanza contra una base local, pero no
+    // contra Neon real: cada `createIfMissing` es un round-trip de red
+    // secuencial, y 75 filas potenciales fácilmente superan 5 s de latencia
+    // acumulada. Se sube a un valor generoso para esta etapa (seed manual,
+    // no un endpoint con SLA) — no cambia la semántica "todo o nada".
+    { timeout: 60_000, maxWait: 10_000 },
+  );
 }
 
 async function main() {
