@@ -30,6 +30,25 @@
   - Datos deliberadamente omitidos (documentados, no inventados): cumpleaños de Benjamín (fecha contradictoria), cantidad de gallinas (sin valor comprobado), administrador inicial, y cualquier historial operativo sin evidencia real en el HTML (ejecuciones, consumos no-apertura, animales, fotos, sesiones, auditoría).
 - **No incluyó**: ninguna migración contra Neon, ningún `db push`, ninguna ejecución del seed, ninguna conexión a Supabase ni a Neon.
 
+## Etapa 2.3 — Retiro seguro del prototipo heredado ✅ completada
+
+- **Objetivo**: verificar la integridad de `index.html`/`legacy/index.original.html` (checksums, historial Git) y, autorizado explícitamente por el usuario, retirarlos por completo del repositorio — árbol de trabajo **y** historial de Git — porque contenían una URL y una API key reales de Supabase (`SB_URL`/`SB_KEY`) hardcodeadas en texto plano.
+- **Disparador**: al conectar el repositorio local a un remoto de GitHub por primera vez, se detectó que ambos archivos seguían conteniendo esa credencial real (documentada desde la Etapa 0 en `docs/SECURITY.md` como el hallazgo de mayor severidad, pero nunca antes retirada del repo). El usuario canceló el push planeado y autorizó explícitamente eliminar ambos archivos antes de cualquier conexión remota.
+- **Verificación previa a eliminar** (sin modificar nada todavía):
+  - MD5/SHA-256/`cmp`/blob SHA de Git idénticos entre `index.html` y `legacy/index.original.html`, y entre los commits `b9b9f78`/`b3b88f5` — confirmado que nunca hubo una modificación real de ninguno de los dos archivos en ningún commit previo.
+  - Confirmado que `frontend/index.html` es un archivo distinto (plantilla de Vite, sin relación ni contenido sensible) y no fue tocado.
+  - Confirmado que todo el contenido funcional, visual y de datos del HTML heredado ya estaba migrado íntegramente a `docs/` (`PROJECT_CONTEXT.md`, `BUSINESS_RULES.md`, `DATA_INVENTORY.md`, `DATABASE.md`, `SECURITY.md`), a `backend/prisma/schema.prisma` y al seed (`docs/SEED_MANIFEST.md`) — nada se perdía al retirar el archivo físico.
+- **Resultado**:
+  - `index.html` y `legacy/index.original.html` eliminados del árbol de trabajo.
+  - Ambos archivos eliminados de **todo el historial de Git local** (reescritura con `git filter-branch --index-filter`, purga de refs de respaldo, `reflog expire`, `git gc --prune=now --aggressive`) — verificado con `git fsck`, `git rev-list --objects --all` y un escaneo de contenido de los ~100 blobs alcanzables: ningún objeto de Git conserva esos archivos ni el contenido de la API key.
+  - El identificador real del proyecto de Supabase (que también aparecía, sin la key, en `docs/ARCHITECTURE.md`, `docs/PROJECT_CONTEXT.md`, `docs/SECURITY.md` y en un test de guarda del seed) se redactó de la misma forma en una segunda pasada de reescritura de historial, y luego se prolijo con texto explicativo en la versión final de cada documento.
+  - `backend/src/test/seed-source-guards.test.ts` — el guard que comparaba contra el identificador/JWT reales se reemplazó por un patrón genérico (dominio `*.supabase.co`, forma de un JWT) que no almacena ningún valor real como fixture.
+  - Como no existía ningún push previo (el remoto todavía no se había conectado), reescribir el historial local no afectó a nadie más — los hashes de ambos commits cambiaron (`b9b9f78`→ nuevo, `b3b88f5`→ nuevo; ver el reporte de cierre de esta etapa para los hashes exactos) y eso se documentó en vez de preservarse.
+  - `AGENTS.md` (regla 9), `README.md` y `.prettierignore` actualizados para no depender de la presencia física de los HTML retirados.
+  - Todas las validaciones (Prisma format/validate/generate, build, typecheck, lint, test, format:check) vueltas a correr en verde tras la reescritura.
+- **No incluyó**: ninguna conexión a Neon, ninguna ejecución del seed, ninguna conexión ni push a GitHub (se pospuso explícitamente hasta después de esta limpieza), ningún avance a la Etapa 3.
+- **Pendiente para el usuario (fuera del alcance de este repositorio)**: si el proyecto de Supabase original sigue activo, rotar/revocar la `anon key` real — retirar el archivo del repo no invalida la key del lado de Supabase.
+
 ## Etapa 3 — Implementar autenticación
 
 - **Objetivo**: reemplazar el PIN comparado en el cliente por autenticación real del lado del backend, sobre el modelo `User`/`Session` ya definido en la Etapa 2.

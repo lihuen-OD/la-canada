@@ -68,7 +68,7 @@ Identificados por los `<div class="pg" id="pg-...">` del HTML (14 pantallas):
 | Dependencia | Uso | Dónde |
 |---|---|---|
 | Google Fonts (`fonts.googleapis.com`) | Tipografías Fraunces (serif, títulos) y Karla (sans, cuerpo) | `<link>` en `<head>` |
-| **Supabase** (proyecto `REDACTED_SUPABASE_PROJECT_REF`) | Base de datos y API REST únicas del prototipo; toda lectura/escritura pasa por ahí desde el navegador | Variables `SB_URL`/`SB_KEY`, funciones `sbFetch`/`sbGet`/`sbPost`/`sbPatch`/`sbDel`/`sbUpsert` |
+| **Supabase** (proyecto original — identificador y API key retirados de esta documentación, ver `docs/SECURITY.md`) | Base de datos y API REST únicas del prototipo; toda lectura/escritura pasa por ahí desde el navegador | Variables `SB_URL`/`SB_KEY`, funciones `sbFetch`/`sbGet`/`sbPost`/`sbPatch`/`sbDel`/`sbUpsert` |
 | **Open-Meteo** (`api.open-meteo.com`) | Clima actual y pronóstico 5 días para lat/lon fijas de Villa Elisa, Entre Ríos (-32.15, -58.40) | `fetchClima()` |
 | Ninguna librería de UI/estado (sin React, sin jQuery, sin bundler) | Todo el DOM se genera con concatenación de strings + `innerHTML` | Todo el `<script>` |
 

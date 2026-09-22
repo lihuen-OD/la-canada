@@ -6,10 +6,10 @@ Sistema de gestión operativa para la propiedad "La Cañada": tareas del equipo,
 
 El proyecto está en transición desde un prototipo de un único archivo (`index.html`, HTML + CSS + JS embebido, conectado directamente a Supabase) hacia una aplicación profesional full stack.
 
-- **`index.html`** (raíz) y **`legacy/index.original.html`** son la referencia funcional y visual del prototipo original. Son idénticos byte a byte (mismo checksum) y **no se modifican ni se usan en tiempo de ejecución** de la nueva app: no se importan desde el código nuevo, no forman parte de ningún build y el backend no los expone como archivos estáticos.
+- **`index.html`/`legacy/index.original.html` (el prototipo original) fueron retirados del repositorio.** Contenían una URL y una API key reales de Supabase hardcodeadas en texto plano (ver `docs/SECURITY.md`); una vez confirmado que todo su contenido funcional, visual y de datos ya estaba migrado a `docs/`, al modelo Prisma y al seed, se eliminaron del árbol de trabajo **y de todo el historial de Git** (Etapa 2.3 — ver `docs/MIGRATION_PLAN.md`). La referencia de diseño y comportamiento del prototipo vive ahora exclusivamente en `docs/` (`PROJECT_CONTEXT.md`, `BUSINESS_RULES.md`, `DATABASE.md`, `DATA_INVENTORY.md`).
 - **Todavía no hay pantallas ni endpoints de negocio implementados** en `frontend/` ni en `backend/` — las Etapas 1 y 2 del plan de migración crearon la estructura profesional base y el modelo de datos + seed, sin lógica de negocio corriendo todavía.
 - **El modelo de datos ya está diseñado** (`backend/prisma/schema.prisma`, 22 modelos) y hay un seed idempotente escrito (`backend/prisma/seed.ts`) con los datos reales del prototipo — pero **todavía no hay conexión con Neon**: no se ejecutó ninguna migración, ningún `db push` ni el seed.
-- **Todavía no hay autenticación implementada.** El PIN del prototipo (y cualquier credencial encontrada en `index.html`) **no se copió** al código nuevo. El modelo ya tiene `User`/`Session` listos para cuando se implemente (Etapa 3).
+- **Todavía no hay autenticación implementada.** El PIN del prototipo (y cualquier credencial encontrada en el HTML original) **no se copió** al código nuevo, y el archivo que las contenía ya fue retirado del repositorio (ver punto anterior). El modelo ya tiene `User`/`Session` listos para cuando se implemente (Etapa 3).
 - **Los datos reales** (personas, tareas, stock, catálogos, etc.) están descritos exactamente en `docs/SEED_MANIFEST.md` y listos para cargarse — la carga real contra una base ocurre recién en una etapa futura de despliegue, no antes.
 
 Ver `docs/PROJECT_CONTEXT.md`, `docs/ARCHITECTURE.md` y `docs/MIGRATION_PLAN.md` para el contexto completo y las próximas etapas.
@@ -33,14 +33,13 @@ El frontend nunca tiene credenciales de base de datos: toda operación pasa por 
 ├── frontend/           React + TypeScript + Vite
 ├── backend/             Node.js + TypeScript + Express
 │   └── prisma/           Schema, config y seed de Prisma (ver sección "Base de datos")
-├── legacy/
-│   └── index.original.html   Copia exacta e intocable del index.html original
-├── docs/                 Documentación técnica y funcional (auditoría del prototipo)
-├── index.html            Prototipo original — referencia, no se modifica
+├── docs/                 Documentación técnica y funcional (auditoría del prototipo original, ya retirado — ver "Estado actual")
 ├── AGENTS.md              Reglas obligatorias de trabajo en este repo
 ├── package.json           Orquestación del monorepo (npm workspaces)
 └── .env.example           Variables de entorno centralizadas (frontend + backend)
 ```
+
+> El prototipo original (`index.html` en la raíz y `legacy/index.original.html`) ya no existe en este repositorio — ver "Estado actual" más arriba.
 
 ## Requisitos locales
 
@@ -108,7 +107,7 @@ npm run format           # Prettier --write (config compartida en .prettierrc, r
 npm run format:check     # Prettier --check
 ```
 
-`index.html`, `legacy/`, `docs/` y los archivos Markdown están excluidos de Prettier a propósito (`.prettierignore`) para no reformatear el prototipo ni la documentación.
+`docs/` y los archivos Markdown están excluidos de Prettier a propósito (`.prettierignore`) para no reformatear la documentación. (El prototipo original, `index.html`/`legacy/`, tenía la misma exclusión hasta que se retiró del repositorio — ver "Estado actual".)
 
 ## Endpoint de health
 

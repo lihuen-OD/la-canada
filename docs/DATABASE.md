@@ -1,6 +1,8 @@
 # DATABASE.md — Modelo de datos reconstruido a partir de `index.html`
 
 > El HTML no incluye ningún schema SQL ni definición de tablas — todo lo aquí descrito se **infiere** de cómo el JavaScript lee y escribe contra la API REST de Supabase (`sbGet`/`sbPost`/`sbFetch`, y los mapeos de fila a objeto en `loadAll()` y cada `loadX()`). Cada tabla indica qué está **comprobado** (nombre de columna usado literalmente en el código) versus **inferido** (tipo de dato, nulabilidad, restricciones) versus **pendiente de definición** (no hay evidencia en el HTML). No se accedió al proyecto Supabase real para confirmar nada de esto.
+>
+> **Nota (Etapa 2.3)**: `index.html` fue retirado del repositorio (contenía credenciales reales de Supabase — ver `docs/SECURITY.md`). El modelo definitivo descrito más abajo ya vive en `backend/prisma/schema.prisma`; las citas de línea del HTML quedan como registro histórico de la auditoría.
 
 ## Tablas identificadas (18)
 

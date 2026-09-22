@@ -23,7 +23,7 @@
 
 ## 4. Acceso directo a Supabase
 
-- Confirmado: **todas** las operaciones de datos de la app (lectura y escritura) son llamadas `fetch` directas desde el navegador a `https://REDACTED_SUPABASE_PROJECT_REF.supabase.co/rest/v1/...`, usando `sbFetch`/`sbGet`/`sbPost` y, en varios lugares, `fetch` crudo con los mismos headers armados a mano (p. ej. `deltaS`, `dbUpdateStock`, `guardarTipoMascota`, `eliminarTipo`, `eliminarDestino`, `eliminarCategoria`).
+- Confirmado: **todas** las operaciones de datos de la app (lectura y escritura) son llamadas `fetch` directas desde el navegador a `https://<project-ref>.supabase.co/rest/v1/...` (el identificador real del proyecto se retiró de esta documentación y del repositorio — ver "Actualización — retiro del prototipo heredado" al final de esta sección), usando `sbFetch`/`sbGet`/`sbPost` y, en varios lugares, `fetch` crudo con los mismos headers armados a mano (p. ej. `deltaS`, `dbUpdateStock`, `guardarTipoMascota`, `eliminarTipo`, `eliminarDestino`, `eliminarCategoria`).
 - Esto es exactamente el patrón que la arquitectura objetivo (`docs/ARCHITECTURE.md`) busca eliminar: **el frontend nunca debe hablar directo con la base de datos**. Es la razón principal, desde el punto de vista de seguridad, por la que se justifica introducir un backend propio.
 
 ## 5. Riesgos XSS
@@ -104,3 +104,9 @@
 | Sesión en `sessionStorage`, sin expiración server-side | Media |
 
 Estos hallazgos son, en conjunto, la justificación técnica central de por qué la reconstrucción (`docs/MIGRATION_PLAN.md`) introduce un backend propio con autenticación y autorización reales, y por qué el frontend nunca debe volver a tener credenciales de base de datos.
+
+## Actualización — retiro del prototipo heredado (Etapa 2.3)
+
+El hallazgo más severo de esta auditoría (acceso completo a la base vía `SB_URL`/`SB_KEY` hardcodeados) dejó de ser un riesgo *potencial* del repositorio: `index.html` y `legacy/index.original.html` — los dos únicos archivos que contenían ese identificador de proyecto y esa API key reales — fueron **retirados por completo del repositorio, del árbol de trabajo y de todo el historial de Git local** (no solo eliminados en un commit nuevo). Se verificó, antes de retirarlos, que todo su contenido funcional y de datos ya estaba migrado a `docs/`, a `backend/prisma/schema.prisma` y al seed. Cualquier mención al identificador real del proyecto Supabase que quedaba en esta documentación (y en un test de guarda del seed) también se redactó de la misma forma. Ver `docs/MIGRATION_PLAN.md`, "Etapa 2.3", para el detalle completo de la verificación y el procedimiento de purga.
+
+Esto no reemplaza una acción pendiente del lado de Supabase: si ese proyecto sigue activo en producción, **rotar/revocar la `anon key` real sigue siendo responsabilidad del usuario**, fuera del alcance de este repositorio — retirar el archivo del repo elimina la exposición *aquí*, no invalida la key en Supabase.

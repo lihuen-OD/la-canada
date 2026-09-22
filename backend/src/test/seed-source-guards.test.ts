@@ -37,12 +37,16 @@ describe('Guards de seguridad e integridad del seed (texto fuente)', () => {
     expect(SEED_FILE.toLowerCase()).not.toMatch(/drop table|truncate/);
   });
 
-  it('no aparece la URL ni la API key de Supabase en ningún archivo del seed', () => {
-    // Se busca el identificador real del proyecto/la key, no la palabra
-    // "supabase" — varios comentarios la mencionan legítimamente al
-    // explicar de dónde viene un dato o por qué algo no se siembra.
-    expect(allSources).not.toMatch(/REDACTED_SUPABASE_PROJECT_REF/);
-    expect(allSources).not.toMatch(/REDACTED_JWT_HEADER/);
+  it('no aparece ninguna URL de Supabase ni ningún token con forma de JWT en ningún archivo del seed', () => {
+    // Guard por *patrón*, no por el valor puntual de un proyecto o key
+    // reales — ningún secreto real se guarda como fixture en este repo (ver
+    // docs/SECURITY.md, "Actualización — retiro del prototipo heredado").
+    // Detecta cualquier dominio *.supabase.co, o cualquier token con la
+    // forma típica de un JWT (tres segmentos base64url separados por
+    // punto), sin comparar contra un identificador de proyecto ni una key
+    // específicos.
+    expect(allSources).not.toMatch(/https?:\/\/[a-z0-9-]+\.supabase\.co/i);
+    expect(allSources).not.toMatch(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/);
   });
 
   it('no hay ningún PIN ni contraseña hardcodeada en el seed', () => {

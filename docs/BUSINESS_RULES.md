@@ -1,6 +1,8 @@
 # BUSINESS_RULES.md — Reglas de negocio extraídas de `index.html`
 
 > Convención de este documento: cada regla cita la(s) función(es) o línea(s) de `index.html` donde se comprobó. Cuando una regla parece incompleta, contradictoria o no verificable solo con lectura estática, se marca explícitamente con **⚠️ DUDA** o **⚠️ INCONSISTENCIA**. Nada de lo marcado así debe tratarse como comportamiento definitivo hasta que un humano lo confirme.
+>
+> **Nota (Etapa 2.3)**: `index.html` fue retirado del repositorio (contenía credenciales reales de Supabase — ver `docs/SECURITY.md`). Las citas de línea de este documento quedan como registro histórico de la auditoría; ya no corresponden a un archivo presente en el repo.
 
 ## 1. Roles y permisos
 

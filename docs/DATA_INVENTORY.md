@@ -1,6 +1,8 @@
 # DATA_INVENTORY.md — Inventario exhaustivo de datos declarados en `index.html`
 
 > Todos los datos listados en este documento provienen de literales JavaScript embebidos en `index.html`. Ninguno se llama "mock": son información inicial real del negocio (personas, tareas, stock, catálogos, configuración) tal como la declaró quien construyó el prototipo. Cuando un dato existe en el código pero **no llega efectivamente a persistirse** por la lógica actual (ver columna "¿Se siembra hoy?"), se aclara explícitamente — es una falla de la función de siembra (`seedData()`), no una razón para descartar el dato como no-real.
+>
+> **Nota (Etapa 2.3)**: `index.html` fue retirado del repositorio (contenía credenciales reales de Supabase — ver `docs/SECURITY.md`). Todo el inventario de este documento ya está migrado a `backend/prisma/seed-data/` (ver `docs/SEED_MANIFEST.md`); las citas de línea quedan como registro histórico de la auditoría.
 
 ## Cómo leer las tablas
 

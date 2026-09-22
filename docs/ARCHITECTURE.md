@@ -23,8 +23,10 @@
           ┌─────────────────────────┐
           │   Supabase (Postgres +  │
           │   REST API autogenerada)│
-          │   Proyecto:              │
-          │   REDACTED_SUPABASE_PROJECT_REF   │
+          │   Proyecto original     │
+          │   (identificador y key   │
+          │   retirados del repo —  │
+          │   ver docs/SECURITY.md) │
           └─────────────────────────┘
 
           ┌─────────────────────────┐
