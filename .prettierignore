@@ -1,0 +1,16 @@
+# Prototipo original y su copia de referencia: no se tocan en esta etapa.
+index.html
+legacy
+
+# Documentación: formato editado a mano, no se reformatea automáticamente.
+docs
+*.md
+
+# Generado / dependencias.
+node_modules
+dist
+coverage
+package-lock.json
+
+# Prisma gestiona el formato de su propio schema con `prisma format`.
+**/*.prisma

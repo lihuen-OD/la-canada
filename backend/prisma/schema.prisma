@@ -1,0 +1,18 @@
+// Etapa 1 — estructura base únicamente.
+//
+// Este archivo TODAVÍA NO define el modelo de datos definitivo. Los modelos
+// (Person, Task, StockItem, etc.) se diseñarán en la Etapa 3 del plan de
+// migración, junto con la primera migración real y el seed de datos reales.
+// Ver docs/DATABASE.md (propuesta preliminar) y docs/MIGRATION_PLAN.md.
+//
+// No se ejecutó `prisma generate`, `prisma migrate` ni `prisma db push`
+// contra ninguna base en esta etapa — no hay modelos que generar todavía.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}

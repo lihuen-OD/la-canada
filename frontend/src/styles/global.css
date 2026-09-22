@@ -1,0 +1,55 @@
+/* Reset mínimo y estilos de la pantalla técnica temporal de la Etapa 1.
+   No reproduce el diseño de index.html — eso se hace recién en la Etapa 6,
+   con un pedido explícito de preservar la paleta y tipografías originales. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  color: #1a1a1a;
+  background: #fafafa;
+}
+
+:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.status-screen {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.status-screen__title {
+  font-size: clamp(1.5rem, 5vw, 2.25rem);
+  margin: 0;
+}
+
+.status-screen__badge {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #15803d;
+  margin: 0;
+}
+
+.status-screen__env {
+  font-size: 0.875rem;
+  color: #525252;
+  margin: 0;
+}

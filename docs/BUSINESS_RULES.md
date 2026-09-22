@@ -1,0 +1,177 @@
+# BUSINESS_RULES.md — Reglas de negocio extraídas de `index.html`
+
+> Convención de este documento: cada regla cita la(s) función(es) o línea(s) de `index.html` donde se comprobó. Cuando una regla parece incompleta, contradictoria o no verificable solo con lectura estática, se marca explícitamente con **⚠️ DUDA** o **⚠️ INCONSISTENCIA**. Nada de lo marcado así debe tratarse como comportamiento definitivo hasta que un humano lo confirme.
+
+## 1. Roles y permisos
+
+- Dos roles: `admin` y `user` (equipo de trabajo). `isAdmin()` → `currentRole === 'admin'` (línea 3889).
+- Elementos con clase `admin-only` se ocultan/muestran por JS según rol (`applyRoleUI()`, línea 3842; también recalculado en `rndMascotaDetalle()` línea 2496 y `rndMas()` línea 3884).
+- Acciones **restringidas a admin** (botón condicionado a `isAdmin()` en el render):
+  - Crear/editar/eliminar tareas (`+ Nueva tarea`, ✏️/✕ en lista de tareas).
+  - Crear/editar/eliminar/dar de baja personas.
+  - Crear/editar ítems de stock, ajustar stock por el badge de estado, gestionar categorías y destinos.
+  - Crear/editar/eliminar eventos.
+  - Alta de tipos de mascota; edición de ficha de mascota; eliminación de registros clínicos.
+  - Alta/baja de gallinas (`ajustarGallinas`, botones "+ Alta"/"− Baja" con clase `admin-only`).
+  - Ver panel "Cumplimiento por persona" y "Tareas más incumplidas" en Desempeño.
+  - Ver "Configuración" y "Datos del equipo".
+  - Cambiar el PIN de admin y el PIN de cualquier persona (desde Configuración → Personas).
+- Acciones disponibles para **cualquier usuario logueado** (admin o equipo):
+  - Tildar/destildar tareas propias; tildar tareas de otra persona (dispara el flujo "¿Quién completa esta tarea?", ver sección 4).
+  - Registrar consumo/ingreso de stock (botón 📤 en cada ítem, sin gate de admin).
+  - Registrar novedades.
+  - Registrar recolección de huevos.
+  - Registrar (no eliminar) registros clínicos de mascotas.
+  - Subir fotos.
+  - Editar su propio perfil ("Mi perfil") y sus hijos.
+- **⚠️ INCONSISTENCIA — Eliminar fotos no está restringido a admin.** `verFoto()` (línea 1672) renderiza el botón "🗑 Eliminar" para cualquier usuario logueado, sin chequear `isAdmin()`, a diferencia de tareas/eventos/personas donde el botón de borrado ni siquiera se renderiza para el rol `user`. Cualquier persona del equipo puede borrar cualquier foto (propia o de otra persona).
+- **⚠️ DUDA — No hay tercer nivel de "empleado ve solo lo suyo".** Un usuario `user` puede ver tareas y avance de *todas* las personas (los filtros de personas en Tareas no distinguen "mis tareas" por defecto), y puede completar tareas ajenas (con registro de quién la completó). No se detectó ninguna restricción que oculte datos de otras personas a un usuario no-admin, salvo los paneles admin-only de Desempeño y Configuración.
+- La autorización es enteramente client-side (una variable JS). Ver `docs/SECURITY.md` para el riesgo de esto — no se debe interpretar como control de acceso real a nivel de datos.
+
+## 2. Tareas y frecuencias
+
+- Cinco frecuencias válidas (`<select id="t-frec">`, línea 848): `diaria`, `semanal`, `mensual`, `urgente`, `unica` ("Una vez").
+- Cada tarea (`tareas`) tiene: descripción (`d`), persona asignada (`pid`), frecuencia (`frec`). **No tiene** campo de estado activo/inactivo pese a que otra parte del código lo asume (ver sección 6, ⚠️ INCONSISTENCIA).
+- Orden de visualización fijo por frecuencia: urgente → única → diaria → semanal → mensual (`frecOrden`, línea 1216).
+- Las tareas de frecuencia `unica` que ya están completadas se ocultan de la lista principal y solo quedan visibles en el historial semanal (línea 1219).
+
+## 3. Cálculo de períodos (recurrencia)
+
+Función `getPeriodo(frec)` (línea 1115) — determina a qué "instancia" de la tarea corresponde el estado de completado actual:
+
+- **Diaria** → el período es la fecha de hoy (`YYYY-MM-DD`). Se resetea todos los días.
+- **Semanal** → el período es la fecha del **lunes** de la semana actual (semana definida lunes a domingo). Se resetea cada lunes.
+- **Mensual** → el período es el primer día del mes actual (`YYYY-MM-01`). Se resetea el día 1 de cada mes.
+- **Urgente** → no tiene período variable; usa el string fijo `'urgente'`. Una vez completada, permanece completada indefinidamente (no hay lógica de reseteo visible) salvo que se destilde manualmente o se elimine la tarea.
+- **Única** → string fijo `'unica'`; comportamiento de completado permanente igual que urgente.
+
+Cada combinación tarea+período tiene a lo sumo una fila en `ejecuciones` (`getEj`, línea 1136).
+
+## 4. Cumplimiento de tareas ("completado por")
+
+- `togTarea(id)` (versión activa, línea 2007): si el usuario logueado es distinto de la persona asignada a la tarea Y la está marcando como hecha (no destildando), se abre un modal "¿Quién completa esta tarea?" (`mo-compby`) donde se elige quién la completó realmente y una nota opcional (línea 2011-2026).
+- Si el usuario asignado la completa él mismo, o si se está destildando, se guarda directo sin modal.
+- El campo `compPid` (completado por) y `nota` quedan en la fila de `ejecuciones`. En el listado de tareas e historial se muestra "✓ por <Nombre>" cuando `compPid` difiere del asignado original (líneas 1248-1252, 1301-1305).
+- **⚠️ DUDA** — Si `currentRole==='admin'` y no hay `currentUser` (login como Administrador, sin persona asociada), `compPid` se guarda como `null` (línea 1899: `currentUser ? currentUser.id : null`). No queda registrado *qué admin* completó la tarea, solo que "fue completada" — no hay identidad individual para el rol admin.
+
+## 5. Historial
+
+- Historial semanal (`rndHistorial()`, línea 1261) muestra únicamente tareas de frecuencia `diaria` y `semanal` (las mensuales/urgentes/únicas no aparecen ahí).
+- Cubre las **últimas 8 semanas** (`getSemanas()`, línea 1184), seleccionables por un `<select>`.
+- Calendario mensual en Configuración (`rndCal()`, línea 1676) marca visualmente los días que "tendrían" tareas según una heurística: diaria siempre, semanal en días hábiles (lunes a viernes), mensual el día 1 (línea 1685). **⚠️ DUDA** — esta heurística no refleja el cálculo real de `getPeriodo` (que ancla la semanal al lunes específico, no a "todo día hábil"); es solo un indicador visual aproximado, no una fuente de verdad de cumplimiento.
+
+## 6. Desempeño (⚠️ módulo con lógica rota, verificado en código)
+
+- Panel "Desempeño" dentro de Tareas, con períodos seleccionables de 7/14/30 días (`desempPeriodo`).
+- **Estrella de la semana**: persona activa con más tareas completadas en el período (`rndDesempeno()`, línea 3559-3602).
+- **Ranking**: todas las personas activas ordenadas por cantidad de tareas completadas en el período, con medallas 🥇🥈🥉 y racha de días consecutivos (🔥).
+- **Racha** (`calcRacha`, línea 3538): cuenta días consecutivos con al menos una tarea completada por esa persona, mirando hasta 30 días atrás.
+- **Cumplimiento por persona (%)** y **Tareas más incumplidas** (solo admin): comparan tareas completadas contra tareas "esperadas" en el período.
+- **⚠️ INCONSISTENCIA / BUG VERIFICADO**: tanto `calcRacha` (línea 3540: `tareas.filter(function(t){return t.pid===pid&&t.activa;})`) como `rndDesempeno` (línea 3565: `t.pid===p.id&&t.activa&&...` y línea 3644 para "tareas más incumplidas") filtran por `t.activa`. Pero **ningún objeto de `tareas` tiene jamás el campo `activa`** — ni el literal inicial (línea 934), ni el mapeo desde Supabase en `loadAll()` (línea 1793: `{id:r.id,d:r.descripcion,pid:r.persona_id,frec:r.frecuencia}`), ni `dbAddTarea`/`dbUpdateTarea`. Como resultado, `t.activa` es siempre `undefined` (falsy), por lo que:
+  - `calcRacha()` siempre devuelve `0` → la racha 🔥 nunca se muestra.
+  - `misTareas` en `rndDesempeno()` siempre es un array vacío → `esperadas` siempre es `0` → el porcentaje de cumplimiento por persona siempre da `0%`.
+  - La lista de "tareas más incumplidas" siempre está vacía (el filtro `t.activa` la vacía antes de llegar al filtro de incumplimiento).
+  - El **ranking** y la **estrella de la semana** sí funcionan, porque no dependen de `t.activa`.
+  - Esto debe tratarse como un defecto del prototipo a corregir en la reconstrucción, **no** como una regla de negocio real ("cumplimiento siempre 0%" no es una regla intencional).
+
+## 7. Stock — mínimo, estados y cálculo
+
+- Cada ítem de stock (`sCasa`/`sJardin`) tiene: nombre, stock actual, stock mínimo, unidad, categoría.
+- Estado (`sStatus`, línea 1014):
+  - `crit` (crítico) si `stock <= 0`.
+  - `low` (bajo) si `stock < min`.
+  - `ok` en cualquier otro caso (incluido `stock === min`, que cuenta como OK).
+- Porcentaje de barra visual (`sPct`, línea 1015): `min(100, round(stock / (min*2) * 100))`. Si `min` es `0`, se muestra `100%` sin importar el stock. **⚠️ DUDA** — un ítem con `min:0` nunca puede aparecer como bajo/crítico salvo `stock<=0` (crítico), independientemente de cuánto stock tenga; es una regla implícita del cálculo, no declarada en ningún lado como tal.
+- Las cantidades de stock admiten decimales (`parseFloat`, `step` en inputs) — no están limitadas a enteros, salvo huevos y gallinas que usan `parseInt`.
+
+## 8. Ingresos y consumos de stock
+
+- Modal único "Registrar movimiento" (`mo-consumo`) con dos modos, `tipoMov`: **consumo** (resta stock) o **ingreso** (suma stock) (`setTipoMov`, `guardarConsumo`, líneas 3002-3111).
+- El consumo no puede dejar el stock negativo (`Math.max(0, ...)`, línea 3085).
+- Todo movimiento pide: cantidad, fecha, persona (o "🔐 Administrador" si el select se deja en `0`), destino opcional (vehículo o sector) y motivo/observación opcional.
+- Toda edición de un ítem de stock que cambie la cantidad actual (`gItem()`, admin) genera automáticamente un registro en `consumos` con motivo `"Ajuste a la baja: -X <u>"` o `"Ajuste al alta: +X <u>"`, prefijado con `[Admin] ` si no hay persona logueada asociada (líneas 1500-1531). Esto asegura que **todo cambio de cantidad queda trazado** en el historial de consumos, incluso los hechos "a mano" desde el formulario de edición.
+- Existe un destino especial autogenerado **"Ajuste de inventario"** (tipo `sector`), creado la primera vez que hace falta (`ensureAjusteDestino()`, línea 1749, invocado en `initUI()`) para asociar esos ajustes automáticos.
+- Reportes de consumo (`rndReportes()`, línea 3263): agregan por destino, por persona y por ítem, en un rango de fechas configurable (chips de 7/30/90/365 días o fechas manuales), con exportación a CSV (`exportarCSV()`, línea 3402).
+
+## 9. Gallinero
+
+- Un único contador global de "gallinas activas" (`gallinasActivas`), ajustable ±1 por vez por un admin, con confirmación (`ajustarGallinas`, línea 2300). **⚠️ DUDA / RIESGO** — el ajuste solo persiste en Supabase si ya existe una fila en la tabla `gallinero` (`if (gallineroId) {...}`, línea 2306); si no existe ninguna fila todavía, el cambio se aplica solo en memoria y se pierde al recargar la página. No hay lógica de "crear la fila si no existe".
+- Recolección diaria: huevos buenos + huevos rotos, persona que recolectó, fecha, observación opcional (`addRecoleccion`, línea 2313).
+- **Postura del día** = `round(huevos_buenos_hoy / gallinas_activas * 100)` (línea 2184).
+- **Postura media del período** = `round(total_buenos_período / (gallinas_activas * días_con_datos) * 100)` (línea 2193) — nota: usa el conteo *actual* de gallinas activas para todo el período, no el histórico (si la cantidad de gallinas cambió durante el período, la postura media queda distorsionada). No hay tracking histórico de cuántas gallinas había en cada fecha.
+- Historial agrupado por fecha, con total de buenos/rotos y % de postura por día.
+- **⚠️ BUG VERIFICADO** — `rndGallHistorial()` (línea 2270) referencia `DIAS_ES[d.getDay()]`, una variable que **no está declarada en ningún lugar del archivo** (el archivo define `DIAS`, `DIAS2`, `DIAS3`, pero no `DIAS_ES`). Esto debería producir un `ReferenceError` en tiempo de ejecución cada vez que se intenta renderizar el historial del gallinero con al menos un registro. No se ejecutó el archivo en navegador para confirmar el efecto exacto (p. ej. si rompe solo esa función o interrumpe el render de toda la pantalla); se deja como hallazgo a verificar en la etapa de reconstrucción, no como comportamiento asumido.
+
+## 10. Producción de huevos
+
+Ver sección 9 — está integrada al módulo Gallinero, no es un módulo separado en el código.
+
+## 11. Mascotas
+
+- Cada mascota (`mascotas`): nombre, tipo (de un catálogo `tiposMascota`), raza opcional, fecha de nacimiento opcional, foto opcional (URL, no upload de archivo — a diferencia del módulo Fotos), activa.
+- El catálogo de tipos es extensible por el admin (`guardarTipoMascota`, `eliminarTipo`) contra la tabla `tipos_mascota`; los tipos "built-in" (`Perro, Gato, Caballo, Burro, Guinea, Pato, Pavo real, Gallina, Faisán`) no se pueden eliminar desde la UI de gestión de tipos (línea 2638, comparación contra array `builtin` hardcodeado ahí mismo — **duplica** la lista inicial de `tiposMascota` en dos lugares del código).
+- Edad (`calcEdad`, línea 2391) y próximo cumpleaños (`calcProxCumple`, línea 2403) se calculan a partir de `fechaNac`.
+- Alta automática de evento "Cumpleaños" al cargar/editar una mascota con fecha de nacimiento (`autoAddCumpleMascota`, línea 2620).
+
+## 12. Registros clínicos
+
+- Tipos: `vacuna`, `peso`, `desparasitacion`, `chequeo` (chequeo sanitario), `evento` (evento clínico genérico).
+- Solo el tipo `peso` pide un valor numérico (kg); el resto solo descripción libre.
+- KPIs por mascota: cantidad de vacunas, último peso registrado, cantidad de desparasitaciones, días al próximo cumpleaños.
+- Alta disponible para cualquier usuario logueado; **eliminación restringida a admin** (`delRegistro`, botón condicionado a `isAdmin()` en línea 2547).
+
+## 13. Eventos
+
+- Tipos: `visita`, `cumple` (cumpleaños), `mant` (mantenimiento), `otro`.
+- CRUD completo, restringido a admin salvo la creación automática de cumpleaños (ver siguiente sección).
+- Filtro por tipo; se separan visualmente "Próximos" y "Pasados" según la fecha respecto a hoy.
+
+## 14. Cumpleaños
+
+Tres orígenes distintos de eventos tipo `cumple`, todos automáticos:
+
+1. **Familia** — hardcodeados en `addFamilyBirthdays()` (línea 1759): Benjamín (16/09), Vicky (10/03), Felicitas (01/06). Se recalcula la próxima fecha cada vez que se corre la función y se evita duplicar por título+tipo.
+2. **Empleados** — al guardar "Mi perfil" con fecha de nacimiento, o al cargarla por primera vez (`autoAddCumpleEmpleado`, línea 2973).
+3. **Hijos de empleados** — al agregar un hijo con fecha de nacimiento (`guardarHijo` → `autoAddCumpleEmpleado`, línea 2918-2923, reutiliza la misma función que empleados).
+4. **Mascotas** — al cargar fecha de nacimiento de una mascota (`autoAddCumpleMascota`, línea 2613/2620).
+
+**⚠️ INCONSISTENCIA VERIFICADA — dato de cumpleaños duplicado y contradictorio para "Benjamín".** El array literal inicial `eventos` (línea 995-999) incluye `{titulo:'Cumpleaños de Benjamín', fecha:'2026-02-19', tipo:'cumple', nota:''}`. Pero `addFamilyBirthdays()` calcula la fecha de Benjamín como **16 de septiembre** (mes 9, día 16), con título `'🎂 Cumpleaños de Benjamín'` (con emoji) y nota `'familia'`. Son dos fechas de nacimiento distintas para la misma persona, en dos lugares distintos del código, con formato de título distinto (con/sin emoji) que además evita que se reconozcan como duplicados entre sí (la deduplicación compara por título exacto). **Se requiere una decisión humana**: ¿cuál es la fecha real de cumpleaños de Benjamín — 19/02 o 16/09? Ver también `docs/DATA_INVENTORY.md`.
+
+## 15. Empleados (ficha de datos)
+
+- Datos por persona (tabla futura `empleados_datos`): nombre completo, fecha de nacimiento, estado civil, teléfono, CUIL, obra social, contacto de emergencia (nombre + teléfono).
+- Autogestionable por el propio empleado desde "Mi perfil"; visible en modo lectura para el admin desde "Datos del equipo", con filtro completos/incompletos (se considera "completo" si tiene al menos fecha de nacimiento, teléfono o CUIL cargado — `tiene = d && (d.fechaNac||d.tel||d.cuil)`, línea 2820).
+- **⚠️ DUDA** — No hay ninguna restricción que impida a un empleado editar los datos de *otro* empleado a nivel de código (la función `guardarMiPerfil()` siempre usa `currentUser.id`, así que en la práctica un `user` solo puede guardar los suyos vía la UI normal — pero esto depende enteramente de que el cliente no sea manipulado; no hay verificación en el backend porque no hay backend).
+
+## 16. Hijos
+
+- Registrados por empleado: nombre y fecha de nacimiento opcional (`hijosData`).
+- Alta/baja gestionadas por el propio empleado desde "Mi perfil"; sin edición (solo alta y eliminación, no hay función de editar un hijo existente).
+- Alta automática de evento de cumpleaños si se carga fecha de nacimiento (ver sección 14).
+
+## 17. Novedades
+
+- Registro simple: persona que reporta + texto libre + fecha/hora automática (`new Date()` al guardar).
+- **No existen funciones de edición ni eliminación de novedades** (se buscó explícitamente `delNov`/`editNov` en todo el archivo y no existen). Una vez creada, una novedad es permanente desde la UI — solo se podría borrar manipulando la base de datos directamente.
+- Se muestran ordenadas de más reciente a más antigua, con "hace X tiempo" (`ago()`, línea 1017).
+
+## 18. Fotografías
+
+- Alta vía `<input type="file">` con `FileReader` → se codifica como `data:` URL (base64) y se guarda tal cual en el campo `src` de la tabla `fotos` (no hay compresión, resize, ni límite de tamaño validado en el cliente).
+- Tipo: `tarea` (evidencia de una tarea) o `recuerdo`; persona opcional asociada.
+- Filtro por tipo; grilla 3 columnas mobile / 5 columnas escritorio.
+- Eliminación disponible para **cualquier usuario logueado**, no solo admin (ver sección 1, inconsistencia ya señalada).
+- Esta es el área explícitamente señalada por el usuario del proyecto como destino de una futura integración con Google Drive vía backend (no implementada en el prototipo).
+
+## 19. Desempeño (ver sección 6)
+
+Repetido aquí por completitud del pedido original — el detalle completo y el bug verificado están en la sección 6.
+
+## 20. Otras reglas encontradas
+
+- **Clima → recomendaciones de jardín** (`rndClima()`, línea 1650-1665): reglas fijas sobre datos de Open-Meteo — no regar si llovió/lloverá suficiente, no fumigar si hay lluvia prevista al día siguiente o viento >25 km/h, regar temprano si la máxima supera 32°, proteger plantas si la máxima es menor a 10°.
+- **Lista de compras** (`rndCompras()`, dentro de Stock → Compras): todo ítem con estado distinto de `ok` (bajo o crítico) de ambas áreas, agrupable por categoría o por estado, compartible vía `navigator.share` o portapapeles (`compartir()`, línea 1593).
+- **Categorías de stock**: catálogo editable por admin (`categorias_stock`, con área `casa`/`jardin`/`ambas`); si la tabla está vacía, se usa como *fallback* un catálogo fijo en el código (`CATS_CASA`, `CATS_JARDIN` — ver `docs/DATA_INVENTORY.md`).
+- **Destinos de consumo**: catálogo editable por admin, tipo `vehiculo` o `sector`; eliminar un destino ofrece elegir entre inactivar (conserva historial) o borrar en forma definitiva (con doble confirmación, línea 3198-3223).
+- **Exportación CSV** de consumos filtrados por rango de fechas (`exportarCSV`, línea 3402) — columnas: Fecha, Ítem, Cantidad, Unidad, Persona, Destino, Motivo.
+- **Sesión**: `sessionStorage` recuerda rol + persona entre recargas de la misma pestaña/sesión de navegador, pero se pierde al cerrar el navegador (no es "recordarme" persistente entre dispositivos ni entre reinicios del navegador). `logout()` la limpia explícitamente.
