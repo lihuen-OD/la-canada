@@ -4,7 +4,10 @@ import { BootstrappingScreen } from '../components/BootstrappingScreen';
 import { SessionRestoreErrorScreen } from '../components/SessionRestoreErrorScreen';
 import { LoginScreen } from '../features/auth/LoginScreen';
 import { AuthenticatedHome } from '../features/home/AuthenticatedHome';
+import { AccessDeniedScreen } from '../features/admin/AccessDeniedScreen';
+import { AdminUsersScreen } from '../features/admin/AdminUsersScreen';
 import { ProtectedRoute } from './ProtectedRoute';
+import { RequireRole } from './RequireRole';
 
 /**
  * `bootstrapping`/`sessionError` se resuelven ACÁ, antes de cualquier
@@ -29,6 +32,14 @@ export function AppRoutes() {
       />
       <Route path="/" element={<ProtectedRoute />}>
         <Route index element={<AuthenticatedHome />} />
+        <Route
+          path="admin/users"
+          element={
+            <RequireRole role="ADMIN" fallback={<AccessDeniedScreen />}>
+              <AdminUsersScreen />
+            </RequireRole>
+          }
+        />
       </Route>
       <Route
         path="*"

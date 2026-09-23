@@ -6,6 +6,9 @@
 
 export type SystemRole = 'ADMIN' | 'EMPLOYEE';
 
+/** Enum real de `backend/prisma/schema.prisma` (`UserStatus`) — usado tanto por `/auth/me` como por `/admin/users`. */
+export type UserStatus = 'PENDING_ACTIVATION' | 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
+
 /** Identidad mínima para el selector público de login (`GET /auth/login-options`). */
 export interface LoginOption {
   id: string;
@@ -19,11 +22,17 @@ export interface LoginOptionsResponse {
   options: LoginOption[];
 }
 
-/** `PublicUser` del backend — nunca incluye `username`, `pinHash` ni datos de sesión. */
+/**
+ * `PublicUser` del backend — nunca incluye `username`, `pinHash` ni datos de
+ * sesión. Deliberadamente un tipo DISTINTO de `AdminUserListItem`
+ * (`api/adminTypes.ts`): son dos contratos reales distintos
+ * (`authService.PublicUser` vs. el `select` de `adminUsersController.listUsers`),
+ * no la misma forma reusada — ver ese archivo para el detalle exacto.
+ */
 export interface AuthenticatedUser {
   id: string;
   role: SystemRole;
-  status: string;
+  status: UserStatus;
   employee: { id: string; displayName: string; colorHex: string } | null;
 }
 

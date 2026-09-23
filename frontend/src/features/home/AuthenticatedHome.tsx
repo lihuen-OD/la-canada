@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../auth/useAuth';
 
 const ADMIN_FALLBACK_DISPLAY_NAME = 'Administrador';
@@ -30,6 +31,11 @@ export function AuthenticatedHome() {
       <p className="authenticated-home__status" role="status">
         Sesión iniciada
       </p>
+      {user.role === 'ADMIN' ? (
+        <Link to="/admin/users" className="authenticated-home__admin-link">
+          Administrar usuarios
+        </Link>
+      ) : null}
       <button type="button" className="button button--secondary" onClick={() => void logout()}>
         Cerrar sesión
       </button>

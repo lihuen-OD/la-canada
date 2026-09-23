@@ -1,3 +1,4 @@
+import { MemoryRouter } from 'react-router-dom';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -6,6 +7,14 @@ const { useAuthMock } = vi.hoisted(() => ({ useAuthMock: vi.fn() }));
 vi.mock('../../auth/useAuth', () => ({ useAuth: useAuthMock }));
 
 import { AuthenticatedHome } from './AuthenticatedHome';
+
+function renderHome() {
+  return render(
+    <MemoryRouter>
+      <AuthenticatedHome />
+    </MemoryRouter>,
+  );
+}
 
 describe('AuthenticatedHome', () => {
   it('muestra el nombre real del empleado y su rol', () => {
@@ -20,7 +29,7 @@ describe('AuthenticatedHome', () => {
       logout,
     });
 
-    render(<AuthenticatedHome />);
+    renderHome();
 
     expect(screen.getByText('Coke')).toBeInTheDocument();
     expect(screen.getByText(/rol: equipo/i)).toBeInTheDocument();
@@ -33,7 +42,7 @@ describe('AuthenticatedHome', () => {
       logout: vi.fn(),
     });
 
-    render(<AuthenticatedHome />);
+    renderHome();
 
     expect(screen.getByText('Administrador')).toBeInTheDocument();
   });
@@ -45,7 +54,7 @@ describe('AuthenticatedHome', () => {
       logout,
     });
 
-    render(<AuthenticatedHome />);
+    renderHome();
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /cerrar sesión/i }));
 
@@ -58,8 +67,30 @@ describe('AuthenticatedHome', () => {
       logout: vi.fn(),
     });
 
-    render(<AuthenticatedHome />);
+    renderHome();
     const content = screen.getByRole('main').textContent ?? '';
     expect(content).not.toMatch(/tarea|stock|gallina|mascota/i);
+  });
+
+  it('un ADMIN ve el enlace de administración de usuarios', () => {
+    useAuthMock.mockReturnValue({
+      user: { id: 'admin-1', role: 'ADMIN', status: 'ACTIVE', employee: null },
+      logout: vi.fn(),
+    });
+
+    renderHome();
+
+    expect(screen.getByRole('link', { name: /administrar usuarios/i })).toBeInTheDocument();
+  });
+
+  it('un EMPLOYEE nunca ve el enlace de administración de usuarios', () => {
+    useAuthMock.mockReturnValue({
+      user: { id: 'user-1', role: 'EMPLOYEE', status: 'ACTIVE', employee: null },
+      logout: vi.fn(),
+    });
+
+    renderHome();
+
+    expect(screen.queryByRole('link', { name: /administrar usuarios/i })).not.toBeInTheDocument();
   });
 });

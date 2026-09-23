@@ -330,10 +330,260 @@ button {
   font-weight: 600;
 }
 
+.authenticated-home__admin-link {
+  color: var(--color-primary-dark);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.button--tertiary {
+  background: transparent;
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.button--tertiary:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  color: var(--color-primary-dark);
+}
+
+/* ── Administración de usuarios (Etapa 3D) ───────────────────────────── */
+
+.admin-users {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.admin-users__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.admin-users__back {
+  align-self: flex-start;
+  color: var(--color-primary-dark);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.admin-users__title {
+  margin: 0;
+  color: var(--color-primary-dark);
+}
+
+.admin-users__feedback [role='status'] {
+  color: var(--color-primary-dark);
+}
+
+.admin-users__feedback [role='alert'] {
+  color: var(--color-danger);
+}
+
+.admin-users__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.admin-user-row {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.admin-user-row__identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.admin-user-row__name {
+  margin: 0;
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.admin-user-row__username,
+.admin-user-row__hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.admin-user-row__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.badge--role-admin {
+  color: var(--color-primary-dark);
+  background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+}
+
+.badge--role-employee {
+  color: var(--color-text-muted);
+  background: var(--color-border);
+}
+
+.badge--status-pending {
+  color: #8a5a00;
+  background: #fdf1d9;
+}
+
+.badge--status-active {
+  color: var(--color-primary-dark);
+  background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+}
+
+.badge--status-suspended,
+.badge--status-deactivated {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
+.admin-user-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.admin-user-row__actions .button {
+  padding: 0.5rem 0.9rem;
+  font-size: 0.9rem;
+}
+
+/* ── Diálogo genérico (Modal.tsx) ─────────────────────────────────────── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(31, 36, 32, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  z-index: 100;
+}
+
+.modal-panel {
+  width: 100%;
+  max-width: 26rem;
+  max-height: calc(100vh - 2.5rem);
+  overflow-y: auto;
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  padding: 1.5rem;
+}
+
+.pin-dialog,
+.confirm-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.pin-dialog__title,
+.confirm-dialog__title {
+  margin: 0;
+  color: var(--color-primary-dark);
+}
+
+.pin-dialog__warning {
+  margin: 0;
+  padding: 0.75rem;
+  border-radius: var(--radius-md);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  font-size: 0.9rem;
+}
+
+.pin-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.pin-dialog__field input {
+  min-height: var(--tap-target-min);
+  font-size: 1.5rem;
+  letter-spacing: 0.5rem;
+  text-align: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 0.5rem;
+}
+
+.pin-dialog__status,
+.confirm-dialog__status {
+  min-height: 1.5rem;
+  font-size: 0.9rem;
+}
+
+.pin-dialog__status [role='alert'],
+.confirm-dialog__status [role='alert'] {
+  color: var(--color-danger);
+}
+
+.confirm-dialog__description {
+  margin: 0;
+  color: var(--color-text);
+}
+
+.pin-dialog__actions,
+.confirm-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
 /* ── Responsive: escritorio ───────────────────────────────────────────── */
 
 @media (min-width: 768px) {
   .identity-selector__grid {
     grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+  }
+
+  .admin-user-row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .admin-user-row__identity {
+    flex: 1 1 40%;
+  }
+
+  .admin-user-row__badges {
+    flex: 0 0 auto;
+  }
+
+  .admin-user-row__actions {
+    flex: 0 0 auto;
+    justify-content: flex-end;
   }
 }

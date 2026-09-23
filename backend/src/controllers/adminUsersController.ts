@@ -175,6 +175,24 @@ export async function changeStatus(req: Request, res: Response): Promise<void> {
       );
     }
 
+    // Invariante real de la base (CHECK `users_active_requires_pin_hash_check`,
+    // ver docs/DATABASE.md): ACTIVE exige pinHash no nulo. La matriz de
+    // transiciones permite SUSPENDED/DEACTIVATED → ACTIVE por diseño (para
+    // reactivar a alguien que YA tenía PIN antes de suspenderse/
+    // deshabilitarse), pero un usuario que llegó a DEACTIVATED directo
+    // desde PENDING_ACTIVATION (sin pasar nunca por /activate) todavía no
+    // tiene pinHash — sin este chequeo, ese intento de reactivación
+    // rompería el CHECK de Postgres y devolvería un 500 crudo en vez de un
+    // rechazo controlado. No hay ninguna transición de vuelta a
+    // PENDING_ACTIVATION una vez pasado ese estado, así que la única forma
+    // de darle un PIN a esa persona es activarla desde PENDING_ACTIVATION
+    // en su momento original — este mensaje lo deja explícito.
+    if (nextStatus === 'ACTIVE' && !user.pinHash) {
+      throw new InvalidStatusTransitionError(
+        'No se puede reactivar: este usuario nunca llegó a tener un PIN asignado (nunca pasó por la activación inicial).',
+      );
+    }
+
     const isSelf = actorUserId === targetId;
     const wouldLockOut = isSelf && user.role === 'ADMIN' && statusChangeRevokesSessions(nextStatus);
     if (wouldLockOut) {

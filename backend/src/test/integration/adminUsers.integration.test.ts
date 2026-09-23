@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Request, Response } from 'express';
 import { prisma } from '../../lib/prisma';
 import { hashPin } from '../../auth/pin';
-import { login } from '../../auth/authService';
+import { getLoginOptions, login } from '../../auth/authService';
 import {
   activateUser,
   changeStatus,
@@ -29,6 +29,7 @@ const RESET_PIN_VALUE = '6187';
 
 let actorUserId: string;
 let targetUserId: string;
+let neverActivatedUserId: string;
 let baselineUserCount: number;
 let baselineSessionCount: number;
 let baselineAuditLogCount: number;
@@ -89,16 +90,33 @@ beforeAll(async () => {
     select: { id: true },
   });
   targetUserId = target.id;
+
+  // Usuario sintético que llega a DEACTIVATED sin pasar nunca por
+  // /activate — reproduce exactamente el hueco real que exponía
+  // `changeStatus` antes de agregar el guard de `pinHash` (ver
+  // `adminUsersController.ts`, comentario junto al chequeo `nextStatus ===
+  // 'ACTIVE' && !user.pinHash`).
+  const neverActivated = await prisma.user.create({
+    data: {
+      username: `test-admin-never-activated-${RUN_ID}`,
+      role: 'EMPLOYEE',
+      status: 'DEACTIVATED',
+      pinHash: null,
+    },
+    select: { id: true },
+  });
+  neverActivatedUserId = neverActivated.id;
 });
 
 afterAll(async () => {
+  const allTestUserIds = [actorUserId, targetUserId, neverActivatedUserId];
   await prisma.auditLog.deleteMany({
     where: {
-      OR: [{ actorUserId: actorUserId }, { entityId: targetUserId }, { actorUserId: targetUserId }],
+      OR: [{ actorUserId: { in: allTestUserIds } }, { entityId: { in: allTestUserIds } }],
     },
   });
-  await prisma.session.deleteMany({ where: { userId: { in: [actorUserId, targetUserId] } } });
-  await prisma.user.deleteMany({ where: { id: { in: [actorUserId, targetUserId] } } });
+  await prisma.session.deleteMany({ where: { userId: { in: allTestUserIds } } });
+  await prisma.user.deleteMany({ where: { id: { in: allTestUserIds } } });
 
   expect(await prisma.user.count()).toBe(baselineUserCount);
   expect(await prisma.session.count()).toBe(baselineSessionCount);
@@ -287,5 +305,56 @@ describe('adminUsersController — flujo real contra demo', () => {
     const testTargetRow = payload.users.find((u) => u.id === targetUserId);
     expect(testTargetRow).toBeDefined();
     expect(testTargetRow).not.toHaveProperty('pinHash');
+  });
+
+  it('un usuario SUSPENDED no puede iniciar sesión (aunque conserve su pinHash)', async () => {
+    const target = await prisma.user.findUniqueOrThrow({ where: { id: targetUserId } });
+    expect(target.status).toBe('SUSPENDED');
+    expect(target.pinHash).not.toBeNull();
+
+    await expect(
+      login(prisma, {
+        userId: targetUserId,
+        pin: RESET_PIN_VALUE,
+        ipAddress: '127.0.0.1',
+        userAgent: 'vitest-integration',
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('un usuario SUSPENDED desaparece de /auth/login-options', async () => {
+    const options = await getLoginOptions(prisma);
+    expect(options.find((option) => option.id === targetUserId)).toBeUndefined();
+  });
+
+  it('changeStatus: reactivar (DEACTIVATED -> ACTIVE) a alguien que nunca tuvo PIN se rechaza limpiamente, no revienta el CHECK de la base', async () => {
+    const { res } = fakeRes();
+    const req = fakeReq({
+      actingAsUserId: actorUserId,
+      targetId: neverActivatedUserId,
+      body: { status: 'ACTIVE' },
+    });
+
+    await expect(changeStatus(req, res)).rejects.toThrow();
+
+    const stillDeactivated = await prisma.user.findUniqueOrThrow({
+      where: { id: neverActivatedUserId },
+    });
+    expect(stillDeactivated.status).toBe('DEACTIVATED');
+    expect(stillDeactivated.pinHash).toBeNull();
+  });
+
+  it('changeStatus: DEACTIVATED -> SUSPENDED (transición permitida, sin relación con el pinHash) sí se acepta', async () => {
+    const { res } = fakeRes();
+    const req = fakeReq({
+      actingAsUserId: actorUserId,
+      targetId: neverActivatedUserId,
+      body: { status: 'SUSPENDED' },
+    });
+
+    await changeStatus(req, res);
+
+    const target = await prisma.user.findUniqueOrThrow({ where: { id: neverActivatedUserId } });
+    expect(target.status).toBe('SUSPENDED');
   });
 });
