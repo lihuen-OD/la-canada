@@ -64,6 +64,17 @@
 - **Scripts agregados** (`backend/package.json`): `db:check` (comprobación de conexión de solo lectura), `db:migrate:dev`, `db:migrate:deploy`, `db:migrate:status`, `db:seed`, `test:integration` (tests contra Neon real, separados de `npm test` — ver `vitest.config.mts`/`vitest.integration.config.mts`).
 - **No incluyó**: ninguna conexión a `production`, ninguna autenticación, ningún endpoint de negocio, ningún cambio funcional en `frontend/`, ningún uso de Object Storage, ningún despliegue, ningún `db push`, ningún reset/truncate de base.
 
+### Revisión correctiva de la Etapa 3A (antes del merge del PR #1)
+
+Tres problemas detectados en la revisión del PR — corregidos sin tocar el modelo Prisma, la migración ya aplicada ni los datos de `demo`; sin volver a ejecutar el seed ni las pruebas de constraints (no era necesario, se confirmaron los mismos conteos por consulta agregada):
+
+- **Sin barrera ejecutable contra `production`**: `db:migrate:dev`, `db:migrate:deploy`, `db:seed` y `test:integration` podían, en teoría, correr contra cualquier URL cargada en `.env` — la protección era solo documental. Se agregó `DATABASE_TARGET` (`demo`/`production`, backend-only) y `backend/src/scripts/guardDbCommand.ts`, que falla antes de invocar Prisma si el destino no es `demo`, si falta la variable requerida, o si su forma no coincide con pooled/direct según corresponda. Wireado en los 4 comandos listados; `db:check`/`db:migrate:status` quedan sin este gate (solo lectura).
+- **Contradicción de `DATABASE_URL`**: `config/env.ts` la declaraba opcional mientras `lib/prisma.ts` (importado por `server.ts`) fallaba igual si faltaba. Resuelto a favor de una única fuente de verdad: `DATABASE_URL` ahora es obligatoria en el schema de Zod, con mensaje claro y sin revelar su valor. `DIRECT_URL` sigue opcional (el servidor nunca la necesita). Los tests unitarios usan un valor sintético inyectado por `vitest.config.mts`.
+- **Build offline roto**: `prisma.config.ts` resolvía `DIRECT_URL` de forma eager, así que `prisma format`/`validate`/`generate` fallaban sin `.env` aunque no tocan ninguna base. Se corrigió armando `datasource` de forma condicional — se omite por completo si `DIRECT_URL` falta, sin URL de reemplazo hardcodeada. Verificado moviendo el `.env` real a un backup temporal fuera del repo (restaurado después, sin tocar su contenido): instalación, `prisma generate`, `validate`, build, typecheck, lint, tests unitarios y `format:check` funcionan igual sin él.
+- **Tests agregados**: `backend/src/test/guard-db-command.test.ts` (la guarda como función pura), `backend/src/test/offline-commands.test.ts` (spawns reales de `prisma format`/`validate`/`generate` sin secretos), `backend/src/test/env.test.ts` actualizado (DATABASE_URL obligatoria, DATABASE_TARGET validado).
+- **Revalidación**: suite normal sin variables de Neon ✅; conexión y `migrate status` contra `demo` con el `.env` local (sin aplicar nada) ✅; conteos agregados siguen en 75 ✅; build/typecheck/lint/tests/format/Prisma format-validate-generate ✅; escaneo de secretos sin coincidencias ✅.
+- **No incluyó**: ninguna conexión a `production`, ninguna migración nueva, ningún `db push`, ninguna re-ejecución del seed, ninguna autenticación, ningún uso de Object Storage, ningún merge a `main`.
+
 ## Etapa 3 — Implementar autenticación
 
 - **Objetivo**: reemplazar el PIN comparado en el cliente por autenticación real del lado del backend, sobre el modelo `User`/`Session` ya definido en la Etapa 2.

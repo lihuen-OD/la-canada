@@ -1,11 +1,10 @@
 import { z } from 'zod';
 
 /**
- * Variables previstas para etapas futuras (Neon, JWT, Object Storage) se
- * dejan opcionales a propósito: no deben bloquear el arranque del backend
- * en esta etapa, en la que todavía no se usan. Cuando se implemente el
- * módulo de archivos, esta validación deberá poder volver obligatorias las
- * variables de `OBJECT_STORAGE_*` (hoy opcionales).
+ * Variables previstas para etapas futuras (JWT, Object Storage) se dejan
+ * opcionales a propósito: no deben bloquear el arranque del backend en esta
+ * etapa, en la que todavía no se usan. `DATABASE_URL` es la única excepción
+ * deliberada a esa regla — ver el comentario junto al campo.
  */
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -14,15 +13,28 @@ const envSchema = z.object({
     .string({ message: 'FRONTEND_URL es obligatoria (la usa CORS para aceptar un único origen).' })
     .url({ message: 'FRONTEND_URL debe ser una URL válida, ej: http://localhost:5173' }),
 
-  // DATABASE_URL (pooled) — runtime de la app y del seed. DIRECT_URL
-  // (directa) — exclusiva de Prisma Migrate (ver backend/prisma.config.ts).
-  // Ambas opcionales acá: el servidor Express no falla al arrancar sin
-  // ellas todavía (ningún endpoint usa Prisma en esta etapa); el cliente
-  // Prisma (`backend/src/lib/prisma.ts`) valida DATABASE_URL por su cuenta,
-  // con un error claro y sin revelar su contenido, recién cuando se
-  // instancia.
-  DATABASE_URL: z.string().optional(),
+  // DATABASE_URL (pooled) — OBLIGATORIA: el backend real (server.ts, vía
+  // lib/prisma.ts) siempre necesita un cliente Prisma, así que falla acá
+  // mismo, temprano y con un mensaje claro, en vez de fallar más tarde y de
+  // forma menos obvia dentro de lib/prisma.ts. Nunca se revela su valor en
+  // el mensaje de error. Los tests unitarios usan un valor sintético
+  // inyectado por `vitest.config.mts` (nunca se conectan de verdad — nada
+  // en la suite normal ejecuta una query).
+  DATABASE_URL: z.string({
+    message:
+      'DATABASE_URL es obligatoria para iniciar el backend (ver .env.example) — nunca se expone su valor en los mensajes de error.',
+  }),
+  // DIRECT_URL (directa) — exclusiva de Prisma Migrate
+  // (backend/prisma.config.ts). El servidor nunca la necesita para arrancar
+  // ni para servir requests: queda opcional acá a propósito.
   DIRECT_URL: z.string().optional(),
+  // Gate explícito (demo | production) que exigen los scripts locales con
+  // capacidad de escritura (seed, migraciones, tests de integración) antes
+  // de tocar la base — ver backend/src/scripts/guardDbCommand.ts. El
+  // servidor Express no lo necesita para arrancar: queda opcional acá:
+  // el enforcement real vive en el guard de cada script, no en el arranque
+  // general de la app.
+  DATABASE_TARGET: z.enum(['demo', 'production']).optional(),
   JWT_ACCESS_SECRET: z.string().optional(),
   JWT_REFRESH_SECRET: z.string().optional(),
   ACCESS_TOKEN_TTL: z.string().optional(),

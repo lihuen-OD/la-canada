@@ -73,8 +73,9 @@ Variables usadas en esta etapa:
 | `PORT` | Backend | No (default `4000`) |
 | `FRONTEND_URL` | Backend (CORS) | **Sí** — sin ella el backend no arranca |
 | `VITE_API_URL` | Frontend | Sí, para que el cliente HTTP sepa a qué backend llamar |
-| `DATABASE_URL` | Backend (runtime, pooled) y seed | Sí, para conectar a Neon — solo la rama `demo` en desarrollo local |
-| `DIRECT_URL` | Prisma Migrate exclusivamente (directa, sin pooler) | Sí, solo para correr migraciones — nunca la usa el runtime de la app |
+| `DATABASE_URL` | Backend (runtime, pooled) y seed | **Sí, sin excepción** — el backend no arranca sin ella (falla temprano y con mensaje claro, ver `backend/src/config/env.ts`) |
+| `DIRECT_URL` | Prisma Migrate exclusivamente (directa, sin pooler) | Solo para correr migraciones — el servidor nunca la necesita para arrancar |
+| `DATABASE_TARGET` | Gate de seguridad de `db:migrate:*`/`db:seed`/`test:integration` (`demo`\|`production`) | Sí, para esos comandos — deben rechazar su ejecución si no es exactamente `demo` |
 
 Ninguna de las dos apunta nunca a `production`: esas credenciales, cuando existan, se configuran directamente en Render, nunca en un `.env` de este repositorio (ver `docs/ARCHITECTURE.md`, sección 13).
 
@@ -133,13 +134,13 @@ Responde `200` con:
 }
 ```
 
-No incluye estado de Neon todavía porque ningún endpoint de negocio usa la base en esta etapa (el módulo de conexión existe, pero nada lo llama desde un endpoint HTTP todavía).
+No incluye estado de Neon todavía porque ningún endpoint de negocio usa la base en esta etapa (el módulo de conexión existe, y el servidor ya requiere `DATABASE_URL` para arrancar, pero nada lo llama desde un endpoint HTTP todavía).
 
 ## Base de datos (Prisma + Neon)
 
 El modelo de datos (`backend/prisma/schema.prisma`, 22 modelos, 11 enums — ver `docs/DATABASE.md`) ya está migrado contra Neon, rama `demo` exclusivamente (Etapa 3A). `production` no se toca en esta etapa.
 
-Comandos estáticos (sin conexión):
+Comandos estáticos — **funcionan sin `DATABASE_URL`/`DIRECT_URL`/`DATABASE_TARGET`, incluso sin ningún `.env`** (verificado explícitamente, ver `docs/ARCHITECTURE.md` sección 13.7):
 
 ```bash
 cd backend
@@ -157,6 +158,8 @@ npm run db:migrate:deploy  # aplica migraciones ya creadas, sin prompts — usad
 npm run db:migrate:status  # estado de migraciones aplicadas / detecta drift
 npm run db:seed            # corre backend/prisma/seed.ts (registrado en prisma.config.ts)
 ```
+
+`db:migrate:dev`, `db:migrate:deploy`, `db:seed` y `test:integration` exigen además `DATABASE_TARGET=demo` — una guarda (`backend/src/scripts/guardDbCommand.ts`) rechaza la ejecución, antes de invocar Prisma, si el valor no es exactamente `"demo"`, si falta la variable de conexión requerida, o si su forma no coincide con lo esperado (pooled/direct). `db:check`/`db:migrate:status` quedan sin este gate por ser de solo lectura.
 
 `prisma generate` corre automáticamente después de `npm install` (script `postinstall` de `backend/package.json`) — la carpeta generada está en `.gitignore`, no se commitea.
 
@@ -178,3 +181,4 @@ Prisma 7 movió la configuración de conexión fuera de `schema.prisma` a `backe
 - Helmet, compresión, rate limiting general (`/api`) y manejo centralizado de errores (sin stack trace en producción, ni siquiera en desarrollo para errores esperados como CORS/404) ya están activos, aunque todavía no hay endpoints de negocio que proteger.
 - El seed (`backend/prisma/seed.ts`) nunca crea un administrador, nunca inventa PIN/contraseña/hash, y nunca usa `deleteMany` ni resetea datos — verificado con tests dedicados (`backend/src/test/seed-source-guards.test.ts`), no solo por inspección manual.
 - `DATABASE_URL`/`DIRECT_URL` (Neon, rama `demo`) viven solo en el `.env` local, gitignored — nunca se commitean, nunca se imprimen en consola ni en documentación. `production` usa credenciales propias, configuradas directamente en Render, nunca en este repositorio ni en Netlify (ver `docs/ARCHITECTURE.md`, sección 13).
+- `DATABASE_TARGET` es una barrera de código, no solo documentación: los scripts locales con capacidad de escritura fallan antes de tocar la base si no vale exactamente `"demo"` (ver `docs/ARCHITECTURE.md`, sección 13.7).
