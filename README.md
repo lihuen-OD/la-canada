@@ -76,7 +76,7 @@ Variables usadas en esta etapa:
 | `DATABASE_URL` | Backend (runtime, pooled) y seed | **Sí, sin excepción** — el backend no arranca sin ella (falla temprano y con mensaje claro, ver `backend/src/config/env.ts`) |
 | `DIRECT_URL` | Prisma Migrate exclusivamente (directa, sin pooler) | Solo para correr migraciones — el servidor nunca la necesita para arrancar |
 | `DATABASE_TARGET` | Gate de seguridad de `db:migrate:*`/`db:seed`/`test:integration` (`demo`\|`production`) | Sí, para esos comandos — deben rechazar su ejecución si no es exactamente `demo` |
-| `JWT_ACCESS_SECRET` | Backend (firma/verifica el access token, `jose`/HS256) | **Sí, para que la autenticación funcione** — mínimo 32 caracteres. Generar con `openssl rand -base64 48` y pegarlo solo en el `.env` local (nunca en `.env.example` ni en el código). El servidor arranca igual sin ella (el health check no depende de auth), pero cualquier ruta bajo `/api/v1/auth`/`/api/v1/admin` falla si falta. |
+| `JWT_ACCESS_SECRET` | Backend (firma/verifica el access token, `jose`/HS256) | **Sí, sin excepción** — mínimo 32 caracteres. Generar con `openssl rand -base64 48` y pegarlo solo en el `.env` local (nunca en `.env.example` ni en el código). El backend **no arranca sin ella** (falla temprano y con mensaje claro, misma fuente de verdad que `DATABASE_URL`, ver `backend/src/config/env.ts`) — no es una variable "solo para auth". |
 | `ACCESS_TOKEN_TTL` / `REFRESH_TOKEN_TTL` | Backend (segundos) | No — default 720 (12 min) y 2592000 (30 días) si se dejan vacías |
 | `COOKIE_SAME_SITE` | Backend (`lax`\|`strict`\|`none`, cookie del refresh token) | No — default `none` en producción (Netlify/Render son dominios distintos), `lax` en desarrollo |
 

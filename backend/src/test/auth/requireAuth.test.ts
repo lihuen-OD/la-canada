@@ -174,4 +174,48 @@ describe('requireAuth', () => {
     expect(calls).toEqual([undefined]);
     expect(req.auth).toEqual({ userId, sessionId: session.id, role: 'ADMIN' });
   });
+
+  it('JWT firmado correctamente pero cuyo sub no es el dueño real de la sesión (sid): AuthenticationRequiredError', async () => {
+    const ownerUserId = crypto.randomUUID();
+    const impersonatedUserId = crypto.randomUUID();
+    await fake().prisma.user.create({
+      data: {
+        id: ownerUserId,
+        username: 'dueño-real',
+        role: 'EMPLOYEE',
+        status: 'ACTIVE',
+        passwordHash: 'x',
+      },
+    });
+    await fake().prisma.user.create({
+      data: {
+        id: impersonatedUserId,
+        username: 'otro-usuario',
+        role: 'ADMIN',
+        status: 'ACTIVE',
+        passwordHash: 'x',
+      },
+    });
+    // La sesión pertenece de verdad a `ownerUserId` — el token, sin embargo,
+    // firma criptográficamente válida (misma clave real) incluida, dice ser
+    // de `impersonatedUserId`. Ninguna de las dos identidades por sí sola
+    // (firma válida, sesión activa) alcanza si no coinciden entre sí.
+    const session = await fake().prisma.session.create({
+      data: {
+        userId: ownerUserId,
+        refreshTokenHash: 'hash-sub-sid-mismatch',
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+    });
+    const token = await signAccessToken(
+      { userId: impersonatedUserId, sessionId: session.id, role: 'ADMIN' },
+      accessTokenSecret,
+      60,
+    );
+    const req = makeReq(`Bearer ${token}`);
+    const { next, calls } = makeNext();
+    await requireAuth(req, {} as Response, next);
+    expect(calls[0]).toBeInstanceOf(AuthenticationRequiredError);
+    expect(req.auth).toBeUndefined();
+  });
 });

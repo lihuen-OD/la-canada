@@ -21,7 +21,11 @@ const TEST_USERNAME = `test-auth-integration-${Date.now()}`;
 const TEST_PASSWORD = 'contraseña de integración bastante larga y segura';
 const META = { ipAddress: '127.0.0.1', userAgent: 'vitest-integration' };
 
+const CONCURRENT_USERNAME = `test-auth-integration-concurrent-${Date.now()}`;
+const CONCURRENT_PASSWORD = 'contraseña de la prueba de concurrencia bastante larga';
+
 let testUserId: string;
+let concurrentTestUserId: string;
 let baselineUserCount: number;
 let baselineSessionCount: number;
 let baselineAuditLogCount: number;
@@ -33,12 +37,11 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (testUserId) {
-    await prisma.auditLog.deleteMany({
-      where: { OR: [{ actorUserId: testUserId }, { entityId: testUserId }] },
-    });
-    await prisma.session.deleteMany({ where: { userId: testUserId } });
-    await prisma.user.delete({ where: { id: testUserId } }).catch(() => undefined);
+  for (const id of [testUserId, concurrentTestUserId]) {
+    if (!id) continue;
+    await prisma.auditLog.deleteMany({ where: { OR: [{ actorUserId: id }, { entityId: id }] } });
+    await prisma.session.deleteMany({ where: { userId: id } });
+    await prisma.user.delete({ where: { id } }).catch(() => undefined);
   }
 
   expect(await prisma.user.count()).toBe(baselineUserCount);
@@ -147,9 +150,73 @@ describe('authService — flujo real contra demo', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('concurrencia — crea un segundo usuario de prueba dedicado (setup)', async () => {
+    const passwordHash = await hashPassword(CONCURRENT_PASSWORD);
+    const user = await prisma.user.create({
+      data: { username: CONCURRENT_USERNAME, role: 'EMPLOYEE', status: 'ACTIVE', passwordHash },
+      select: { id: true },
+    });
+    concurrentTestUserId = user.id;
+    expect(concurrentTestUserId).toEqual(expect.any(String));
+  });
+
+  it('dos refresh simultáneos con el mismo token: exactamente uno gana, nunca quedan dos sesiones activas utilizables', async () => {
+    const loginResult = await login(prisma, {
+      username: CONCURRENT_USERNAME,
+      password: CONCURRENT_PASSWORD,
+      ...META,
+    });
+
+    // Mismo refresh token, dos llamadas a `refresh()` lanzadas a la vez —
+    // simula dos requests HTTP concurrentes contra /auth/refresh. La toma
+    // atómica de la sesión (ver authService.ts) garantiza que como máximo
+    // una gane; la otra debe recibir el mismo error genérico de sesión
+    // inválida, nunca un segundo refresh token utilizable.
+    const results = await Promise.allSettled([
+      refresh(prisma, { refreshToken: loginResult.refreshToken, ...META }),
+      refresh(prisma, { refreshToken: loginResult.refreshToken, ...META }),
+    ]);
+
+    const fulfilled = results.filter(
+      (r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof refresh>>> =>
+        r.status === 'fulfilled',
+    );
+    const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.reason).toBeInstanceOf(InvalidSessionError);
+
+    // La detección conservadora revoca TODAS las sesiones activas del
+    // usuario ante la carrera — incluida la que la solicitud ganadora
+    // acababa de crear. No debe quedar ninguna sesión activa para este
+    // usuario después de que ambas promesas resolvieron.
+    const sessions = await prisma.session.findMany({ where: { userId: concurrentTestUserId } });
+    const activeSessions = sessions.filter((s) => s.revokedAt === null);
+    expect(activeSessions).toHaveLength(0);
+
+    // Qué rama exacta detecta al perdedor depende del timing real de red
+    // contra Neon, no es determinístico desde el test: si su lectura inicial
+    // ocurre antes de que la ganadora confirme, entra por la toma atómica
+    // (`auth.refresh.concurrent_rotation_detected`); si ocurre después,
+    // ya ve la sesión revocada y entra por la detección de reuso clásica
+    // (`auth.refresh.reuse_detected`, ver el test de reuso más arriba) —
+    // ambas ramas aplican exactamente la misma respuesta de seguridad
+    // (revocar todo lo activo + auditar), así que cualquiera de las dos
+    // cuenta como la protección funcionando.
+    const concurrentAudit = await prisma.auditLog.findMany({
+      where: {
+        actorUserId: concurrentTestUserId,
+        action: {
+          in: ['auth.refresh.concurrent_rotation_detected', 'auth.refresh.reuse_detected'],
+        },
+      },
+    });
+    expect(concurrentAudit.length).toBeGreaterThanOrEqual(1);
+  });
+
   it('los usuarios del seed real no cambiaron de estado ni de rol durante este archivo', async () => {
     const seedUsers = await prisma.user.findMany({
-      where: { username: { not: TEST_USERNAME } },
+      where: { username: { notIn: [TEST_USERNAME, CONCURRENT_USERNAME] } },
       select: { username: true, role: true, status: true },
     });
     // No se afirma un número fijo acá (ya se verificó por SQL directo tras

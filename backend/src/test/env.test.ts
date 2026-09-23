@@ -2,12 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { loadEnv } from '../config/env';
 
 const VALID_DATABASE_URL = 'postgresql://test:test@localhost:5432/test_db';
+// Sintético, >=32 caracteres — nunca un secreto real. JWT_ACCESS_SECRET pasó
+// a ser obligatoria (corrección posterior a la Etapa 3B.1, ver
+// "loadEnv — autenticación" más abajo), así que se agrega a casi todos los
+// entornos de prueba de este archivo, igual que ya se hacía con
+// VALID_DATABASE_URL desde la corrección post-Etapa 3A.
+const VALID_JWT_SECRET = 'a'.repeat(32);
 
 describe('loadEnv', () => {
   it('parsea un entorno válido y aplica los valores por defecto', () => {
     const env = loadEnv({
       FRONTEND_URL: 'http://localhost:5173',
       DATABASE_URL: VALID_DATABASE_URL,
+      JWT_ACCESS_SECRET: VALID_JWT_SECRET,
     });
     expect(env.FRONTEND_URL).toBe('http://localhost:5173');
     expect(env.NODE_ENV).toBe('development');
@@ -15,7 +22,9 @@ describe('loadEnv', () => {
   });
 
   it('lanza un error cuando falta una variable requerida (FRONTEND_URL)', () => {
-    expect(() => loadEnv({ DATABASE_URL: VALID_DATABASE_URL })).toThrow(/FRONTEND_URL/);
+    expect(() =>
+      loadEnv({ DATABASE_URL: VALID_DATABASE_URL, JWT_ACCESS_SECRET: VALID_JWT_SECRET }),
+    ).toThrow(/FRONTEND_URL/);
   });
 
   it('ignora variables no declaradas, incluidas las VITE_* del frontend', () => {
@@ -25,6 +34,7 @@ describe('loadEnv', () => {
     const env = loadEnv({
       FRONTEND_URL: 'http://localhost:5173',
       DATABASE_URL: VALID_DATABASE_URL,
+      JWT_ACCESS_SECRET: VALID_JWT_SECRET,
       VITE_API_URL: 'http://localhost:4000/api/v1',
       SOME_UNRELATED_VAR: 'x',
     });
@@ -38,6 +48,7 @@ describe('loadEnv', () => {
     const env = loadEnv({
       FRONTEND_URL: 'http://localhost:5173',
       DATABASE_URL: VALID_DATABASE_URL,
+      JWT_ACCESS_SECRET: VALID_JWT_SECRET,
     });
     expect(env.OBJECT_STORAGE_ENDPOINT).toBeUndefined();
     expect(env.OBJECT_STORAGE_BUCKET).toBeUndefined();
@@ -45,6 +56,7 @@ describe('loadEnv', () => {
     const withStorage = loadEnv({
       FRONTEND_URL: 'http://localhost:5173',
       DATABASE_URL: VALID_DATABASE_URL,
+      JWT_ACCESS_SECRET: VALID_JWT_SECRET,
       OBJECT_STORAGE_ENDPOINT: 'https://example-storage.neon.tech',
       OBJECT_STORAGE_REGION: 'us-east-1',
       OBJECT_STORAGE_BUCKET: 'la-canada-uploads',
@@ -58,6 +70,7 @@ describe('loadEnv', () => {
     const env = loadEnv({
       FRONTEND_URL: 'http://localhost:5173',
       DATABASE_URL: VALID_DATABASE_URL,
+      JWT_ACCESS_SECRET: VALID_JWT_SECRET,
     }) as unknown as Record<string, unknown>;
     expect(env).not.toHaveProperty('GOOGLE_DRIVE_FOLDER_ID');
     expect(env).not.toHaveProperty('GOOGLE_SERVICE_ACCOUNT_EMAIL');
@@ -67,12 +80,14 @@ describe('loadEnv', () => {
 
 describe('loadEnv — DATABASE_URL / DIRECT_URL / DATABASE_TARGET (corrección post-Etapa 3A)', () => {
   it('DATABASE_URL es obligatoria: falla temprano y con claridad si falta', () => {
-    expect(() => loadEnv({ FRONTEND_URL: 'http://localhost:5173' })).toThrow(/DATABASE_URL/);
+    expect(() =>
+      loadEnv({ FRONTEND_URL: 'http://localhost:5173', JWT_ACCESS_SECRET: VALID_JWT_SECRET }),
+    ).toThrow(/DATABASE_URL/);
   });
 
   it('el error por DATABASE_URL faltante nunca incluye un valor de connection string', () => {
     try {
-      loadEnv({ FRONTEND_URL: 'http://localhost:5173' });
+      loadEnv({ FRONTEND_URL: 'http://localhost:5173', JWT_ACCESS_SECRET: VALID_JWT_SECRET });
       expect.unreachable('debía lanzar');
     } catch (error) {
       expect(String(error)).not.toMatch(/postgres(ql)?:\/\//i);
@@ -83,6 +98,7 @@ describe('loadEnv — DATABASE_URL / DIRECT_URL / DATABASE_TARGET (corrección p
     const env = loadEnv({
       FRONTEND_URL: 'http://localhost:5173',
       DATABASE_URL: VALID_DATABASE_URL,
+      JWT_ACCESS_SECRET: VALID_JWT_SECRET,
     });
     expect(env.DIRECT_URL).toBeUndefined();
   });
@@ -91,12 +107,14 @@ describe('loadEnv — DATABASE_URL / DIRECT_URL / DATABASE_TARGET (corrección p
     const withoutTarget = loadEnv({
       FRONTEND_URL: 'http://localhost:5173',
       DATABASE_URL: VALID_DATABASE_URL,
+      JWT_ACCESS_SECRET: VALID_JWT_SECRET,
     });
     expect(withoutTarget.DATABASE_TARGET).toBeUndefined();
 
     const withDemo = loadEnv({
       FRONTEND_URL: 'http://localhost:5173',
       DATABASE_URL: VALID_DATABASE_URL,
+      JWT_ACCESS_SECRET: VALID_JWT_SECRET,
       DATABASE_TARGET: 'demo',
     });
     expect(withDemo.DATABASE_TARGET).toBe('demo');
@@ -105,6 +123,7 @@ describe('loadEnv — DATABASE_URL / DIRECT_URL / DATABASE_TARGET (corrección p
       loadEnv({
         FRONTEND_URL: 'http://localhost:5173',
         DATABASE_URL: VALID_DATABASE_URL,
+        JWT_ACCESS_SECRET: VALID_JWT_SECRET,
         DATABASE_TARGET: 'staging',
       }),
     ).toThrow();
@@ -114,24 +133,30 @@ describe('loadEnv — DATABASE_URL / DIRECT_URL / DATABASE_TARGET (corrección p
     const env = loadEnv({
       FRONTEND_URL: 'http://localhost:5173',
       DATABASE_URL: VALID_DATABASE_URL,
+      JWT_ACCESS_SECRET: VALID_JWT_SECRET,
       DATABASE_TARGET: '',
     });
     expect(env.DATABASE_TARGET).toBeUndefined();
   });
 });
 
-describe('loadEnv — autenticación (Etapa 3B.1)', () => {
-  const VALID_JWT_SECRET = 'a'.repeat(32);
-
-  it('JWT_ACCESS_SECRET es opcional a nivel de schema (el arranque real lo exige en auth/config.ts, no acá)', () => {
-    const env = loadEnv({
-      FRONTEND_URL: 'http://localhost:5173',
-      DATABASE_URL: VALID_DATABASE_URL,
-    });
-    expect(env.JWT_ACCESS_SECRET).toBeUndefined();
+describe('loadEnv — autenticación (Etapa 3B.1, corregido en el hardening posterior)', () => {
+  it('JWT_ACCESS_SECRET es obligatoria: falla temprano y con claridad si falta (misma fuente de verdad que DATABASE_URL)', () => {
+    expect(() =>
+      loadEnv({ FRONTEND_URL: 'http://localhost:5173', DATABASE_URL: VALID_DATABASE_URL }),
+    ).toThrow(/JWT_ACCESS_SECRET/);
   });
 
-  it('JWT_ACCESS_SECRET exige un mínimo de 32 caracteres cuando está presente', () => {
+  it('el error por JWT_ACCESS_SECRET faltante nunca incluye ningún valor de secreto', () => {
+    try {
+      loadEnv({ FRONTEND_URL: 'http://localhost:5173', DATABASE_URL: VALID_DATABASE_URL });
+      expect.unreachable('debía lanzar');
+    } catch (error) {
+      expect(String(error)).not.toContain(VALID_JWT_SECRET);
+    }
+  });
+
+  it('JWT_ACCESS_SECRET exige un mínimo de 32 caracteres', () => {
     expect(() =>
       loadEnv({
         FRONTEND_URL: 'http://localhost:5173',
@@ -154,6 +179,7 @@ describe('loadEnv — autenticación (Etapa 3B.1)', () => {
     const env = loadEnv({
       FRONTEND_URL: 'http://localhost:5173',
       DATABASE_URL: VALID_DATABASE_URL,
+      JWT_ACCESS_SECRET: VALID_JWT_SECRET,
     }) as unknown as Record<string, unknown>;
     expect(env).not.toHaveProperty('JWT_REFRESH_SECRET');
   });
@@ -162,6 +188,7 @@ describe('loadEnv — autenticación (Etapa 3B.1)', () => {
     const env = loadEnv({
       FRONTEND_URL: 'http://localhost:5173',
       DATABASE_URL: VALID_DATABASE_URL,
+      JWT_ACCESS_SECRET: VALID_JWT_SECRET,
     });
     expect(env.ACCESS_TOKEN_TTL).toBe(720);
     expect(env.REFRESH_TOKEN_TTL).toBe(60 * 60 * 24 * 30);
@@ -171,6 +198,7 @@ describe('loadEnv — autenticación (Etapa 3B.1)', () => {
     const env = loadEnv({
       FRONTEND_URL: 'http://localhost:5173',
       DATABASE_URL: VALID_DATABASE_URL,
+      JWT_ACCESS_SECRET: VALID_JWT_SECRET,
       ACCESS_TOKEN_TTL: '',
       REFRESH_TOKEN_TTL: '',
     });
@@ -182,6 +210,7 @@ describe('loadEnv — autenticación (Etapa 3B.1)', () => {
     const env = loadEnv({
       FRONTEND_URL: 'http://localhost:5173',
       DATABASE_URL: VALID_DATABASE_URL,
+      JWT_ACCESS_SECRET: VALID_JWT_SECRET,
       ACCESS_TOKEN_TTL: '900',
       REFRESH_TOKEN_TTL: '3600',
     });
@@ -194,6 +223,7 @@ describe('loadEnv — autenticación (Etapa 3B.1)', () => {
       loadEnv({
         FRONTEND_URL: 'http://localhost:5173',
         DATABASE_URL: VALID_DATABASE_URL,
+        JWT_ACCESS_SECRET: VALID_JWT_SECRET,
         ACCESS_TOKEN_TTL: '0',
       }),
     ).toThrow();
@@ -203,6 +233,7 @@ describe('loadEnv — autenticación (Etapa 3B.1)', () => {
     const empty = loadEnv({
       FRONTEND_URL: 'http://localhost:5173',
       DATABASE_URL: VALID_DATABASE_URL,
+      JWT_ACCESS_SECRET: VALID_JWT_SECRET,
       COOKIE_SAME_SITE: '',
     });
     expect(empty.COOKIE_SAME_SITE).toBeUndefined();
@@ -210,6 +241,7 @@ describe('loadEnv — autenticación (Etapa 3B.1)', () => {
     const valid = loadEnv({
       FRONTEND_URL: 'http://localhost:5173',
       DATABASE_URL: VALID_DATABASE_URL,
+      JWT_ACCESS_SECRET: VALID_JWT_SECRET,
       COOKIE_SAME_SITE: 'none',
     });
     expect(valid.COOKIE_SAME_SITE).toBe('none');
@@ -218,6 +250,7 @@ describe('loadEnv — autenticación (Etapa 3B.1)', () => {
       loadEnv({
         FRONTEND_URL: 'http://localhost:5173',
         DATABASE_URL: VALID_DATABASE_URL,
+        JWT_ACCESS_SECRET: VALID_JWT_SECRET,
         COOKIE_SAME_SITE: 'invalido',
       }),
     ).toThrow();

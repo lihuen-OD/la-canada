@@ -21,7 +21,7 @@ export const config = {
   databaseUrl: env.DATABASE_URL,
   isProduction: env.NODE_ENV === 'production',
   isTest: env.NODE_ENV === 'test',
-  /** Puede faltar — `backend/src/auth/config.ts` es quien la exige de forma eager. */
+  /** Obligatoria (ver `config/env.ts`) — única fuente de verdad, ya validada acá. */
   jwtAccessSecret: env.JWT_ACCESS_SECRET,
   accessTokenTtlSeconds: env.ACCESS_TOKEN_TTL,
   refreshTokenTtlSeconds: env.REFRESH_TOKEN_TTL,

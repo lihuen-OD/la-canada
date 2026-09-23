@@ -1,4 +1,4 @@
-import type { PrismaClient } from '../generated/prisma/client';
+import type { Prisma, PrismaClient } from '../generated/prisma/client';
 import { InvalidCredentialsError, InvalidSessionError } from '../errors/AppError';
 import { normalizeUsername } from '../utils/username';
 import { verifyAgainstDummy, verifyPassword } from './password';
@@ -170,6 +170,29 @@ type RotationOutcome =
       userId: string;
     };
 
+/** Revoca todas las sesiones activas de un usuario y audita el motivo — usado tanto ante reuso clásico como ante una carrera de rotación concurrente detectada. */
+async function revokeAllActiveSessionsAndAudit(
+  tx: Prisma.TransactionClient,
+  params: {
+    userId: string;
+    action: string;
+    relatedSessionId: string;
+  } & RequestMeta,
+): Promise<void> {
+  await tx.session.updateMany({
+    where: { userId: params.userId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+  await recordAuditLog(tx, {
+    actorUserId: params.userId,
+    action: params.action,
+    entityType: 'Session',
+    entityId: params.relatedSessionId,
+    ipAddress: params.ipAddress,
+    userAgent: params.userAgent,
+  });
+}
+
 /**
  * Rotación transaccional: revocar la sesión vieja y crear la nueva deben
  * confirmarse juntas o ninguna. Ningún camino lanza dentro del callback de
@@ -185,6 +208,27 @@ type RotationOutcome =
  * debe deshacer una rotación válida. La detección de reuso audita DENTRO
  * de la transacción (con `recordAuditLog` estricto): ahí el registro es
  * parte del efecto de seguridad, no un best-effort secundario.
+ *
+ * **Rotación concurrente**: el `findUnique` inicial NO alcanza para decidir
+ * con seguridad que esta solicitud puede rotar la sesión — dos solicitudes
+ * con el mismo refresh token pueden leerla ambas como "activa" antes de que
+ * cualquiera escriba. La revocación de la sesión vieja se hace entonces con
+ * un `updateMany` condicionado por `id` + `revokedAt: null` + vigencia
+ * (`expiresAt` futuro) — no con un `update` incondicional. Bajo el nivel de
+ * aislamiento por defecto de Postgres (READ COMMITTED) esto ya alcanza para
+ * la exclusión mutua real: un `UPDATE` toma un lock de fila al ejecutarse, y
+ * si dos transacciones intentan actualizar la misma fila, la segunda queda
+ * bloqueada hasta que la primera confirme — al desbloquearse, Postgres
+ * vuelve a evaluar el `WHERE` contra la fila ya committeada por la primera,
+ * así que la segunda ve `revoked_at` ya no nulo y su `updateMany` afecta 0
+ * filas. No hace falta `SERIALIZABLE` ni un `SELECT ... FOR UPDATE`
+ * explícito: la propia semántica de re-chequeo del `UPDATE` en READ
+ * COMMITTED ya es la exclusión mutua. Si `count !== 1`, se trata igual que
+ * un reuso (no se sabe si fue una carrera benigna o un robo real corriendo
+ * en paralelo a la rotación legítima): no se emite un refresh token nuevo,
+ * se revocan conservadoramente todas las sesiones activas del usuario
+ * (incluida la que la solicitud ganadora acababa de crear, si ya llegó a
+ * confirmar), se audita, y se responde con el mismo error genérico.
  */
 export async function refresh(
   prisma: PrismaClient,
@@ -204,15 +248,10 @@ export async function refresh(
       // el modelo actual no rastrea "familias" de tokens, así que la
       // respuesta segura y sin campos especulativos nuevos es cortar todo
       // acceso vigente de esa cuenta.
-      await tx.session.updateMany({
-        where: { userId: session.userId, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
-      await recordAuditLog(tx, {
-        actorUserId: session.userId,
+      await revokeAllActiveSessionsAndAudit(tx, {
+        userId: session.userId,
         action: 'auth.refresh.reuse_detected',
-        entityType: 'Session',
-        entityId: session.id,
+        relatedSessionId: session.id,
         ipAddress: params.ipAddress,
         userAgent: params.userAgent,
       });
@@ -231,10 +270,27 @@ export async function refresh(
       return { kind: 'invalid' };
     }
 
+    // Toma atómica de la sesión: solo una solicitud concurrente puede ganar
+    // esta escritura condicionada (ver comentario de la función). Si otra
+    // ya la reclamó entre nuestra lectura y este `updateMany`, `count` da 0.
+    const claim = await tx.session.updateMany({
+      where: { id: session.id, revokedAt: null, expiresAt: { gt: new Date() } },
+      data: { revokedAt: new Date() },
+    });
+    if (claim.count !== 1) {
+      await revokeAllActiveSessionsAndAudit(tx, {
+        userId: session.userId,
+        action: 'auth.refresh.concurrent_rotation_detected',
+        relatedSessionId: session.id,
+        ipAddress: params.ipAddress,
+        userAgent: params.userAgent,
+      });
+      return { kind: 'invalid' };
+    }
+
     const newRefreshToken = generateRefreshToken();
     const newRefreshTokenHash = hashRefreshToken(newRefreshToken);
 
-    await tx.session.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
     const newSession = await tx.session.create({
       data: {
         userId: user.id,

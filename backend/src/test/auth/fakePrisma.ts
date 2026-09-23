@@ -124,11 +124,27 @@ export function createFakePrisma(initialUsers: FakeUserRecord[] = []) {
         return updated;
       },
       updateMany: async ({ where, data }: any) => {
+        // Genérico a propósito: `authService.refresh()` usa este `updateMany`
+        // de dos formas distintas — filtrando por `userId` (revocación
+        // masiva ante reuso/carrera) y filtrando por `id` + `revokedAt: null`
+        // + `expiresAt: { gt }` (la toma atómica de la sesión al rotar). Cada
+        // condición de `where` presente debe cumplirse; una ausente no
+        // descarta nada.
         let count = 0;
         for (const [id, session] of sessions) {
-          const matchesUser = session.userId === where.userId;
-          const matchesRevoked = where.revokedAt === null ? session.revokedAt === null : true;
-          if (matchesUser && matchesRevoked) {
+          const matchesId = where.id === undefined || session.id === where.id;
+          const matchesUser = where.userId === undefined || session.userId === where.userId;
+          const matchesRevoked =
+            where.revokedAt === undefined
+              ? true
+              : where.revokedAt === null
+                ? session.revokedAt === null
+                : session.revokedAt === where.revokedAt;
+          const matchesExpiresGt =
+            where.expiresAt?.gt === undefined
+              ? true
+              : session.expiresAt.getTime() > where.expiresAt.gt.getTime();
+          if (matchesId && matchesUser && matchesRevoked && matchesExpiresGt) {
             sessions.set(id, { ...session, ...data });
             count += 1;
           }

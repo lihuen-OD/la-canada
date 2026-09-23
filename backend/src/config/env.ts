@@ -1,10 +1,11 @@
 import { z } from 'zod';
 
 /**
- * Variables previstas para etapas futuras (JWT, Object Storage) se dejan
+ * Variables previstas para una etapa futura (Object Storage) se dejan
  * opcionales a propósito: no deben bloquear el arranque del backend en esta
- * etapa, en la que todavía no se usan. `DATABASE_URL` es la única excepción
- * deliberada a esa regla — ver el comentario junto al campo.
+ * etapa, en la que todavía no se usan. `DATABASE_URL` y `JWT_ACCESS_SECRET`
+ * son las excepciones deliberadas a esa regla — ver el comentario junto a
+ * cada campo.
  */
 
 /**
@@ -48,17 +49,21 @@ const envSchema = z.object({
   // general de la app.
   DATABASE_TARGET: z.preprocess(emptyStringToUndefined, z.enum(['demo', 'production']).optional()),
 
-  // Etapa 3B.1 — autenticación. Opcional acá a propósito (mismo patrón que
-  // DATABASE_URL antes de Etapa 3A): el servidor arranca sin ella para que
-  // health/CORS/tests no dependan de auth, pero `backend/src/auth/config.ts`
-  // (importado por las rutas de auth, montadas siempre) la exige de forma
-  // eager y falla claro, sin revelar el valor, si falta — ver ese archivo.
-  // Mínimo 32 caracteres (256 bits) como piso criptográfico razonable para
-  // un secreto HMAC-SHA256 (HS256).
+  // Autenticación — OBLIGATORIA, misma razón y mismo patrón que
+  // DATABASE_URL: las rutas de auth se montan siempre (`routes/index.ts`),
+  // así que en la práctica el servidor completo ya no arrancaba sin ella
+  // (antes fallaba tarde y de forma menos clara, dentro de
+  // `auth/config.ts`, con dos fuentes de verdad distintas — corregido acá:
+  // una sola). Nunca se revela su valor en el mensaje de error. Mínimo 32
+  // caracteres (256 bits) como piso criptográfico razonable para un secreto
+  // HMAC-SHA256 (HS256). Los tests unitarios usan un valor sintético
+  // inyectado por `vitest.config.mts`/`vitest.integration.config.mts`.
   JWT_ACCESS_SECRET: z
-    .string()
-    .min(32, 'JWT_ACCESS_SECRET debe tener al menos 32 caracteres (256 bits) para HS256.')
-    .optional(),
+    .string({
+      message:
+        'JWT_ACCESS_SECRET es obligatoria para iniciar el backend (ver .env.example) — nunca se expone su valor en los mensajes de error.',
+    })
+    .min(32, 'JWT_ACCESS_SECRET debe tener al menos 32 caracteres (256 bits) para HS256.'),
   // JWT_REFRESH_SECRET NO existe: el refresh token es opaco (no un JWT), no
   // hay nada que firmar del lado del servidor — ver docs/SECURITY.md.
   // Ambas en segundos. Duración corta para el access token (10-15 min);

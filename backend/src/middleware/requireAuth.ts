@@ -25,6 +25,12 @@ function extractBearerToken(req: Request): string | null {
  * suspenderse o una sesión puede revocarse después de emitido un token
  * todavía sin expirar. El `role` que queda en `req.auth` es siempre el de
  * la base al momento del request, no el claim del JWT (ver `auth/types.ts`).
+ * 4) exige además que `session.userId === payload.sub`: un token firmado
+ * correctamente (misma clave, misma firma) pero cuyo `sub` no coincide con
+ * el dueño real de la sesión (`sid`) igual se rechaza — la sesión por sí
+ * sola no alcanza como prueba de identidad si dice pertenecer a otro
+ * usuario. Nunca se revela en la respuesta cuál de las dos validaciones
+ * falló.
  */
 export async function requireAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const token = extractBearerToken(req);
@@ -49,7 +55,12 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
   }
 
   const session = await prisma.session.findUnique({ where: { id: sessionId } });
-  if (!session || session.revokedAt || session.expiresAt.getTime() < Date.now()) {
+  if (
+    !session ||
+    session.revokedAt ||
+    session.expiresAt.getTime() < Date.now() ||
+    session.userId !== userId
+  ) {
     next(new AuthenticationRequiredError());
     return;
   }
