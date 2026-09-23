@@ -7,9 +7,9 @@ Sistema de gestión operativa para la propiedad "La Cañada": tareas del equipo,
 El proyecto está en transición desde un prototipo de un único archivo (`index.html`, HTML + CSS + JS embebido, conectado directamente a Supabase) hacia una aplicación profesional full stack.
 
 - **`index.html`/`legacy/index.original.html` (el prototipo original) fueron retirados del repositorio.** Contenían una URL y una API key reales de Supabase hardcodeadas en texto plano (ver `docs/SECURITY.md`); una vez confirmado que todo su contenido funcional, visual y de datos ya estaba migrado a `docs/`, al modelo Prisma y al seed, se eliminaron del árbol de trabajo **y de todo el historial de Git** (Etapa 2.3 — ver `docs/MIGRATION_PLAN.md`). La referencia de diseño y comportamiento del prototipo vive ahora exclusivamente en `docs/` (`PROJECT_CONTEXT.md`, `BUSINESS_RULES.md`, `DATABASE.md`, `DATA_INVENTORY.md`).
-- **Todavía no hay pantallas ni endpoints de negocio implementados** en `frontend/` ni en `backend/` — las Etapas 1 y 2 del plan de migración crearon la estructura profesional base y el modelo de datos + seed, sin lógica de negocio corriendo todavía.
-- **El modelo de datos ya está migrado contra Neon, rama `demo` exclusivamente** (Etapa 3A): `backend/prisma/schema.prisma` (22 modelos, 11 enums), la migración inicial aplicada, y el seed ya ejecutado dos veces (idempotencia confirmada). `production` no se toca en esta etapa — ver "Base de datos (Prisma + Neon)" más abajo.
-- **Todavía no hay autenticación implementada.** El PIN del prototipo (y cualquier credencial encontrada en el HTML original) **no se copió** al código nuevo, y el archivo que las contenía ya fue retirado del repositorio. El modelo ya tiene `User`/`Session` listos para cuando se implemente (Etapa 3) — ningún endpoint usa la base todavía.
+- **Todavía no hay pantallas de negocio implementadas** en `frontend/` — las Etapas 1 y 2 del plan de migración crearon la estructura profesional base y el modelo de datos + seed; la Etapa 3B.1 agregó autenticación real en el backend (ver más abajo), sin tocar el frontend.
+- **El modelo de datos ya está migrado contra Neon, rama `demo` exclusivamente** (Etapa 3A, con un ajuste de `Session` en la Etapa 3B.1): `backend/prisma/schema.prisma` (22 modelos, 11 enums), migraciones aplicadas, y el seed ya ejecutado dos veces (idempotencia confirmada). `production` no se toca en esta etapa — ver "Base de datos (Prisma + Neon)" más abajo.
+- **Autenticación real implementada en el backend (Etapa 3B.1)**: login, refresh con rotación (token opaco, nunca un JWT), logout, `/me`, administración de usuarios (activar, resetear contraseña, cambiar estado) y bootstrap del primer administrador (construido y testeado, **nunca ejecutado** — ver `docs/MIGRATION_PLAN.md`, "Etapa 3B.1"). **No hay todavía pantalla de login ni ningún cambio funcional en el frontend** — eso queda para una etapa posterior, autorizada explícitamente.
 - **Los datos reales** (personas, tareas, stock, catálogos, etc.) ya están cargados en `demo`, exactamente como los describe `docs/SEED_MANIFEST.md` (61 entidades maestras + 14 movimientos de apertura = 75 filas).
 
 Ver `docs/PROJECT_CONTEXT.md`, `docs/ARCHITECTURE.md` y `docs/MIGRATION_PLAN.md` para el contexto completo y las próximas etapas.
@@ -76,10 +76,15 @@ Variables usadas en esta etapa:
 | `DATABASE_URL` | Backend (runtime, pooled) y seed | **Sí, sin excepción** — el backend no arranca sin ella (falla temprano y con mensaje claro, ver `backend/src/config/env.ts`) |
 | `DIRECT_URL` | Prisma Migrate exclusivamente (directa, sin pooler) | Solo para correr migraciones — el servidor nunca la necesita para arrancar |
 | `DATABASE_TARGET` | Gate de seguridad de `db:migrate:*`/`db:seed`/`test:integration` (`demo`\|`production`) | Sí, para esos comandos — deben rechazar su ejecución si no es exactamente `demo` |
+| `JWT_ACCESS_SECRET` | Backend (firma/verifica el access token, `jose`/HS256) | **Sí, para que la autenticación funcione** — mínimo 32 caracteres. Generar con `openssl rand -base64 48` y pegarlo solo en el `.env` local (nunca en `.env.example` ni en el código). El servidor arranca igual sin ella (el health check no depende de auth), pero cualquier ruta bajo `/api/v1/auth`/`/api/v1/admin` falla si falta. |
+| `ACCESS_TOKEN_TTL` / `REFRESH_TOKEN_TTL` | Backend (segundos) | No — default 720 (12 min) y 2592000 (30 días) si se dejan vacías |
+| `COOKIE_SAME_SITE` | Backend (`lax`\|`strict`\|`none`, cookie del refresh token) | No — default `none` en producción (Netlify/Render son dominios distintos), `lax` en desarrollo |
 
 Ninguna de las dos apunta nunca a `production`: esas credenciales, cuando existan, se configuran directamente en Render, nunca en un `.env` de este repositorio (ver `docs/ARCHITECTURE.md`, sección 13).
 
-Variables previstas para etapas futuras (no se usan todavía, no hace falta completarlas para correr el health check local): `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `ACCESS_TOKEN_TTL`, `REFRESH_TOKEN_TTL`, `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_REGION`, `OBJECT_STORAGE_BUCKET`, `OBJECT_STORAGE_ACCESS_KEY_ID`, `OBJECT_STORAGE_SECRET_ACCESS_KEY` (Neon Object Storage, reemplaza a Google Drive — ver `docs/ARCHITECTURE.md`).
+No existe `JWT_REFRESH_SECRET`: el refresh token es un valor opaco generado con bytes aleatorios (`crypto.randomBytes`), nunca un JWT — no hay nada que firmar del lado del servidor (ver `docs/SECURITY.md`).
+
+Variables previstas para una etapa futura (Object Storage — no se usan todavía, no hace falta completarlas para correr el health check local): `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_REGION`, `OBJECT_STORAGE_BUCKET`, `OBJECT_STORAGE_ACCESS_KEY_ID`, `OBJECT_STORAGE_SECRET_ACCESS_KEY` (Neon Object Storage, reemplaza a Google Drive — ver `docs/ARCHITECTURE.md`).
 
 Ninguna de estas variables tiene valores reales en `.env.example` ni en el código.
 
@@ -169,9 +174,18 @@ npm run db:seed            # corre backend/prisma/seed.ts (registrado en prisma.
 
 **Cliente Prisma único** (`backend/src/lib/prisma.ts`): una sola instancia reutilizable de `PrismaClient` (vía `@prisma/adapter-pg`, `DATABASE_URL`) — ningún servicio debe crear la suya propia. Sin endpoints que lo usen todavía (eso es de la Etapa 5); el cierre ordenado ya está conectado al apagado del servidor.
 
-**Tests de integración** (`backend/src/test/integration/`, `npm run test:integration`): corren contra Neon real (`demo`) — separados de la suite normal (`npm test`, que nunca requiere conexión). Prueban que los 5 `CHECK` de la migración inicial realmente rechazan la fila inválida, siempre dentro de una transacción con `ROLLBACK`.
+**Tests de integración** (`backend/src/test/integration/`, `npm run test:integration`): corren contra Neon real (`demo`) — separados de la suite normal (`npm test`, que nunca requiere conexión), y siempre en secuencia (`fileParallelism: false`, ver `vitest.integration.config.mts`) porque miden conteos globales de filas como línea de base. Prueban que los 5 `CHECK` de la migración inicial realmente rechazan la fila inválida (siempre dentro de una transacción con `ROLLBACK`), y el flujo real de autenticación (login/refresh/rotación/detección de reuso/logout, administración de usuarios, e idempotencia del bootstrap del primer admin) con limpieza determinística — nunca dejan usuarios, sesiones ni auditorías de prueba, y nunca tocan las filas del seed real.
 
 Prisma 7 movió la configuración de conexión fuera de `schema.prisma` a `backend/prisma.config.ts` — ver `docs/ARCHITECTURE.md` §10 para el detalle de este y otros cambios de la versión instalada.
+
+## Autenticación (Etapa 3B.1)
+
+Implementada en el backend, sin ninguna pantalla ni cambio funcional en el frontend todavía. Detalle completo en `docs/ARCHITECTURE.md` ("Autenticación") y `docs/SECURITY.md`.
+
+- **Access token**: JWT (HS256, vía `jose`), corta duración (default 12 min), claims mínimos (`sub`, `sid`, `role`, `iat`, `exp`), issuer/audience propios.
+- **Refresh token**: opaco (no JWT), 256 bits aleatorios, enviado solo por cookie `HttpOnly` (`lc_refresh_token`, `Path=/api/v1/auth`) — en base solo se guarda su hash SHA-256. Rota en cada uso; reusar un token ya rotado revoca todas las sesiones activas de ese usuario (posible robo).
+- **Endpoints**: `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`; administración (`ADMIN`) en `/api/v1/admin/users` (listado, activar, resetear contraseña, cambiar estado).
+- **Primer administrador**: `npm run auth:bootstrap-admin` (interactivo, contraseña oculta) — se niega si ya existe un `ADMIN` activo. No se ejecutó como parte de esta etapa; solo se construyó y testeó.
 
 ## Seguridad de esta etapa
 
@@ -182,3 +196,6 @@ Prisma 7 movió la configuración de conexión fuera de `schema.prisma` a `backe
 - El seed (`backend/prisma/seed.ts`) nunca crea un administrador, nunca inventa PIN/contraseña/hash, y nunca usa `deleteMany` ni resetea datos — verificado con tests dedicados (`backend/src/test/seed-source-guards.test.ts`), no solo por inspección manual.
 - `DATABASE_URL`/`DIRECT_URL` (Neon, rama `demo`) viven solo en el `.env` local, gitignored — nunca se commitean, nunca se imprimen en consola ni en documentación. `production` usa credenciales propias, configuradas directamente en Render, nunca en este repositorio ni en Netlify (ver `docs/ARCHITECTURE.md`, sección 13).
 - `DATABASE_TARGET` es una barrera de código, no solo documentación: los scripts locales con capacidad de escritura fallan antes de tocar la base si no vale exactamente `"demo"` (ver `docs/ARCHITECTURE.md`, sección 13.7).
+- Contraseñas: Argon2id (nunca en texto plano, nunca en logs, nunca devueltas en ninguna respuesta). Login nunca revela si un usuario existe, está deshabilitado o si la contraseña fue la incorrecta — siempre el mismo error genérico.
+- Ningún token (access ni refresh) se guarda en `localStorage`/`sessionStorage`; el refresh token solo viaja por cookie `HttpOnly`.
+- `/auth/refresh` y `/auth/logout` validan el header `Origin` contra `FRONTEND_URL` antes de actuar.

@@ -17,23 +17,29 @@
     "db:migrate:dev": "tsx src/scripts/guardDbCommand.ts --require DIRECT_URL --shape direct --gate-target && prisma migrate dev",
     "db:migrate:deploy": "tsx src/scripts/guardDbCommand.ts --require DIRECT_URL --shape direct --gate-target && prisma migrate deploy",
     "db:migrate:status": "tsx src/scripts/guardDbCommand.ts --require DIRECT_URL --shape direct && prisma migrate status",
-    "db:seed": "tsx src/scripts/guardDbCommand.ts --require DATABASE_URL --shape pooled --gate-target && prisma db seed"
+    "db:seed": "tsx src/scripts/guardDbCommand.ts --require DATABASE_URL --shape pooled --gate-target && prisma db seed",
+    "auth:bootstrap-admin": "tsx src/scripts/bootstrapAdmin.ts"
   },
   "dependencies": {
+    "@inquirer/prompts": "^8.7.2",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
+    "argon2": "^0.45.1",
     "compression": "^1.8.2",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^18.0.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.0",
     "helmet": "^8.3.0",
+    "jose": "^6.2.12",
     "morgan": "^1.12.1",
     "pg": "^8.23.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/compression": "^1.8.1",
+    "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/morgan": "^1.9.10",

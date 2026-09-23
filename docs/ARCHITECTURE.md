@@ -111,12 +111,15 @@ Puntos que la migración debe resolver — **no se decide en este documento**, s
 - Definir si se mantiene el modelo "PIN de 4 dígitos por persona + PIN de admin compartido" o se reemplaza por credenciales por persona con rol propio (recomendado para trazabilidad — hoy, como se documentó en `docs/BUSINESS_RULES.md` sección 4, un login como "Administrador" sin persona asociada no deja registro de qué individuo actuó).
 - Definir política de intentos fallidos / bloqueo, ausente en el prototipo actual.
 
-**Actualización Etapa 2**: el modelo de datos que soporta esto ya existe (`User.passwordHash`, `User.status`, `Session`), pero **ningún flujo de autenticación está implementado todavía** — eso sigue siendo íntegramente Etapa 3. Se confirmó (decisión del usuario) que `User` y `Employee` son entidades separadas con relación explícita — ver `docs/DATABASE.md`, "Separación User/Employee". Los 4 empleados reales ya tienen su `User` correspondiente sembrado en `status: PENDING_ACTIVATION`, sin contraseña ni PIN — no pueden autenticarse hasta que la Etapa 3 implemente la activación real.
+**Actualización Etapa 2**: el modelo de datos que soporta esto ya existe (`User.passwordHash`, `User.status`, `Session`). Se confirmó (decisión del usuario) que `User` y `Employee` son entidades separadas con relación explícita — ver `docs/DATABASE.md`, "Separación User/Employee". Los 4 empleados reales ya tienen su `User` correspondiente sembrado en `status: PENDING_ACTIVATION`, sin contraseña ni PIN — no pueden autenticarse hasta que un `ADMIN` los active vía `POST /api/v1/admin/users/:id/activate`.
+
+**Actualización Etapa 3B.1**: implementado — login por contraseña (Argon2id), autorización por rol validada en el servidor contra la base (nunca solo contra el claim del JWT), y activación/gestión de usuarios como se describe arriba. Detalle completo en la sección 14.
 
 ## 6. Sesiones persistentes
 
 - El prototipo usa `sessionStorage` (se pierde al cerrar el navegador). La arquitectura objetivo debe decidir, en su propia etapa, si usa cookies de sesión httpOnly con expiración configurable (recomendado, evita exposición a robo de token vía XSS) o JWT de corta duración con refresh — pendiente de definición explícita, no se resuelve en esta auditoría.
 - **Actualización Etapa 2**: el modelo `Session` ya existe en el schema (`refreshTokenHash` — nunca el token en texto plano —, `expiresAt`, `revokedAt` nullable para revocación sin borrado físico, `ipAddress`, `userAgent`). Sin filas sembradas ni lógica de emisión/validación todavía.
+- **Actualización Etapa 3B.1**: decisión tomada — JWT de corta duración (access token) + refresh token opaco persistido como `Session`, con rotación en cada uso. Detalle completo en la sección 14.
 
 ## 7. Roles `ADMIN` y `EMPLOYEE`
 
@@ -130,6 +133,7 @@ Puntos que la migración debe resolver — **no se decide en este documento**, s
 - El prototipo actual **no tiene una tabla de auditoría genérica**. Lo más cercano es el campo `compPid`/`completado_por` + `nota` en `ejecuciones` (quién completó una tarea de otra persona) y el registro automático de "ajustes" de stock como filas de `consumos` con motivo prefijado (`docs/BUSINESS_RULES.md` sección 8).
 - La arquitectura objetivo debe definir, en su propia etapa, si se agrega una tabla de auditoría transversal (quién hizo qué, cuándo, sobre qué entidad) — no existe en el prototipo, por lo que es una decisión nueva, no una migración de algo existente.
 - **Actualización Etapa 2**: se agregó `AuditLog` (actor, `action` como texto libre —no enum, ver justificación en `docs/DATABASE.md`—, `entityType`/`entityId`, `previousState`/`newState` en JSON, IP, user-agent, timestamp). Sin filas sembradas ni lógica de escritura todavía — eso corresponde a cuando se implementen los servicios que modifican datos (Etapa 5).
+- **Actualización Etapa 3B.1**: primera lógica de escritura real sobre `AuditLog` — todas las acciones de autenticación (login exitoso/fallido, refresh, detección de reuso de refresh token, logout, activación, cambio de estado, reset de contraseña, bootstrap del admin) quedan auditadas. `previousState`/`newState` nunca incluyen contraseñas ni tokens. Detalle en la sección 14.
 
 ## 9. Object Storage — fotografías y archivos
 
@@ -234,7 +238,7 @@ Implementado y verificado en la Etapa 1 (no es solo un plan): hay un único `.en
 
 | Servicio | Variables que usa hoy | Origen en producción |
 |---|---|---|
-| Backend (Render) | `NODE_ENV`, `PORT`, `FRONTEND_URL`, `DATABASE_URL` (todas obligatorias — sin `DATABASE_URL` el backend no arranca, ver sección 13.7); `DIRECT_URL`, `DATABASE_TARGET`, `JWT_*`, `OBJECT_STORAGE_*` (previstas u opcionales) | Variables de entorno configuradas en el dashboard de Render para ese servicio — inyectadas directamente en `process.env` del proceso Node, sin ningún archivo |
+| Backend (Render) | `NODE_ENV`, `PORT`, `FRONTEND_URL`, `DATABASE_URL` (todas obligatorias — sin `DATABASE_URL` el backend no arranca, ver sección 13.7); `DIRECT_URL`, `DATABASE_TARGET` (opcionales, solo scripts locales); `JWT_ACCESS_SECRET` (obligatoria para que la autenticación funcione, ver sección 14 — el servidor arranca sin ella, pero `/api/v1/auth`/`/api/v1/admin` fallan), `ACCESS_TOKEN_TTL`/`REFRESH_TOKEN_TTL`/`COOKIE_SAME_SITE` (opcionales, con default); `OBJECT_STORAGE_*` (previstas para una etapa futura) | Variables de entorno configuradas en el dashboard de Render para ese servicio — inyectadas directamente en `process.env` del proceso Node, sin ningún archivo |
 | Frontend (Netlify) | `VITE_API_URL` (única variable pública prevista en esta etapa) | Variable de entorno configurada en el dashboard de Netlify (Site settings → Environment variables) para ese sitio, inyectada en `process.env` durante el paso de build |
 
 **Por qué esto funciona sin un `.env` en producción — comprobado, no solo asumido:**
@@ -313,6 +317,62 @@ Tres problemas detectados en la revisión del PR, corregidos sin tocar el modelo
 **a) Sin barrera ejecutable contra `production`.** La sección 13.5 documentaba la intención ("nunca se toca `production`"), pero ningún código la hacía valer — un `.env` mal configurado podía, en teoría, dejar correr `db:migrate:dev`/`db:migrate:deploy`/`db:seed`/`test:integration` contra cualquier URL cargada. Se agregó `DATABASE_TARGET` (`demo` | `production`, backend-only, nunca `VITE_`) y una guarda (`backend/src/scripts/guardDbCommand.ts`) que corre **antes** de invocar Prisma o abrir cualquier transacción: exige `DATABASE_TARGET=demo`, que la variable requerida esté presente, y que su forma coincida con lo esperado (pooled/direct) — sin revelar nunca su valor. Wireada en los 4 comandos con capacidad de escritura (`db:migrate:dev`, `db:migrate:deploy`, `db:seed`, `test:integration`); `db:check`/`db:migrate:status` quedan sin este gate por ser de solo lectura. No previene una evasión deliberada (editar el código o correr `prisma` a mano) — sí evita que los scripts oficiales actúen por error.
 
 **b) Contradicción de `DATABASE_URL`.** `config/env.ts` la declaraba opcional mientras `lib/prisma.ts` (importado por `server.ts`) fallaba igual si faltaba — dos fuentes de verdad distintas. Se resolvió a favor de una sola: `DATABASE_URL` es ahora **obligatoria** en el schema de Zod (`config/env.ts`), con mensaje claro y sin revelar ningún valor; el backend real falla ahí, temprano, no más adentro en `lib/prisma.ts` (que conserva su propio chequeo como defensa en profundidad, ya no contradictorio). `DIRECT_URL` sigue opcional a propósito: el servidor nunca la necesita para arrancar, solo Prisma Migrate. Los tests unitarios usan un valor sintético (`postgresql://test:test@localhost:5432/test_db`) inyectado por `vitest.config.mts` — nunca se conectan de verdad.
+
+## 14. Autenticación (Etapa 3B.1)
+
+Implementado íntegramente en el backend — sin pantalla de login ni ningún cambio funcional en el frontend. Ver también `docs/SECURITY.md` (amenazas consideradas) y `docs/DATABASE.md` (cambios al modelo `Session`).
+
+### 14.1 Contraseñas
+
+Argon2id (`argon2`, parámetros recomendados por OWASP: `memoryCost=19456` (19 MiB), `timeCost=2`, `parallelism=1`). Política: mínimo 12 caracteres, máximo 128, sin reglas de composición (se prioriza longitud/passphrase sobre "mayúscula+número+símbolo"). El login nunca distingue en su respuesta entre usuario inexistente, contraseña incorrecta o cuenta no `ACTIVE` — siempre el mismo error genérico —, y compara igual contra un hash *dummy* cacheado cuando el usuario no existe o no tiene `passwordHash` todavía, para no filtrar por tiempo de respuesta qué rama del código se ejecutó.
+
+### 14.2 Access token
+
+JWT firmado con HS256 vía `jose` (issuer `la-canada-api`, audience `la-canada-frontend`, ambos verificados en cada validación junto con la firma y la expiración — nunca se acepta `alg: none`). Claims mínimos: `sub` (userId), `sid` (sessionId), `role`, `iat`, `exp` — ningún dato personal. Duración corta, configurable (`ACCESS_TOKEN_TTL`, default 720 s / 12 min).
+
+### 14.3 Refresh token
+
+Opaco (no JWT): 256 bits aleatorios (`crypto.randomBytes(32)`, base64url). Se envía únicamente por cookie `HttpOnly` (`lc_refresh_token`), nunca en el body de la respuesta ni accesible desde JS. En base solo se guarda su hash SHA-256 (`Session.refreshTokenHash`, `@unique`) — nunca el valor original. Rota en cada uso: la sesión vieja se marca `revokedAt`, se crea una fila nueva. Si se reintenta usar un refresh token ya revocado (reuso — indicio de robo), se revocan **todas** las sesiones activas de ese usuario, no solo la reusada — el modelo no rastrea "familias" de tokens, así que cortar todo acceso vigente de la cuenta es la respuesta segura sin agregar campos especulativos nuevos.
+
+Detalle de implementación relevante: la revocación masiva + el audit log de la detección de reuso corren dentro de la misma transacción de Prisma que hace la lectura, y esa transacción **nunca lanza una excepción en su callback** — devuelve un resultado discriminado y recién afuera se decide si hay que rechazar la solicitud. (Lanzar dentro del callback de `$transaction` hace que Prisma revierta todo lo escrito en esa transacción, incluida la revocación de seguridad que se quería persistir — se detectó con un test de integración contra Neon real, no con los tests unitarios, que usan un Prisma en memoria sin semántica real de rollback.)
+
+### 14.4 Sesiones (`Session`)
+
+Se usa el modelo real, sin campos especulativos: `userId`, `refreshTokenHash` (único, indexado), `ipAddress`, `userAgent`, `expiresAt`, `revokedAt` (nullable), `createdAt`. Logout nunca borra filas, solo marca `revokedAt`. Migración `20260923110309_auth_session_security` (índice único en `refresh_token_hash`, índice compuesto `(user_id, revoked_at)` para las consultas de sesiones activas/expiradas) — aplicada solo a `demo`, ver 14.10.
+
+### 14.5 Autorización
+
+`requireAuth` (backend/src/middleware/requireAuth.ts): valida el access token (firma/algoritmo/issuer/audience/expiración vía Zod), y en cada request confirma en base que la sesión existe, no está revocada ni expirada, y que el usuario existe y está `ACTIVE` — el rol efectivo para autorizar siempre se lee de la base en ese momento, nunca del claim `role` del JWT (que puede quedar desactualizado si un admin cambia el rol/estado de alguien a mitad de la vida del access token). `requireRole(...roles)` se apoya en el resultado de `requireAuth`.
+
+### 14.6 Endpoints
+
+`/api/v1/auth`: `POST /login`, `POST /refresh` (lee el refresh token solo de la cookie, valida `Origin` contra `FRONTEND_URL`), `POST /logout` (ídem, idempotente, nunca revela si el token existía), `GET /me` (requiere access token, nunca devuelve `passwordHash` ni sesiones).
+
+`/api/v1/admin/users` (`ADMIN` únicamente, vía `requireAuth` + `requireRole('ADMIN')`): `GET /` (paginado, filtrable por status/rol), `POST /:id/activate` (solo desde `PENDING_ACTIVATION`), `POST /:id/reset-password` (revoca todas las sesiones activas del usuario), `PATCH /:id/status` (transiciones explícitas — nunca `PENDING_ACTIVATION → ACTIVE` por esta vía, reservado a `/activate` —, con protección de auto-lockout: un admin no puede suspenderse/desactivarse a sí mismo si eso dejara al sistema sin ningún `ADMIN` activo).
+
+### 14.7 Primer administrador
+
+`npm run auth:bootstrap-admin` (`backend/src/scripts/bootstrapAdmin.ts`): núcleo puro `bootstrapAdmin(prisma, input)` + `main()` interactivo (usuario/contraseña por prompt, contraseña oculta vía `@inquirer/prompts` — nunca como argumento de línea de comandos, nunca hardcodeada). Se niega si ya existe un `ADMIN` con status `ACTIVE` (idempotente, seguro ante una segunda corrida), respeta la guarda `DATABASE_TARGET=demo`, y audita la creación sin registrar nunca la contraseña ni su hash en la salida de consola. **No se ejecutó en ningún momento de esta etapa** — solo se construyó y se testeó (unitariamente con un Prisma en memoria, y de forma controlada contra `demo` con limpieza determinística en `backend/src/test/integration/bootstrapAdmin.integration.test.ts`, nunca invocando su `main()`).
+
+### 14.8 Cookies y CSRF
+
+Frontend en Netlify, backend en Render — dominios distintos en esta etapa. CORS restringido a `FRONTEND_URL` con `credentials: true` (nunca `origin: '*'` combinado con credenciales). La cookie del refresh token se configura en un único lugar (`backend/src/config/cookies.ts`) para que su creación y su borrado usen exactamente los mismos atributos (nombre, `path`, `sameSite`, `secure`, `httpOnly`) — `res.clearCookie` los compara y, si no coinciden, la cookie no se borra realmente. `login`/`refresh`/`logout` exigen `Content-Type: application/json`; `refresh`/`logout` además validan el header `Origin` contra `FRONTEND_URL` antes de actuar.
+
+`COOKIE_SAME_SITE` (`lax`\|`strict`\|`none`) es configurable; si se deja vacía, se deriva `none` en producción (dominios cruzados reales) y `lax` en desarrollo local (mismo origen efectivo). La regla dura, verificada con un test dedicado (`deriveSecureFlag`): `SameSite=None` siempre fuerza `Secure=true`, sin excepción — nunca se desactiva esa protección "para que funcione".
+
+**Pendiente, documentado a propósito**: no se decidió todavía si la arquitectura final usa un proxy de Netlify (`_redirects`/Netlify Functions) para que frontend y backend compartan efectivamente el mismo origen público (evitando cookies cross-site del todo), o si se mantienen dominios separados con `SameSite=None; Secure`. Esa decisión queda para cuando se implemente la pantalla de login (fuera del alcance de esta etapa).
+
+### 14.9 Rate limiting, respuestas y auditoría
+
+Límite específico para `/auth/login` y `/auth/refresh` (`createAuthRateLimiter`, más estricto que el límite general de `/api`). Todas las respuestas de `/api/v1/auth`/`/api/v1/admin` llevan `Cache-Control: no-store`. Morgan nunca registra cookies ni el header `Authorization`. Auditoría (`AuditLog`) para: login exitoso/fallido, refresh, detección de reuso, logout, activación, cambio de estado, reset de contraseña, bootstrap del admin — nunca con contraseñas o tokens en `previousState`/`newState`. Un fallo al auditar el camino normal de login/refresh/logout nunca rompe la autenticación (auditoría *best-effort*, fuera de la transacción); en las operaciones administrativas y en la detección de reuso, en cambio, la auditoría es parte del efecto atómico (dentro de la misma transacción que el cambio de estado).
+
+### 14.10 Migración y verificación
+
+`20260923110309_auth_session_security` generada offline (`prisma migrate diff --from-schema <schema.prisma antes del cambio> --to-schema <schema.prisma actual> --script`, comparación pura entre dos archivos, sin base de shadow ni conexión — el flujo interactivo estándar de `migrate dev --create-only` no es viable en este entorno no interactivo cuando hay una advertencia que normalmente pide confirmación), inspeccionada a mano, y aplicada únicamente a `demo` con `prisma migrate deploy` (guardado). Verificado contra Postgres real: los dos índices nuevos existen exactamente como se esperaba, `_prisma_migrations` muestra ambas migraciones aplicadas sin rollback, las 75 filas del seed original y la tabla `sessions` (vacía antes de esta etapa) quedaron intactas.
+
+### 14.11 Tests
+
+Suite unitaria (`backend/src/test/auth/`, corre con `npm test`, nunca contra Neon): política de contraseñas, hash/verificación, tokens (firma/verificación, expiración, secreto/issuer/audience incorrectos, `alg=none`), transiciones de estado, cookies, `authService` (login/refresh/rotación/detección de reuso/logout), `requireAuth`/`requireRole`, `bootstrapAdmin`. Suite de integración (`backend/src/test/integration/`, `npm run test:integration`, guardada por `DATABASE_TARGET=demo`, siempre secuencial — `fileParallelism: false`, porque varios archivos miden conteos globales de filas como línea de base): login/refresh/rotación/detección de reuso/logout reales, activación/reset/cambio de estado/listado reales, e idempotencia real de `bootstrapAdmin` — todo con limpieza determinística, nunca deja usuarios/sesiones/auditorías de prueba, nunca toca las filas del seed real. Fue precisamente esta suite la que encontró el bug descrito en 14.3 (rollback de la detección de reuso) — los tests unitarios, con un Prisma en memoria sin transacciones reales, no podían detectarlo.
 
 **c) Build offline roto.** `prisma.config.ts` resolvía `DIRECT_URL` de forma eager (vía el helper `env()` de `prisma/config`), así que `prisma format`/`validate`/`generate` — que no tocan ninguna base — fallaban igual sin un `.env`. Se corrigió armando `datasource` de forma condicional (`process.env.DIRECT_URL` leído directo, sin el helper que lanza; `datasource` se omite por completo si falta, **sin URL de reemplazo hardcodeada ni connection string ficticia guardada**). Verificado con un entorno real sin `DATABASE_URL`/`DIRECT_URL`/`DATABASE_TARGET` (`.env` movido a un backup temporal fuera del repo y restaurado después, sin tocar su contenido): instalación, `prisma generate`, `prisma validate`, build, typecheck, lint, tests unitarios y `format:check` funcionan igual — ninguno requiere Neon. Solo conexión (`db:check`), migraciones, seed y tests de integración necesitan las variables reales, y fallan con un mensaje claro (nunca con una connection string) si faltan.
 

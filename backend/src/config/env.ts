@@ -6,6 +6,18 @@ import { z } from 'zod';
  * etapa, en la que todavía no se usan. `DATABASE_URL` es la única excepción
  * deliberada a esa regla — ver el comentario junto al campo.
  */
+
+/**
+ * Un `.env` con una variable declarada pero sin completar queda como
+ * `KEY=` (string vacío en `process.env`), no como clave ausente —
+ * `z.coerce.number()`/`z.enum()` tratan `''` como un valor inválido en vez
+ * de dejar que el `.default()`/`.optional()` se aplique. Se normaliza acá,
+ * antes de la validación real, para los campos numéricos/enum que además
+ * tienen semántica de "vacío = todavía no configurado".
+ */
+function emptyStringToUndefined(value: unknown): unknown {
+  return value === '' ? undefined : value;
+}
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
@@ -34,11 +46,42 @@ const envSchema = z.object({
   // servidor Express no lo necesita para arrancar: queda opcional acá:
   // el enforcement real vive en el guard de cada script, no en el arranque
   // general de la app.
-  DATABASE_TARGET: z.enum(['demo', 'production']).optional(),
-  JWT_ACCESS_SECRET: z.string().optional(),
-  JWT_REFRESH_SECRET: z.string().optional(),
-  ACCESS_TOKEN_TTL: z.string().optional(),
-  REFRESH_TOKEN_TTL: z.string().optional(),
+  DATABASE_TARGET: z.preprocess(emptyStringToUndefined, z.enum(['demo', 'production']).optional()),
+
+  // Etapa 3B.1 — autenticación. Opcional acá a propósito (mismo patrón que
+  // DATABASE_URL antes de Etapa 3A): el servidor arranca sin ella para que
+  // health/CORS/tests no dependan de auth, pero `backend/src/auth/config.ts`
+  // (importado por las rutas de auth, montadas siempre) la exige de forma
+  // eager y falla claro, sin revelar el valor, si falta — ver ese archivo.
+  // Mínimo 32 caracteres (256 bits) como piso criptográfico razonable para
+  // un secreto HMAC-SHA256 (HS256).
+  JWT_ACCESS_SECRET: z
+    .string()
+    .min(32, 'JWT_ACCESS_SECRET debe tener al menos 32 caracteres (256 bits) para HS256.')
+    .optional(),
+  // JWT_REFRESH_SECRET NO existe: el refresh token es opaco (no un JWT), no
+  // hay nada que firmar del lado del servidor — ver docs/SECURITY.md.
+  // Ambas en segundos. Duración corta para el access token (10-15 min);
+  // sesión persistente vía refresh token para el resto.
+  ACCESS_TOKEN_TTL: z.preprocess(
+    emptyStringToUndefined,
+    z.coerce.number().int().positive().default(720),
+  ),
+  REFRESH_TOKEN_TTL: z.preprocess(
+    emptyStringToUndefined,
+    z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(60 * 60 * 24 * 30),
+  ),
+  // Cookie del refresh token. Cross-site real en producción (Netlify ≠
+  // Render) — ver docs/ARCHITECTURE.md, "Cookies y CSRF", para el
+  // razonamiento completo y por qué queda configurable en vez de fijo.
+  COOKIE_SAME_SITE: z.preprocess(
+    emptyStringToUndefined,
+    z.enum(['lax', 'strict', 'none']).optional(),
+  ),
 
   // Neon Object Storage (interfaz S3) — reemplaza a Google Drive, ver
   // docs/ARCHITECTURE.md, "Object Storage". Backend local usa únicamente la

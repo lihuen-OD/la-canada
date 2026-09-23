@@ -18,6 +18,10 @@ export default defineConfig({
       FRONTEND_URL: 'http://localhost:5173',
       PORT: '4001',
       DATABASE_URL: 'postgresql://test:test@localhost:5432/test_db',
+      // Sintético, >=32 caracteres — nunca un secreto real. Igual patrón que
+      // DATABASE_URL: garantiza que `npm test` nunca dependa de un `.env`
+      // real para que la app (y las rutas de auth, montadas siempre) arranquen.
+      JWT_ACCESS_SECRET: 'test-only-access-token-secret-do-not-use-in-prod',
     },
     // Los tests de integración (contra Neon real) quedan fuera de la suite
     // normal — requieren DATABASE_URL/DIRECT_URL y se corren explícitamente

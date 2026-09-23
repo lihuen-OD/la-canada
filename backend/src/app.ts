@@ -2,6 +2,7 @@ import express, { type Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
+import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
 import { config } from './config';
 import { corsOptions } from './config/cors';
@@ -22,7 +23,14 @@ export function createApp(): Express {
   app.use(helmet());
   app.use(cors(corsOptions));
   app.use(compression());
-  app.use(express.json());
+  // Límite explícito y conservador de tamaño de body — ningún endpoint
+  // actual necesita más (el módulo de archivos, cuando exista, subirá
+  // binarios por otra vía, nunca como JSON en este límite).
+  app.use(express.json({ limit: '100kb' }));
+  // Necesario para leer la cookie del refresh token (`POST /auth/refresh`,
+  // `POST /auth/logout`) — no firma cookies (no hay ninguna cookie firmada
+  // en este proyecto), solo las parsea.
+  app.use(cookieParser());
 
   // Log HTTP de desarrollo/producción. No registra cookies ni el header
   // Authorization: los formatos 'dev'/'combined' de morgan solo incluyen

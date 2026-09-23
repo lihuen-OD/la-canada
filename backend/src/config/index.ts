@@ -21,4 +21,14 @@ export const config = {
   databaseUrl: env.DATABASE_URL,
   isProduction: env.NODE_ENV === 'production',
   isTest: env.NODE_ENV === 'test',
+  /** Puede faltar — `backend/src/auth/config.ts` es quien la exige de forma eager. */
+  jwtAccessSecret: env.JWT_ACCESS_SECRET,
+  accessTokenTtlSeconds: env.ACCESS_TOKEN_TTL,
+  refreshTokenTtlSeconds: env.REFRESH_TOKEN_TTL,
+  /**
+   * Cross-site real en producción (Netlify ≠ Render): sin config explícita,
+   * usa "none" en producción (requiere Secure, ver config/cookies.ts) y
+   * "lax" en desarrollo local (alcanza porque ahí no es cross-site).
+   */
+  cookieSameSite: env.COOKIE_SAME_SITE ?? (env.NODE_ENV === 'production' ? 'none' : 'lax'),
 } as const;

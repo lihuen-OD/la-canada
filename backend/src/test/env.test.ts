@@ -109,4 +109,117 @@ describe('loadEnv — DATABASE_URL / DIRECT_URL / DATABASE_TARGET (corrección p
       }),
     ).toThrow();
   });
+
+  it('DATABASE_TARGET vacío ("KEY=" sin completar en .env) se trata como ausente, no como valor inválido', () => {
+    const env = loadEnv({
+      FRONTEND_URL: 'http://localhost:5173',
+      DATABASE_URL: VALID_DATABASE_URL,
+      DATABASE_TARGET: '',
+    });
+    expect(env.DATABASE_TARGET).toBeUndefined();
+  });
+});
+
+describe('loadEnv — autenticación (Etapa 3B.1)', () => {
+  const VALID_JWT_SECRET = 'a'.repeat(32);
+
+  it('JWT_ACCESS_SECRET es opcional a nivel de schema (el arranque real lo exige en auth/config.ts, no acá)', () => {
+    const env = loadEnv({
+      FRONTEND_URL: 'http://localhost:5173',
+      DATABASE_URL: VALID_DATABASE_URL,
+    });
+    expect(env.JWT_ACCESS_SECRET).toBeUndefined();
+  });
+
+  it('JWT_ACCESS_SECRET exige un mínimo de 32 caracteres cuando está presente', () => {
+    expect(() =>
+      loadEnv({
+        FRONTEND_URL: 'http://localhost:5173',
+        DATABASE_URL: VALID_DATABASE_URL,
+        JWT_ACCESS_SECRET: 'demasiado-corto',
+      }),
+    ).toThrow(/32/);
+  });
+
+  it('acepta JWT_ACCESS_SECRET con 32+ caracteres', () => {
+    const env = loadEnv({
+      FRONTEND_URL: 'http://localhost:5173',
+      DATABASE_URL: VALID_DATABASE_URL,
+      JWT_ACCESS_SECRET: VALID_JWT_SECRET,
+    });
+    expect(env.JWT_ACCESS_SECRET).toBe(VALID_JWT_SECRET);
+  });
+
+  it('ya no declara JWT_REFRESH_SECRET (el refresh token es opaco, no un JWT)', () => {
+    const env = loadEnv({
+      FRONTEND_URL: 'http://localhost:5173',
+      DATABASE_URL: VALID_DATABASE_URL,
+    }) as unknown as Record<string, unknown>;
+    expect(env).not.toHaveProperty('JWT_REFRESH_SECRET');
+  });
+
+  it('ACCESS_TOKEN_TTL / REFRESH_TOKEN_TTL: valores por defecto cuando faltan', () => {
+    const env = loadEnv({
+      FRONTEND_URL: 'http://localhost:5173',
+      DATABASE_URL: VALID_DATABASE_URL,
+    });
+    expect(env.ACCESS_TOKEN_TTL).toBe(720);
+    expect(env.REFRESH_TOKEN_TTL).toBe(60 * 60 * 24 * 30);
+  });
+
+  it('ACCESS_TOKEN_TTL / REFRESH_TOKEN_TTL vacíos ("KEY=" sin completar) aplican el default, no fallan', () => {
+    const env = loadEnv({
+      FRONTEND_URL: 'http://localhost:5173',
+      DATABASE_URL: VALID_DATABASE_URL,
+      ACCESS_TOKEN_TTL: '',
+      REFRESH_TOKEN_TTL: '',
+    });
+    expect(env.ACCESS_TOKEN_TTL).toBe(720);
+    expect(env.REFRESH_TOKEN_TTL).toBe(60 * 60 * 24 * 30);
+  });
+
+  it('ACCESS_TOKEN_TTL / REFRESH_TOKEN_TTL respetan un valor explícito', () => {
+    const env = loadEnv({
+      FRONTEND_URL: 'http://localhost:5173',
+      DATABASE_URL: VALID_DATABASE_URL,
+      ACCESS_TOKEN_TTL: '900',
+      REFRESH_TOKEN_TTL: '3600',
+    });
+    expect(env.ACCESS_TOKEN_TTL).toBe(900);
+    expect(env.REFRESH_TOKEN_TTL).toBe(3600);
+  });
+
+  it('rechaza un ACCESS_TOKEN_TTL no positivo', () => {
+    expect(() =>
+      loadEnv({
+        FRONTEND_URL: 'http://localhost:5173',
+        DATABASE_URL: VALID_DATABASE_URL,
+        ACCESS_TOKEN_TTL: '0',
+      }),
+    ).toThrow();
+  });
+
+  it('COOKIE_SAME_SITE es opcional, solo acepta lax/strict/none, y vacío se trata como ausente', () => {
+    const empty = loadEnv({
+      FRONTEND_URL: 'http://localhost:5173',
+      DATABASE_URL: VALID_DATABASE_URL,
+      COOKIE_SAME_SITE: '',
+    });
+    expect(empty.COOKIE_SAME_SITE).toBeUndefined();
+
+    const valid = loadEnv({
+      FRONTEND_URL: 'http://localhost:5173',
+      DATABASE_URL: VALID_DATABASE_URL,
+      COOKIE_SAME_SITE: 'none',
+    });
+    expect(valid.COOKIE_SAME_SITE).toBe('none');
+
+    expect(() =>
+      loadEnv({
+        FRONTEND_URL: 'http://localhost:5173',
+        DATABASE_URL: VALID_DATABASE_URL,
+        COOKIE_SAME_SITE: 'invalido',
+      }),
+    ).toThrow();
+  });
 });

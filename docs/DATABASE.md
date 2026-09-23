@@ -316,14 +316,14 @@ Un `Employee` es la identidad operativa liviana (nombre a mostrar, rol funcional
 
 ### Usuarios pendientes de activación
 
-Los 4 `User` que sembraría el seed nacen con `status: PENDING_ACTIVATION` y `passwordHash: null`. Ningún flujo de autenticación existe todavía (Etapa 3) — este estado es exclusivamente un lugar reservado.
+Los 4 `User` que sembró el seed nacen con `status: PENDING_ACTIVATION` y `passwordHash: null`. **Actualización Etapa 3B.1**: el flujo de autenticación ya existe (`docs/ARCHITECTURE.md`, sección 14) — cada uno de estos 4 usuarios pasa a `ACTIVE` recién cuando un `ADMIN` los active explícitamente vía `POST /api/v1/admin/users/:id/activate` (con una contraseña inicial provista en ese momento, nunca inventada por el sistema); ninguno se activó como parte de esta etapa.
 
 Semántica confirmada de cada campo, explícita para que la Etapa 3 no tenga ambigüedad:
 
 - **`passwordHash`** puede almacenar **únicamente un hash criptográfico** (ej. bcrypt/argon2), **nunca la credencial en texto plano**. El nombre se mantiene tal cual (no se renombra): es consistente con la estrategia futura y ya deja claro, por sí mismo, que ahí no va texto plano.
 - Es nullable **solo** para representar el estado `PENDING_ACTIVATION` — un usuario sin contraseña todavía definida. La invariante "no puede quedar `ACTIVE` con `passwordHash` nulo" **sí es expresable como `CHECK` de Postgres de una sola tabla** (`CHECK (status != 'ACTIVE' OR password_hash IS NOT NULL)`) — ver la matriz de invariantes más abajo; se aplicará en la futura migración, no en este schema todavía.
 - La aplicación (Etapa 3) usará una credencial inicial configurada mediante un proceso de activación — nunca un valor generado o inventado en el seed.
-- `Session` (ver más arriba) es **persistencia de sesión segura** tras una autenticación real — su existencia en el modelo **no** implica ni habilita ningún tipo de omisión de autenticación; sin lógica de emisión/validación implementada todavía.
+- `Session` (ver más arriba) es **persistencia de sesión segura** tras una autenticación real. **Actualización Etapa 3B.1**: la lógica de emisión/validación ya existe (login/refresh con rotación/logout, ver `docs/ARCHITECTURE.md` sección 14) y `refreshTokenHash` ganó un índice único (migración `20260923110309_auth_session_security`, ver más abajo) para que `POST /auth/refresh` busque por hash con índice real, no con un table scan.
 
 ### Historial de asignación de tareas — asignado vs. completador
 
@@ -408,7 +408,7 @@ Invariantes de negocio que Prisma **no** puede expresar de forma completamente d
 | 8 | Singleton de `ChickenCoop`/`PropertyLocation` identificado por clave única | ✅ `code @unique` | — | — | — | Resuelto en este schema — ver "Singletons reforzados" arriba |
 | 9 | `TaskExecution.assignedEmployeeId` = snapshot inmutable, nunca se reescribe tras reasignar `Task.employeeId` | — | — | ✅ | — | Prisma no puede "congelar" un valor tras la creación; el servicio simplemente nunca debe incluir ese campo en un `update()` |
 | 10 | `TaskExecution` única por `(taskId, periodKey)` | ✅ `@@unique([taskId, periodKey])` | (ya cubierto) | — | — | Resuelto en este schema |
-| 11 | `AuditLog`/`Session` — nunca editados, solo creados (inmutabilidad) | — | — | ✅ | — | Prisma permite `.update()` técnicamente; la disciplina de no llamarlo es de servicio, reforzada por no tener `updatedAt` (ver `docs/DATABASE.md`, "Timestamps") |
+| 11 | `AuditLog` nunca editado ni eliminado (inmutabilidad total). `Session` nunca **eliminado** físicamente — se revoca seteando `revokedAt`, nunca se reescribe ningún otro campo tras crearla | — | — | ✅ | — | **Actualización Etapa 3B.1**: `Session.revokedAt` sí se actualiza de verdad (login/refresh/logout/reset de contraseña/cambio de estado lo hacen) — la inmutabilidad de esta fila nunca fue "ningún `.update()`", sino "ningún campo salvo `revokedAt` se reescribe, y ninguna fila se borra" (ver `backend/src/auth/authService.ts`). `AuditLog` sí sigue sin ningún `.update()` en ningún camino de código |
 | 12 | `FileAsset` único por `(bucket, objectKey)` — no se registra dos veces el mismo objeto dentro del mismo bucket | ✅ `@@unique([bucket, objectKey])` | (ya cubierto) | — | — | Resuelto en este schema — ver "Object Storage reemplaza Google Drive" arriba |
 | 13 | `FileAsset.sizeBytes` nunca negativo | — | ✅ `CHECK (size_bytes >= 0)` | ✅ (validación de formulario/backend antes de escribir) | — | Columna única, `CHECK` de una sola tabla — directo |
 | 14 | Un `FileAsset` con `status = AVAILABLE` requiere `objectKey` válida (no vacía, con formato esperado) | — | — | ✅ | — | `objectKey` es `String` no nulo a nivel de tipo, pero "válida" (formato, no vacía) es una regla de negocio que Prisma no puede expresar — se valida al confirmar la subida |
@@ -430,12 +430,16 @@ Chequeo explícito de los puntos pedidos, con resultado:
 - **Datos personales en modelos incorrectos**: no — siguen separados en `EmployeeProfile`/`EmployeeChild`, nunca en `Employee`.
 - **Enums insuficientes o excesivamente rígidos**: sin cambios — `AuditLog.action` sigue siendo `String` a propósito (ver arriba).
 - **Uso accidental de `Float` para cantidades**: **cero** — verificado explícitamente, el schema no declara ningún campo `Float` (test dedicado en `backend/src/test/schema-static.test.ts`).
-- **Timestamps faltantes**: `AuditLog` y `Session` tienen solo `createdAt` — **decisión deliberada, no un olvido**: ambos representan un hecho puntual e inmutable (un log no se edita; una sesión se revoca seteando `revokedAt`, no se "actualiza"). El resto de los modelos de negocio mutables tiene `createdAt` + `updatedAt`.
+- **Timestamps faltantes**: `AuditLog` y `Session` tienen solo `createdAt` — **decisión deliberada, no un olvido**: ambos representan un hecho puntual (un log no se edita nunca; una sesión solo cambia un campo, `revokedAt`, y nunca se reescribe ningún otro). El resto de los modelos de negocio mutables tiene `createdAt` + `updatedAt`.
 - **Soft delete inconsistente**: la mayoría usa `active: Boolean`; `FileAsset` usa `status: FileStatus` + `deletedAt` en su lugar — deliberado, no inconsistente: un archivo tiene un ciclo de vida de eliminación real (con fecha), distinto de "activo/inactivo" en el sentido de las demás entidades.
 
 ### Etapa 3A — migración inicial aplicada a `demo`
 
 **Actualización**: la migración real contra Neon ya se ejecutó — exclusivamente contra la rama `demo`, nunca `production`. `backend/prisma/migrations/20260922174631_init/migration.sql`, generada con `prisma migrate dev --create-only`, revisada a mano y aplicada con `prisma migrate deploy`. Contiene los 22 modelos, 11 enums, 23 FK (sin ninguna `ON DELETE CASCADE` — ver corrección más arriba) y 41 índices únicos del schema, más los 5 `CHECK` de la matriz de invariantes clasificados para SQL (filas 1, 3, 4, 5, 13) agregados a mano en esa misma migración. Verificado contra Postgres real (no solo releído del archivo) y probado con inserts inválidos dentro de transacciones con `ROLLBACK` — ver `docs/MIGRATION_PLAN.md`, "Etapa 3A", y `docs/ARCHITECTURE.md`, sección 13, para el detalle completo del proceso y del resultado.
+
+### Etapa 3B.1 — `Session`: índices para autenticación real
+
+Migración `20260923110309_auth_session_security`, aplicada solo a `demo`: agrega un índice único sobre `refresh_token_hash` (búsqueda por hash en `POST /auth/refresh`, y protección adicional ante una colisión de hash — prácticamente imposible con 256 bits aleatorios, pero igual reforzada) y un índice compuesto `(user_id, revoked_at)` (consultas de sesiones activas/expiradas de un usuario, usadas por la detección de reuso y por la revocación masiva al suspender/desactivar/resetear contraseña). Sin cambios de columnas — el modelo `Session` ya tenía exactamente los campos necesarios desde la Etapa 2. Generada offline con `prisma migrate diff --from-schema/--to-schema --script` (sin conexión — el flujo interactivo estándar pedía una confirmación no disponible en este entorno no interactivo), inspeccionada a mano, aplicada con `prisma migrate deploy`. Verificado contra Postgres real: los dos índices existen exactamente como se esperaba, las 75 filas del seed original y la tabla `sessions` (vacía antes de esta etapa, y vacía otra vez después de que los tests de integración limpiaron lo que crearon) quedaron intactas. Detalle completo del proceso en `docs/ARCHITECTURE.md`, sección 14.10, y en `docs/MIGRATION_PLAN.md`, "Etapa 3B.1".
 
 El seed (`backend/prisma/seed.ts`) también se ejecutó dos veces contra `demo`: 61 entidades maestras + 14 movimientos de apertura = 75 filas en la primera corrida, idénticas en la segunda (idempotencia confirmada, cero duplicados). Detalle por tabla en `docs/SEED_MANIFEST.md`.
 

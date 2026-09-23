@@ -75,15 +75,21 @@ Tres problemas detectados en la revisión del PR — corregidos sin tocar el mod
 - **Revalidación**: suite normal sin variables de Neon ✅; conexión y `migrate status` contra `demo` con el `.env` local (sin aplicar nada) ✅; conteos agregados siguen en 75 ✅; build/typecheck/lint/tests/format/Prisma format-validate-generate ✅; escaneo de secretos sin coincidencias ✅.
 - **No incluyó**: ninguna conexión a `production`, ninguna migración nueva, ningún `db push`, ninguna re-ejecución del seed, ninguna autenticación, ningún uso de Object Storage, ningún merge a `main`.
 
-## Etapa 3 — Implementar autenticación
+## Etapa 3B.1 — Autenticación backend profesional ✅ completada
 
-- **Objetivo**: reemplazar el PIN comparado en el cliente por autenticación real del lado del backend, sobre el modelo `User`/`Session` ya definido en la Etapa 2.
-- **Alcance sugerido**:
-  - Definir con el usuario el mecanismo real de activación de los 4 `User` `PENDING_ACTIVATION` ya sembrados (invitación por link, contraseña temporal, u otro).
-  - Sesión gestionada por el backend (cookie httpOnly o JWT de corta duración con refresh vía `Session.refreshTokenHash` — decisión a tomar en esta etapa, ver `docs/ARCHITECTURE.md` §5-6).
-  - Autorización real por rol (`ADMIN`/`EMPLOYEE`) verificada en cada endpoint, no solo ocultada en la UI.
-  - Proceso seguro para crear el administrador inicial (variable de entorno o comando administrativo — nunca datos inventados en el seed, ya excluido a propósito en la Etapa 2).
-- **No incluye**: exponer ningún secreto en el frontend (regla 8 de `AGENTS.md`).
+- **Objetivo**: reemplazar el PIN comparado en el cliente por autenticación real del lado del backend (login, sesión persistente con refresh rotativo, autorización por rol verificada en servidor, administración de usuarios, bootstrap del primer admin), sobre el modelo `User`/`Session` ya definido en la Etapa 2 — **sin ninguna pantalla ni cambio funcional en el frontend**.
+- **Resultado**:
+  - **Contraseñas**: Argon2id (`argon2`, parámetros OWASP), política mínimo 12/máximo 128 caracteres sin reglas de composición forzadas, comparación contra hash *dummy* cuando no aplica para no filtrar por tiempo de respuesta.
+  - **Access token**: JWT HS256 vía `jose`, claims mínimos (`sub`/`sid`/`role`/`iat`/`exp`), issuer/audience propios, corta duración configurable (`ACCESS_TOKEN_TTL`).
+  - **Refresh token**: opaco (256 bits aleatorios, no JWT), solo en cookie `HttpOnly`, solo su hash SHA-256 persistido en `Session`. Rotación en cada uso; reuso de un token ya revocado revoca todas las sesiones activas del usuario (posible robo) — la revocación masiva y su auditoría corren dentro de la misma transacción que el chequeo, sin depender de que el callback de `$transaction` lance una excepción (bug real encontrado por los tests de integración contra Neon, corregido — ver `docs/ARCHITECTURE.md` §14.3).
+  - **Migración** `20260923110309_auth_session_security` (índice único en `refresh_token_hash`, índice compuesto `(user_id, revoked_at)`), generada offline (`prisma migrate diff --from-schema/--to-schema --script`), aplicada solo a `demo`. Detalle en `docs/DATABASE.md`, "Etapa 3B.1".
+  - **Endpoints**: `/api/v1/auth/{login,refresh,logout,me}`; administración `ADMIN`-only en `/api/v1/admin/users` (listado paginado, activar, resetear contraseña, cambiar estado con protección de auto-lockout).
+  - **Bootstrap del primer admin** (`npm run auth:bootstrap-admin`): construido y testeado (unitariamente y contra `demo` con limpieza determinística) — **nunca ejecutado como parte de esta etapa**, no se creó ningún administrador real.
+  - **Cookies/CSRF**: configuración centralizada (`backend/src/config/cookies.ts`) para que creación y borrado de la cookie usen exactamente los mismos atributos; `SameSite=None` fuerza `Secure=true` siempre; `Origin` validado en `/refresh`/`/logout`. Pendiente, documentado a propósito: elegir entre proxy de Netlify o dominios separados — decisión para cuando exista pantalla de login.
+  - **Auditoría**: login (éxito/fallo), refresh, detección de reuso, logout, activación, cambio de estado, reset de contraseña y bootstrap, todos en `AuditLog` — nunca con contraseñas ni tokens.
+  - **Variables de entorno**: `JWT_ACCESS_SECRET` (obligatoria para que la autenticación funcione, mínimo 32 caracteres — generada por el usuario, nunca pedida ni escrita por el agente), `ACCESS_TOKEN_TTL`/`REFRESH_TOKEN_TTL`/`COOKIE_SAME_SITE` (opcionales, con default). `JWT_REFRESH_SECRET` eliminada (el refresh token es opaco, no hay nada que firmar).
+  - **Tests**: suite unitaria completa (`backend/src/test/auth/`, sin conexión a Neon) más suite de integración contra `demo` (`backend/src/test/integration/{auth,adminUsers,bootstrapAdmin}.integration.test.ts`, guardada por `DATABASE_TARGET=demo`, siempre secuencial entre archivos, limpieza determinística verificada por conteo antes/después) — ver `docs/ARCHITECTURE.md` §14.11 para el detalle y para el bug real que solo la suite de integración pudo encontrar.
+- **No incluyó**: ninguna pantalla de login ni cambio funcional en `frontend/`, ninguna ejecución real de `auth:bootstrap-admin`, ninguna conexión a `production`, ningún uso de Object Storage, ningún despliegue, ninguna rama ni Pull Request nuevos (trabajo directo sobre `main`).
 
 ## Etapa 4 — Reconstruir el frontend sin alterar el diseño
 
@@ -187,3 +193,18 @@ Cambios de esta revisión:
 - [x] El seed (`backend/prisma/seed.ts`) no crea ningún `FileAsset` — sin cambios, conteo de 61 entidades maestras + 14 movimientos de apertura = 75 filas potenciales sin alterar.
 - [x] Sin conexión a Neon, sin migración, sin `db push`, sin ejecución del seed, sin creación de buckets, sin subida real de archivos, sin implementación de SDK S3 ni de endpoints — todo lo relativo a esta etapa es solo modelo de datos y documentación.
 - [x] Commit único de las Etapas 2, 2.1 y 2.2 realizado tras validar todo en verde (ver reporte de cierre entregado al usuario).
+
+## Validaciones obligatorias de la Etapa 3B.1
+
+- [x] `prisma format` / `prisma validate` / `prisma generate` — sin conexión, en verde.
+- [x] Migración `20260923110309_auth_session_security` generada con `--create-only` (vía diff offline, ver `docs/ARCHITECTURE.md` §14.10), inspeccionada a mano antes de aplicar.
+- [x] Migración aplicada solo a `demo` (`prisma migrate deploy`); `prisma migrate status` sin drift.
+- [x] `npm run build`, `npm run typecheck`, `npm run lint`, `npm run format:check` — en verde sobre el monorepo completo.
+- [x] Suite unitaria del backend (`npm test`, incluye toda `backend/src/test/auth/`) — 205 tests en verde, sin conexión a Neon.
+- [x] Suite de integración autorizada contra `demo` (`npm run test:integration`, guardada por `DATABASE_TARGET=demo`) — en verde; encontró y permitió corregir un bug real (rollback de la detección de reuso de refresh token dentro de `$transaction`, ver `docs/ARCHITECTURE.md` §14.3).
+- [x] Verificado por SQL directo tras los tests de integración: 4 usuarios reales del seed intactos, 0 sesiones remanentes, 0 usuarios con prefijo de prueba — ninguna de las 75 filas originales tocada.
+- [x] Escaneo de secretos sobre el diff completo (patrones de connection string con credenciales, claves de API, JWT reales, llaves privadas) — sin coincidencias.
+- [x] Confirmado que `.env` sigue sin trackear (`git ls-files | grep -x ".env"` vacío) y que `.env.example` solo tiene placeholders vacíos con comentarios.
+- [x] `npm run auth:bootstrap-admin` **no se ejecutó** en ningún momento de esta etapa — solo su núcleo puro se testeó, con limpieza determinística cuando llegó a crear un admin real de prueba contra `demo`.
+- [x] Documentación actualizada: `README.md`, `docs/ARCHITECTURE.md` (§5, §6, §8, §11, y nueva §14), `docs/SECURITY.md`, `docs/DATABASE.md`, este documento, y `AGENTS.md` ("Estado actual").
+- **No incluyó**: ninguna pantalla de login, ningún cambio funcional en `frontend/`, ninguna conexión a `production`, ningún uso de Object Storage, ningún despliegue, ninguna rama ni Pull Request (commit único directo sobre `main`).

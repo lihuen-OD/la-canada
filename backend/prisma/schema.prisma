@@ -265,14 +265,20 @@ model EmployeeChild {
 }
 
 /// Sesión de autenticación revocable. El refresh token nunca se guarda en
-/// texto plano — solo su hash. No implementado todavía (Etapa 3); el
-/// modelo existe para que el diseño de datos esté completo.
+/// texto plano — solo su hash (SHA-256). Implementado en la Etapa 3B.1
+/// (migración `auth_session_security`).
 model Session {
   id     String @id @default(uuid()) @db.Uuid
   userId String @map("user_id") @db.Uuid
   user   User   @relation(fields: [userId], references: [id])
 
-  refreshTokenHash String    @map("refresh_token_hash")
+  /// Hash determinístico (SHA-256) del refresh token opaco — nunca el token
+  /// original. `@unique` sirve dos propósitos a la vez: impide que dos
+  /// sesiones terminen con el mismo hash (colisión, prácticamente
+  /// imposible con 256 bits aleatorios, pero se protege igual) y da un
+  /// índice real para la búsqueda de `POST /auth/refresh` (`findUnique` por
+  /// hash, no un scan de tabla).
+  refreshTokenHash String    @unique @map("refresh_token_hash")
   ipAddress        String?   @map("ip_address")
   userAgent        String?   @map("user_agent")
   expiresAt        DateTime  @map("expires_at")
@@ -282,6 +288,10 @@ model Session {
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([userId])
+  /// Cubre "todas las sesiones activas de este usuario" — usado al detectar
+  /// reutilización de un refresh token revocado (revocar el resto) y al
+  /// suspender/desactivar un usuario desde administración.
+  @@index([userId, revokedAt])
   @@map("sessions")
 }
 
