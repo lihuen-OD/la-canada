@@ -4,8 +4,8 @@ import { normalizeUsername } from './normalize';
 /**
  * Una cuenta de usuario PENDING_ACTIVATION por cada empleado real, derivada
  * de `employeeSeeds` (garantiza 1:1 por construcción — nunca un username
- * sin empleado real detrás). Deliberadamente sin `passwordHash` ni ningún
- * campo de credencial: no se inventa PIN, contraseña ni hash — ver
+ * sin empleado real detrás). Deliberadamente sin `pinHash` ni ningún
+ * campo de credencial: no se inventa PIN ni hash — ver
  * "Usuarios reales" en las instrucciones de la Etapa 2 y
  * docs/ARCHITECTURE.md.
  *

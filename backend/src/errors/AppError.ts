@@ -33,13 +33,14 @@ export class CorsOriginError extends AppError {
 }
 
 /**
- * Un único error para TODO fallo de login (usuario inexistente, contraseña
- * incorrecta, o estado no ACTIVE) — a propósito, para no permitir
- * enumeración de cuentas por el mensaje ni por el código de error.
+ * Un único error para TODO fallo de login (identidad inexistente, PIN
+ * incorrecto, estado no ACTIVE, o cuenta bloqueada por intentos fallidos)
+ * — a propósito, para no permitir enumeración de cuentas ni de motivos de
+ * bloqueo por el mensaje ni por el código de error.
  */
 export class InvalidCredentialsError extends AppError {
   constructor() {
-    super('Usuario o contraseña incorrectos.', 401, { code: 'AUTH_INVALID_CREDENTIALS' });
+    super('Identidad o PIN incorrectos.', 401, { code: 'AUTH_INVALID_CREDENTIALS' });
   }
 }
 

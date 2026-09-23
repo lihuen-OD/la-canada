@@ -1,73 +1,83 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { PrismaClient } from '../../generated/prisma/client';
-import { hashPassword } from '../../auth/password';
-import { getPublicUserById, login, logout, refresh } from '../../auth/authService';
+import { hashPin } from '../../auth/pin';
+import { getLoginOptions, getPublicUserById, login, logout, refresh } from '../../auth/authService';
 import { InvalidCredentialsError, InvalidSessionError } from '../../errors/AppError';
 import { createFakePrisma, type FakeUserRecord } from './fakePrisma';
 
-const KNOWN_PASSWORD = 'contraseña de prueba bastante larga y segura';
-let knownPasswordHash: string;
+const KNOWN_PIN = '4821';
+let knownPinHash: string;
 
 const META = { ipAddress: '127.0.0.1', userAgent: 'vitest' };
 
 beforeAll(async () => {
-  knownPasswordHash = await hashPassword(KNOWN_PASSWORD);
+  knownPinHash = await hashPin(KNOWN_PIN);
 });
 
 function activeUser(overrides: Partial<FakeUserRecord> = {}): FakeUserRecord {
   return {
-    id: 'user-active-1',
+    id: crypto.randomUUID(),
     username: 'empleada.activa',
     role: 'EMPLOYEE',
     status: 'ACTIVE',
-    passwordHash: knownPasswordHash,
+    pinHash: knownPinHash,
+    failedLoginAttempts: 0,
+    lockedUntil: null,
     employee: { id: 'employee-1', displayName: 'Empleada Activa', colorHex: '#4a7c59' },
+    createdAt: new Date(),
     ...overrides,
   };
 }
 
 describe('login', () => {
-  it('login válido: crea sesión y devuelve access token + datos públicos', async () => {
-    const { prisma, sessions } = createFakePrisma([activeUser()]);
+  it('login válido con PIN correcto: crea sesión y devuelve access token + datos públicos', async () => {
+    const user = activeUser();
+    const { prisma, sessions } = createFakePrisma([user]);
     const result = await login(prisma as unknown as PrismaClient, {
-      username: 'empleada.activa',
-      password: KNOWN_PASSWORD,
+      userId: user.id,
+      pin: KNOWN_PIN,
       ...META,
     });
     expect(result.accessToken).toEqual(expect.any(String));
     expect(result.refreshToken).toEqual(expect.any(String));
-    expect(result.user.username).toBe('empleada.activa');
-    expect(result.user).not.toHaveProperty('passwordHash');
+    expect(result.user.id).toBe(user.id);
+    expect(result.user).not.toHaveProperty('username');
+    expect(result.user).not.toHaveProperty('pinHash');
     expect(sessions.size).toBe(1);
   });
 
-  it('normaliza el username antes de buscarlo (mismo criterio que el seed)', async () => {
-    const { prisma } = createFakePrisma([activeUser({ username: 'coke' })]);
+  it('PIN con cero inicial funciona de punta a punta, y su variante sin el cero nunca sirve como si fuera el mismo PIN', async () => {
+    const pinWithLeadingZero = '0091';
+    const user = activeUser({ pinHash: await hashPin(pinWithLeadingZero) });
+    const { prisma } = createFakePrisma([user]);
     const result = await login(prisma as unknown as PrismaClient, {
-      username: '  Coke  ',
-      password: KNOWN_PASSWORD,
+      userId: user.id,
+      pin: pinWithLeadingZero,
       ...META,
     });
-    expect(result.user.username).toBe('coke');
-  });
+    expect(result.accessToken).toEqual(expect.any(String));
 
-  it('login con contraseña incorrecta: InvalidCredentialsError genérico', async () => {
-    const { prisma } = createFakePrisma([activeUser()]);
+    // '91' (como si algo hubiera parseado el string a número y perdido el
+    // cero) nunca debe autenticar contra el hash de '0091'.
     await expect(
-      login(prisma as unknown as PrismaClient, {
-        username: 'empleada.activa',
-        password: 'contraseña-incorrecta',
-        ...META,
-      }),
+      login(prisma as unknown as PrismaClient, { userId: user.id, pin: '91', ...META }),
     ).rejects.toBeInstanceOf(InvalidCredentialsError);
   });
 
-  it('usuario inexistente: mismo error genérico que contraseña incorrecta (sin enumeración)', async () => {
+  it('login con PIN incorrecto: InvalidCredentialsError genérico', async () => {
+    const user = activeUser();
+    const { prisma } = createFakePrisma([user]);
+    await expect(
+      login(prisma as unknown as PrismaClient, { userId: user.id, pin: '0000', ...META }),
+    ).rejects.toBeInstanceOf(InvalidCredentialsError);
+  });
+
+  it('usuario inexistente: mismo error genérico que PIN incorrecto (sin enumeración)', async () => {
     const { prisma } = createFakePrisma([]);
     await expect(
       login(prisma as unknown as PrismaClient, {
-        username: 'no-existe',
-        password: KNOWN_PASSWORD,
+        userId: crypto.randomUUID(),
+        pin: KNOWN_PIN,
         ...META,
       }),
     ).rejects.toBeInstanceOf(InvalidCredentialsError);
@@ -76,40 +86,162 @@ describe('login', () => {
   it.each(['PENDING_ACTIVATION', 'SUSPENDED', 'DEACTIVATED'] as const)(
     'usuario en estado %s: mismo error genérico, nunca deja loguear',
     async (status) => {
-      const { prisma } = createFakePrisma([activeUser({ status, username: 'no-activo' })]);
+      const user = activeUser({ status });
+      const { prisma } = createFakePrisma([user]);
       await expect(
-        login(prisma as unknown as PrismaClient, {
-          username: 'no-activo',
-          password: KNOWN_PASSWORD,
-          ...META,
-        }),
+        login(prisma as unknown as PrismaClient, { userId: user.id, pin: KNOWN_PIN, ...META }),
       ).rejects.toBeInstanceOf(InvalidCredentialsError);
     },
   );
 
-  it('usuario PENDING_ACTIVATION sin passwordHash: no revienta, responde igual que credenciales inválidas', async () => {
-    const { prisma } = createFakePrisma([
-      activeUser({ status: 'PENDING_ACTIVATION', passwordHash: null, username: 'pendiente' }),
-    ]);
+  it('usuario PENDING_ACTIVATION sin pinHash: no revienta, responde igual que credenciales inválidas', async () => {
+    const user = activeUser({ status: 'PENDING_ACTIVATION', pinHash: null });
+    const { prisma } = createFakePrisma([user]);
     await expect(
-      login(prisma as unknown as PrismaClient, {
-        username: 'pendiente',
-        password: 'cualquier-cosa-larga-1234',
-        ...META,
-      }),
+      login(prisma as unknown as PrismaClient, { userId: user.id, pin: '1234', ...META }),
     ).rejects.toBeInstanceOf(InvalidCredentialsError);
+  });
+
+  it('nunca incluye el PIN en la auditoría (ni en éxito ni en fallo)', async () => {
+    const user = activeUser();
+    const { prisma, auditLogs } = createFakePrisma([user]);
+    await login(prisma as unknown as PrismaClient, { userId: user.id, pin: KNOWN_PIN, ...META });
+    await expect(
+      login(prisma as unknown as PrismaClient, { userId: user.id, pin: '0000', ...META }),
+    ).rejects.toBeInstanceOf(InvalidCredentialsError);
+
+    const serialized = JSON.stringify(auditLogs);
+    expect(serialized).not.toContain(KNOWN_PIN);
+    expect(serialized).not.toContain('0000');
+  });
+
+  describe('protección contra fuerza bruta', () => {
+    it('5 fallos consecutivos bloquean la cuenta', async () => {
+      const user = activeUser();
+      const { prisma, users } = createFakePrisma([user]);
+      for (let i = 0; i < 5; i++) {
+        await expect(
+          login(prisma as unknown as PrismaClient, { userId: user.id, pin: '0000', ...META }),
+        ).rejects.toBeInstanceOf(InvalidCredentialsError);
+      }
+      const updated = users.get(user.id);
+      expect(updated?.failedLoginAttempts).toBe(5);
+      expect(updated?.lockedUntil).not.toBeNull();
+      expect(updated?.lockedUntil?.getTime()).toBeGreaterThan(Date.now());
+    });
+
+    it('la cuenta bloqueada rechaza el login aunque el PIN sea correcto', async () => {
+      const user = activeUser({ lockedUntil: new Date(Date.now() + 60_000) });
+      const { prisma } = createFakePrisma([user]);
+      await expect(
+        login(prisma as unknown as PrismaClient, { userId: user.id, pin: KNOWN_PIN, ...META }),
+      ).rejects.toBeInstanceOf(InvalidCredentialsError);
+    });
+
+    it('un bloqueo ya vencido permite volver a intentar', async () => {
+      const user = activeUser({ lockedUntil: new Date(Date.now() - 1000) });
+      const { prisma } = createFakePrisma([user]);
+      await expect(
+        login(prisma as unknown as PrismaClient, { userId: user.id, pin: KNOWN_PIN, ...META }),
+      ).resolves.toBeDefined();
+    });
+
+    it('un login correcto resetea el contador de intentos y el bloqueo', async () => {
+      const user = activeUser({ failedLoginAttempts: 3 });
+      const { prisma, users } = createFakePrisma([user]);
+      await login(prisma as unknown as PrismaClient, { userId: user.id, pin: KNOWN_PIN, ...META });
+      const updated = users.get(user.id);
+      expect(updated?.failedLoginAttempts).toBe(0);
+      expect(updated?.lockedUntil).toBeNull();
+    });
+
+    it('un bloqueo nuevo genera además una auditoría distinta de "login fallido"', async () => {
+      const user = activeUser();
+      const { prisma, auditLogs } = createFakePrisma([user]);
+      for (let i = 0; i < 5; i++) {
+        await expect(
+          login(prisma as unknown as PrismaClient, { userId: user.id, pin: '0000', ...META }),
+        ).rejects.toBeInstanceOf(InvalidCredentialsError);
+      }
+      const lockedAudit = auditLogs.filter((a) => a.action === 'auth.login.locked');
+      const failedAudit = auditLogs.filter((a) => a.action === 'auth.login.failed');
+      expect(lockedAudit).toHaveLength(1);
+      expect(failedAudit).toHaveLength(5);
+    });
+  });
+});
+
+describe('getLoginOptions', () => {
+  it('incluye únicamente usuarios ACTIVE, en orden estable por createdAt', async () => {
+    const t0 = new Date('2026-01-01T00:00:00Z');
+    const t1 = new Date('2026-01-02T00:00:00Z');
+    const t2 = new Date('2026-01-03T00:00:00Z');
+    const active1 = activeUser({
+      id: crypto.randomUUID(),
+      createdAt: t1,
+      employee: { id: 'e1', displayName: 'Segunda', colorHex: '#111111' },
+    });
+    const active2 = activeUser({
+      id: crypto.randomUUID(),
+      createdAt: t0,
+      employee: { id: 'e2', displayName: 'Primera', colorHex: '#222222' },
+    });
+    const pending = activeUser({
+      id: crypto.randomUUID(),
+      status: 'PENDING_ACTIVATION',
+      pinHash: null,
+      createdAt: t2,
+    });
+    const suspended = activeUser({ id: crypto.randomUUID(), status: 'SUSPENDED', createdAt: t2 });
+
+    const { prisma } = createFakePrisma([active1, active2, pending, suspended]);
+    const options = await getLoginOptions(prisma as unknown as PrismaClient);
+
+    expect(options.map((o) => o.displayName)).toEqual(['Primera', 'Segunda']);
+  });
+
+  it('un ADMIN sin Employee vinculado se muestra con la etiqueta genérica "Administrador"', async () => {
+    const admin = activeUser({
+      id: crypto.randomUUID(),
+      role: 'ADMIN',
+      employee: null,
+    });
+    const { prisma } = createFakePrisma([admin]);
+    const options = await getLoginOptions(prisma as unknown as PrismaClient);
+    expect(options).toHaveLength(1);
+    expect(options[0]).toMatchObject({ id: admin.id, role: 'ADMIN', displayName: 'Administrador' });
+  });
+
+  it('un EMPLOYEE sin Employee vinculado (no debería pasar en datos reales) se excluye en vez de exponer el username', async () => {
+    const orphanEmployee = activeUser({ id: crypto.randomUUID(), employee: null });
+    const { prisma } = createFakePrisma([orphanEmployee]);
+    const options = await getLoginOptions(prisma as unknown as PrismaClient);
+    expect(options).toHaveLength(0);
+  });
+
+  it('nunca expone pinHash, username, intentos fallidos ni fecha de bloqueo', async () => {
+    const user = activeUser();
+    const { prisma } = createFakePrisma([user]);
+    const options = await getLoginOptions(prisma as unknown as PrismaClient);
+    expect(options).toHaveLength(1);
+    expect(options[0]).not.toHaveProperty('pinHash');
+    expect(options[0]).not.toHaveProperty('username');
+    expect(options[0]).not.toHaveProperty('failedLoginAttempts');
+    expect(options[0]).not.toHaveProperty('lockedUntil');
+    expect(options[0]).not.toHaveProperty('status');
   });
 });
 
 describe('refresh', () => {
   async function loginFresh() {
-    const fake = createFakePrisma([activeUser()]);
+    const user = activeUser();
+    const fake = createFakePrisma([user]);
     const result = await login(fake.prisma as unknown as PrismaClient, {
-      username: 'empleada.activa',
-      password: KNOWN_PASSWORD,
+      userId: user.id,
+      pin: KNOWN_PIN,
       ...META,
     });
-    return { ...fake, firstRefreshToken: result.refreshToken };
+    return { ...fake, user, firstRefreshToken: result.refreshToken };
   }
 
   it('refresh válido rota el token — el viejo deja de servir', async () => {
@@ -158,9 +290,9 @@ describe('refresh', () => {
   });
 
   it('rechaza el refresh si el usuario ya no está ACTIVE', async () => {
-    const { prisma, users, firstRefreshToken } = await loginFresh();
-    const user = users.get('user-active-1');
-    if (user) users.set('user-active-1', { ...user, status: 'SUSPENDED' });
+    const { prisma, users, user, firstRefreshToken } = await loginFresh();
+    const existing = users.get(user.id);
+    if (existing) users.set(user.id, { ...existing, status: 'SUSPENDED' });
     await expect(
       refresh(prisma as unknown as PrismaClient, { refreshToken: firstRefreshToken, ...META }),
     ).rejects.toBeInstanceOf(InvalidSessionError);
@@ -169,10 +301,11 @@ describe('refresh', () => {
 
 describe('logout', () => {
   it('revoca la sesión correspondiente al refresh token', async () => {
-    const fake = createFakePrisma([activeUser()]);
+    const user = activeUser();
+    const fake = createFakePrisma([user]);
     const result = await login(fake.prisma as unknown as PrismaClient, {
-      username: 'empleada.activa',
-      password: KNOWN_PASSWORD,
+      userId: user.id,
+      pin: KNOWN_PIN,
       ...META,
     });
     await logout(fake.prisma as unknown as PrismaClient, {
@@ -199,17 +332,19 @@ describe('logout', () => {
 });
 
 describe('getPublicUserById', () => {
-  it('devuelve solo campos públicos, nunca passwordHash', async () => {
-    const { prisma } = createFakePrisma([activeUser()]);
-    const user = await getPublicUserById(prisma as unknown as PrismaClient, 'user-active-1');
-    expect(user).not.toBeNull();
-    expect(user).not.toHaveProperty('passwordHash');
-    expect(user?.employee?.displayName).toBe('Empleada Activa');
+  it('devuelve solo campos públicos, nunca pinHash ni username', async () => {
+    const user = activeUser();
+    const { prisma } = createFakePrisma([user]);
+    const publicUser = await getPublicUserById(prisma as unknown as PrismaClient, user.id);
+    expect(publicUser).not.toBeNull();
+    expect(publicUser).not.toHaveProperty('pinHash');
+    expect(publicUser).not.toHaveProperty('username');
+    expect(publicUser?.employee?.displayName).toBe('Empleada Activa');
   });
 
   it('devuelve null si no existe', async () => {
     const { prisma } = createFakePrisma([]);
-    const user = await getPublicUserById(prisma as unknown as PrismaClient, 'no-existe');
+    const user = await getPublicUserById(prisma as unknown as PrismaClient, crypto.randomUUID());
     expect(user).toBeNull();
   });
 });

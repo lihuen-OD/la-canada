@@ -114,6 +114,7 @@ describe('Usuarios pendientes de activación', () => {
       expect(user).not.toHaveProperty('passwordHash');
       expect(user).not.toHaveProperty('password');
       expect(user).not.toHaveProperty('pin');
+      expect(user).not.toHaveProperty('pinHash');
       expect(user).not.toHaveProperty('hash');
     }
   });

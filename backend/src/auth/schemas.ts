@@ -1,23 +1,32 @@
 import { z } from 'zod';
+import { PIN_PATTERN } from './pin';
+
+const PIN_MESSAGE = 'El PIN debe tener exactamente 4 dígitos (0-9).';
 
 /**
- * `password` acá usa un máximo generoso (no el máximo de política, 128) —
- * el login debe poder rechazar por credenciales inválidas una contraseña
- * vieja que ya no cumpliera una política futura, no por un límite de
- * tamaño demasiado ajustado. Sí acota el tamaño máximo de entrada (defensa
- * básica), la política real de longitud se aplica en activate/reset.
+ * `z.string().regex(...)` — nunca `.trim()` ni ninguna otra transformación:
+ * el PIN es un string, no un número, y un valor como `'0007'` debe llegar
+ * intacto hasta el hash/verificación. Zod valida la forma tal cual llegó en
+ * el JSON, sin normalizar nada.
+ */
+const pinSchema = z.string().regex(PIN_PATTERN, PIN_MESSAGE);
+
+/**
+ * El login ya no usa username+password (Etapa 3B.2): recibe el `id` (UUID)
+ * del `User` elegido en el selector de identidad (`GET /auth/login-options`)
+ * y su PIN de 4 dígitos.
  */
 export const loginBodySchema = z.object({
-  username: z.string().min(1).max(255),
-  password: z.string().min(1).max(256),
+  userId: z.string().uuid(),
+  pin: pinSchema,
 });
 
 export const activateBodySchema = z.object({
-  password: z.string().min(1).max(256),
+  pin: pinSchema,
 });
 
-export const resetPasswordBodySchema = z.object({
-  password: z.string().min(1).max(256),
+export const resetPinBodySchema = z.object({
+  pin: pinSchema,
 });
 
 export const statusChangeBodySchema = z.object({

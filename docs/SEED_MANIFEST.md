@@ -56,14 +56,14 @@ Todas las demás entidades del modelo (`EmployeeProfile`, `EmployeeChild`, `Task
 
 ### User (4)
 
-| username | employeeCode | role | status | passwordHash |
+| username | employeeCode | role | status | pinHash |
 |---|---|---|---|---|
 | coke | coke | EMPLOYEE | PENDING_ACTIVATION | `null` |
 | cami | cami | EMPLOYEE | PENDING_ACTIVATION | `null` |
 | ruth | ruth | EMPLOYEE | PENDING_ACTIVATION | `null` |
 | pablo | pablo | EMPLOYEE | PENDING_ACTIVATION | `null` |
 
-Ningún usuario puede autenticarse hasta que un proceso de activación futuro (Etapa 3) les asigne una credencial real. **Cero administradores sembrados.**
+Ningún usuario puede autenticarse hasta que un administrador los active (`POST /admin/users/:id/activate`) asignándoles un PIN — ver `docs/ARCHITECTURE.md`, "Autenticación por PIN". El campo se llamó `passwordHash` en la Etapa 3B.1 y se renombró a `pinHash` en la Etapa 3B.2 (rename de columna, mismo `null` preservado, ver `docs/MIGRATION_PLAN.md`). **Cero administradores sembrados.**
 
 ### Task (10)
 

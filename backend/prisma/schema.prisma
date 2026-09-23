@@ -160,16 +160,43 @@ enum FileStatus {
 /// creado, pendiente de invitar). Ver docs/ARCHITECTURE.md, "Separación
 /// User/Employee".
 model User {
-  id           String     @id @default(uuid()) @db.Uuid
-  /// Normalizado (minúsculas, sin acentos, solo [a-z0-9._-]) — ver
-  /// backend/prisma/seed-data/users.ts para la función de normalización.
-  username     String     @unique
-  role         SystemRole
-  status       UserStatus @default(PENDING_ACTIVATION)
-  /// Nullable: es null mientras status=PENDING_ACTIVATION (todavía no se
-  /// definió contraseña). Nunca contiene un PIN ni un hash inventado —
-  /// la activación real (Etapa 3) es la única que puede setear esto.
-  passwordHash String?    @map("password_hash")
+  id       String     @id @default(uuid()) @db.Uuid
+  /// Identificador técnico interno (normalizado: minúsculas, sin acentos,
+  /// solo [a-z0-9._-] — ver backend/prisma/seed-data/users.ts). Ya NO se usa
+  /// para iniciar sesión (Etapa 3B.2 reemplazó usuario+contraseña por
+  /// selección de identidad + PIN, ver `pinHash` abajo): el login recibe el
+  /// `id` (UUID) de este mismo modelo, no `username`. Se conserva como clave
+  /// natural estable para el seed idempotente y como identificador legible
+  /// en la administración de usuarios (`GET /admin/users`) — nunca se
+  /// expone en `GET /auth/login-options` ni en la respuesta de login/`/me`.
+  username String     @unique
+  role     SystemRole
+  status   UserStatus @default(PENDING_ACTIVATION)
+  /// Hash Argon2id de un PIN numérico de 4 dígitos — nunca el PIN en texto
+  /// plano, nunca un PIN inventado. Nullable: es null mientras
+  /// status=PENDING_ACTIVATION (todavía no se definió un PIN). El
+  /// administrador es quien asigna el PIN inicial al activar (`POST
+  /// /admin/users/:id/activate`) y quien puede cambiarlo después (`POST
+  /// /admin/users/:id/reset-pin`) — un empleado nunca puede cambiar su
+  /// propio PIN. No existe ni existió un PIN global/compartido/por defecto.
+  pinHash  String?    @map("pin_hash")
+
+  /// Intentos de login fallidos consecutivos desde el último éxito (o desde
+  /// el último cambio de PIN por un admin, que también resetea esto).
+  /// Persistido en Postgres (no en memoria del proceso) para que el bloqueo
+  /// sobreviva a un reinicio de Render. Se incrementa con el operador
+  /// atómico de Prisma (`{ increment: 1 }`, `SET col = col + 1` a nivel
+  /// SQL) — nunca leyendo el valor en la aplicación y reescribiéndolo, que
+  /// perdería incrementos bajo solicitudes concurrentes.
+  failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
+  /// Fecha/hora hasta la cual el login de este usuario se rechaza
+  /// genéricamente (igual que credenciales inválidas), sin importar si el
+  /// PIN enviado es correcto. Se fija tras 5 intentos fallidos consecutivos
+  /// (ver `authService.login`); se limpia con un login exitoso o con un
+  /// cambio de PIN hecho por un admin — nunca automáticamente por el solo
+  /// paso del tiempo (el contador de intentos tampoco se resetea solo
+  /// porque el bloqueo haya vencido).
+  lockedUntil         DateTime? @map("locked_until")
 
   /// Un Employee puede estar vinculado como máximo a un User (constraint
   /// @unique acá, del lado de User → Employee.userId no existe, evitando

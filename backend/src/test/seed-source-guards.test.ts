@@ -60,8 +60,9 @@ describe('Guards de seguridad e integridad del seed (texto fuente)', () => {
     expect(SEED_FILE).toMatch(/SystemRole\.EMPLOYEE/);
   });
 
-  it('el seed nunca setea passwordHash a un valor inventado', () => {
+  it('el seed nunca setea passwordHash ni pinHash a un valor inventado', () => {
     expect(SEED_FILE).not.toMatch(/passwordHash\s*:/);
+    expect(SEED_FILE).not.toMatch(/pinHash\s*:/);
   });
 
   it('no existe ningún módulo de seed-data para gallinero (cantidad de gallinas)', () => {

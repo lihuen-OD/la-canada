@@ -1,7 +1,6 @@
 import type { Prisma, PrismaClient } from '../generated/prisma/client';
 import { InvalidCredentialsError, InvalidSessionError } from '../errors/AppError';
-import { normalizeUsername } from '../utils/username';
-import { verifyAgainstDummy, verifyPassword } from './password';
+import { verifyAgainstDummy, verifyPin } from './pin';
 import {
   generateRefreshToken,
   hashRefreshToken,
@@ -16,9 +15,13 @@ export interface RequestMeta {
   userAgent: string | null;
 }
 
+/**
+ * Nunca incluye `username` (Etapa 3B.2: es un identificador técnico interno,
+ * no algo que se muestre a la propia persona autenticada) ni, por supuesto,
+ * `pinHash`, intentos fallidos o fecha de bloqueo.
+ */
 export interface PublicUser {
   id: string;
-  username: string;
   role: 'ADMIN' | 'EMPLOYEE';
   status: string;
   employee: { id: string; displayName: string; colorHex: string } | null;
@@ -34,14 +37,12 @@ export interface LoginResult {
 
 function toPublicUser(user: {
   id: string;
-  username: string;
   role: 'ADMIN' | 'EMPLOYEE';
   status: string;
   employee: { id: string; displayName: string; colorHex: string } | null;
 }): PublicUser {
   return {
     id: user.id,
-    username: user.username,
     role: user.role,
     status: user.status,
     employee: user.employee,
@@ -50,12 +51,26 @@ function toPublicUser(user: {
 
 const USER_SELECT_FOR_AUTH = {
   id: true,
-  username: true,
   role: true,
   status: true,
-  passwordHash: true,
+  pinHash: true,
+  failedLoginAttempts: true,
+  lockedUntil: true,
   employee: { select: { id: true, displayName: true, colorHex: true } },
 } as const;
+
+/**
+ * Protección persistente contra fuerza bruta sobre el PIN (10.000
+ * combinaciones posibles) — ver `docs/SECURITY.md`, "Autenticación por PIN".
+ * Valores fijos, no configurables por entorno: la política de bloqueo es
+ * una decisión de producto, no un parámetro de despliegue.
+ */
+const MAX_FAILED_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_DURATION_MS = 15 * 60 * 1000;
+
+function isLocked(user: { lockedUntil: Date | null }): boolean {
+  return user.lockedUntil !== null && user.lockedUntil.getTime() > Date.now();
+}
 
 async function issueSession(
   prisma: PrismaClient,
@@ -85,37 +100,72 @@ async function issueSession(
 }
 
 /**
- * Login — sin distinguir en la respuesta usuario inexistente, contraseña
- * incorrecta, o estado no ACTIVE: siempre `InvalidCredentialsError` (evita
- * enumeración de cuentas). Cuando el usuario no existe o no tiene
- * `passwordHash` todavía (PENDING_ACTIVATION), se verifica igual contra un
- * hash dummy para no delatar la diferencia por tiempo de respuesta.
+ * Login — identidad seleccionada (`userId`) + PIN de 4 dígitos (Etapa
+ * 3B.2, reemplaza username+contraseña). Sin distinguir en la respuesta
+ * usuario inexistente, PIN incorrecto, estado no ACTIVE, o cuenta
+ * bloqueada por intentos fallidos: siempre `InvalidCredentialsError` (evita
+ * enumeración de cuentas y de motivos de bloqueo). Cuando el usuario no
+ * existe, no tiene `pinHash` todavía, o está bloqueado, se verifica igual
+ * contra un hash dummy para no delatar la diferencia por tiempo de
+ * respuesta entre esos casos y un PIN real incorrecto.
  */
 export async function login(
   prisma: PrismaClient,
-  params: { username: string; password: string } & RequestMeta,
+  params: { userId: string; pin: string } & RequestMeta,
 ): Promise<LoginResult> {
-  const normalizedUsername = normalizeUsername(params.username);
   const user = await prisma.user.findUnique({
-    where: { username: normalizedUsername },
+    where: { id: params.userId },
     select: USER_SELECT_FOR_AUTH,
   });
 
-  if (!user || user.status !== 'ACTIVE' || !user.passwordHash) {
-    await verifyAgainstDummy(params.password);
+  if (!user || user.status !== 'ACTIVE' || !user.pinHash || isLocked(user)) {
+    await verifyAgainstDummy(params.pin);
     await recordAuditLogSafe(prisma, {
       actorUserId: user?.id ?? null,
       action: 'auth.login.failed',
       entityType: 'User',
-      entityId: user?.id ?? normalizedUsername,
+      entityId: user?.id ?? params.userId,
       ipAddress: params.ipAddress,
       userAgent: params.userAgent,
     });
     throw new InvalidCredentialsError();
   }
 
-  const passwordValid = await verifyPassword(user.passwordHash, params.password);
-  if (!passwordValid) {
+  const pinValid = await verifyPin(user.pinHash, params.pin);
+  if (!pinValid) {
+    // Incremento atómico (`SET col = col + 1` a nivel SQL, vía el operador
+    // `increment` de Prisma) — nunca "leer contador, sumar en JS, escribir
+    // contador+1", que perdería incrementos bajo intentos concurrentes.
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: { failedLoginAttempts: { increment: 1 } },
+      select: { failedLoginAttempts: true },
+    });
+
+    // Toma atómica del bloqueo: bajo una ráfaga concurrente, varias
+    // solicitudes pueden cruzar el umbral con su propio incremento (el
+    // conteo en sí nunca se pierde, pero *cuál* de ellas "aplica" el
+    // bloqueo sí puede duplicarse si no se condiciona la escritura). Igual
+    // que la toma atómica de sesión en `refresh()`: el `updateMany` exige
+    // que `lockedUntil` esté nulo o ya vencido *en el momento de escribir*
+    // — Postgres solo dejar pasar la escritura de la primera solicitud que
+    // llega a ese estado; el resto, al desbloquearse, reevalúa el `WHERE`
+    // contra la fila ya bloqueada por la primera y no matchea (`count: 0`).
+    // Así, sin importar cuántas solicitudes concurrentes crucen el umbral,
+    // como máximo una queda marcada como `justLocked` y solo esa audita el
+    // evento de bloqueo.
+    let justLocked = false;
+    if (updated.failedLoginAttempts >= MAX_FAILED_LOGIN_ATTEMPTS) {
+      const lockClaim = await prisma.user.updateMany({
+        where: {
+          id: user.id,
+          OR: [{ lockedUntil: null }, { lockedUntil: { lt: new Date() } }],
+        },
+        data: { lockedUntil: new Date(Date.now() + LOCKOUT_DURATION_MS) },
+      });
+      justLocked = lockClaim.count === 1;
+    }
+
     await recordAuditLogSafe(prisma, {
       actorUserId: user.id,
       action: 'auth.login.failed',
@@ -124,8 +174,25 @@ export async function login(
       ipAddress: params.ipAddress,
       userAgent: params.userAgent,
     });
+    if (justLocked) {
+      await recordAuditLogSafe(prisma, {
+        actorUserId: user.id,
+        action: 'auth.login.locked',
+        entityType: 'User',
+        entityId: user.id,
+        ipAddress: params.ipAddress,
+        userAgent: params.userAgent,
+      });
+    }
     throw new InvalidCredentialsError();
   }
+
+  // Login correcto: resetea el contador y cualquier bloqueo vigente (nunca
+  // se resetean solos por el paso del tiempo — ver el campo en schema.prisma).
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { failedLoginAttempts: 0, lockedUntil: null },
+  });
 
   const { accessToken, refreshToken, sessionId } = await issueSession(prisma, {
     userId: user.id,
@@ -150,6 +217,61 @@ export async function login(
     refreshTokenTtlSeconds,
     user: toPublicUser(user),
   };
+}
+
+/** Identidad mínima para el selector público de login — ver `docs/ARCHITECTURE.md`, "Autenticación por PIN". */
+export interface LoginOption {
+  id: string;
+  displayName: string;
+  role: 'ADMIN' | 'EMPLOYEE';
+  colorHex: string | null;
+}
+
+/**
+ * Etiqueta genérica para un `ADMIN` sin `Employee` vinculado (el caso
+ * normal: el admin se crea vía `bootstrapAdmin`, nunca vía el seed de
+ * empleados) — nunca se usa `username` como reemplazo, aunque estuviera
+ * disponible, porque es un identificador técnico interno, no un nombre
+ * pensado para mostrarse.
+ */
+const ADMIN_FALLBACK_DISPLAY_NAME = 'Administrador';
+
+/**
+ * Únicamente usuarios `status: ACTIVE` — los `PENDING_ACTIVATION` todavía no
+ * tienen PIN (no pueden autenticarse), y `SUSPENDED`/`DEACTIVATED` no deben
+ * ofrecerse como identidad seleccionable aunque conserven su PIN antiguo.
+ * Nunca selecciona `pinHash`, `username`, intentos fallidos ni fecha de
+ * bloqueo — ver la lista explícita de campos exportados en `LoginOption`.
+ * Orden estable: por `createdAt` ascendente, igual que `GET /admin/users`.
+ */
+export async function getLoginOptions(prisma: PrismaClient): Promise<LoginOption[]> {
+  const users = await prisma.user.findMany({
+    where: { status: 'ACTIVE' },
+    select: {
+      id: true,
+      role: true,
+      employee: { select: { displayName: true, colorHex: true } },
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  const options: LoginOption[] = [];
+  for (const user of users) {
+    if (user.role === 'EMPLOYEE' && !user.employee) {
+      // Invariante de negocio: todo User EMPLOYEE debería estar vinculado a
+      // un Employee real (así los siembra el seed). Si no lo estuviera, no
+      // hay ningún nombre real para mostrar — se excluye del selector en vez
+      // de inventar un nombre o exponer el username interno.
+      continue;
+    }
+    options.push({
+      id: user.id,
+      displayName: user.employee?.displayName ?? ADMIN_FALLBACK_DISPLAY_NAME,
+      role: user.role,
+      colorHex: user.employee?.colorHex ?? null,
+    });
+  }
+  return options;
 }
 
 export interface RefreshResult {

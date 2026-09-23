@@ -39,10 +39,8 @@ afterAll(async () => {
 describe('bootstrapAdmin — núcleo puro contra demo', () => {
   it('primera llamada: crea el admin solo si demo todavía no tenía uno activo; si ya tenía, se rechaza (idempotencia real)', async () => {
     const username = `test-bootstrap-admin-${Date.now()}`;
-    const result = await bootstrapAdmin(prisma, {
-      username,
-      password: 'contraseña de bootstrap de prueba bastante larga',
-    });
+    const pin = '7410';
+    const result = await bootstrapAdmin(prisma, { username, pin });
 
     if (hadActiveAdminBeforeSuite) {
       expect(result.created).toBe(false);
@@ -56,31 +54,39 @@ describe('bootstrapAdmin — núcleo puro contra demo', () => {
         const admin = await prisma.user.findUniqueOrThrow({ where: { id: result.userId } });
         expect(admin.role).toBe('ADMIN');
         expect(admin.status).toBe('ACTIVE');
-        expect(admin.passwordHash).not.toBeNull();
+        expect(admin.pinHash).not.toBeNull();
+        expect(admin.pinHash).not.toBe(pin);
 
         const audit = await prisma.auditLog.findMany({
           where: { actorUserId: result.userId, action: 'auth.bootstrap_admin' },
         });
         expect(audit).toHaveLength(1);
+        expect(JSON.stringify(audit)).not.toContain(pin);
       }
     }
   });
 
   it('segunda llamada inmediatamente después: nunca crea un segundo admin (idempotente de verdad)', async () => {
     const secondUsername = `test-bootstrap-admin-second-${Date.now()}`;
-    const result = await bootstrapAdmin(prisma, {
-      username: secondUsername,
-      password: 'otra contraseña de bootstrap también bastante larga',
-    });
+    const result = await bootstrapAdmin(prisma, { username: secondUsername, pin: '8265' });
     expect(result.created).toBe(false);
 
     const secondUserExists = await prisma.user.findUnique({ where: { username: secondUsername } });
     expect(secondUserExists).toBeNull();
   });
 
-  it('rechaza una contraseña que no cumple la política, sin tocar la base', async () => {
+  it('rechaza un PIN que no cumple la política (no son exactamente 4 dígitos), sin tocar la base', async () => {
     const username = `test-bootstrap-admin-weak-${Date.now()}`;
-    const result = await bootstrapAdmin(prisma, { username, password: 'corta' });
+    const result = await bootstrapAdmin(prisma, { username, pin: '12' });
+    expect(result.created).toBe(false);
+
+    const userExists = await prisma.user.findUnique({ where: { username } });
+    expect(userExists).toBeNull();
+  });
+
+  it('rechaza un PIN con caracteres no numéricos, sin tocar la base', async () => {
+    const username = `test-bootstrap-admin-nonnumeric-${Date.now()}`;
+    const result = await bootstrapAdmin(prisma, { username, pin: '12ab' });
     expect(result.created).toBe(false);
 
     const userExists = await prisma.user.findUnique({ where: { username } });

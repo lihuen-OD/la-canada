@@ -3,7 +3,7 @@ import type { UserStatus } from '../generated/prisma/enums';
 /**
  * Transiciones explícitas y validadas — `PATCH /admin/users/:id/status`
  * (sección 4). `PENDING_ACTIVATION → ACTIVE` NO está acá a propósito: esa
- * transición exige fijar una contraseña y pasa exclusivamente por
+ * transición exige fijar un PIN y pasa exclusivamente por
  * `POST /admin/users/:id/activate`, nunca por este endpoint genérico.
  */
 const ALLOWED_TRANSITIONS: Record<UserStatus, readonly UserStatus[]> = {

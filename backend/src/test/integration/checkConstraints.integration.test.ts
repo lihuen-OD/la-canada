@@ -61,14 +61,18 @@ describe.skipIf(!DATABASE_URL)(
       });
     });
 
-    it('users_active_requires_password_hash_check rechaza status=ACTIVE con password_hash nulo', async () => {
+    it('users_active_requires_pin_hash_check rechaza status=ACTIVE con pin_hash nulo', async () => {
+      // Migración `pin_authentication` (Etapa 3B.2): renombró la columna
+      // `password_hash` -> `pin_hash` y, con ella, el constraint (rename
+      // seguro, no drop+recreate — ver esa migración). Este test ejercita
+      // la restricción real ya renombrada, contra Postgres de verdad.
       await withRollback(async () => {
         await expect(
           client.query(
-            `INSERT INTO users (id, username, role, status, password_hash, updated_at)
+            `INSERT INTO users (id, username, role, status, pin_hash, updated_at)
              VALUES (gen_random_uuid(), 'usuario-de-prueba-rollback', 'EMPLOYEE', 'ACTIVE', NULL, now())`,
           ),
-        ).rejects.toThrow(/users_active_requires_password_hash_check/);
+        ).rejects.toThrow(/users_active_requires_pin_hash_check/);
       });
     });
 

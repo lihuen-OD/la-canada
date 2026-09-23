@@ -108,7 +108,7 @@ describe('requireAuth', () => {
   it('sesión revocada: AuthenticationRequiredError', async () => {
     const userId = crypto.randomUUID();
     await fake().prisma.user.create({
-      data: { id: userId, username: 'u1', role: 'EMPLOYEE', status: 'ACTIVE', passwordHash: 'x' },
+      data: { id: userId, username: 'u1', role: 'EMPLOYEE', status: 'ACTIVE', pinHash: 'x' },
     });
     const session = await fake().prisma.session.create({
       data: {
@@ -137,7 +137,7 @@ describe('requireAuth', () => {
         username: 'u1',
         role: 'EMPLOYEE',
         status: 'SUSPENDED',
-        passwordHash: 'x',
+        pinHash: 'x',
       },
     });
     const session = await fake().prisma.session.create({
@@ -157,7 +157,7 @@ describe('requireAuth', () => {
   it('token + sesión + usuario válidos: adjunta req.auth con el rol vigente en base (no el del JWT)', async () => {
     const userId = crypto.randomUUID();
     await fake().prisma.user.create({
-      data: { id: userId, username: 'u1', role: 'ADMIN', status: 'ACTIVE', passwordHash: 'x' },
+      data: { id: userId, username: 'u1', role: 'ADMIN', status: 'ACTIVE', pinHash: 'x' },
     });
     const session = await fake().prisma.session.create({
       data: { userId, refreshTokenHash: 'hash3', expiresAt: new Date(Date.now() + 60_000) },
@@ -184,7 +184,7 @@ describe('requireAuth', () => {
         username: 'dueño-real',
         role: 'EMPLOYEE',
         status: 'ACTIVE',
-        passwordHash: 'x',
+        pinHash: 'x',
       },
     });
     await fake().prisma.user.create({
@@ -193,7 +193,7 @@ describe('requireAuth', () => {
         username: 'otro-usuario',
         role: 'ADMIN',
         status: 'ACTIVE',
-        passwordHash: 'x',
+        pinHash: 'x',
       },
     });
     // La sesión pertenece de verdad a `ownerUserId` — el token, sin embargo,

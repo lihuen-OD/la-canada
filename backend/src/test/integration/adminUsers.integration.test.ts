@@ -1,12 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Request, Response } from 'express';
 import { prisma } from '../../lib/prisma';
-import { hashPassword } from '../../auth/password';
+import { hashPin } from '../../auth/pin';
+import { login } from '../../auth/authService';
 import {
   activateUser,
   changeStatus,
   listUsers,
-  resetPassword,
+  resetPin,
 } from '../../controllers/adminUsersController';
 
 /**
@@ -23,8 +24,8 @@ import {
 const RUN_ID = Date.now();
 const ACTOR_USERNAME = `test-admin-actor-${RUN_ID}`;
 const TARGET_USERNAME = `test-admin-target-${RUN_ID}`;
-const INITIAL_PASSWORD = 'contraseña inicial de activación bastante larga';
-const RESET_PASSWORD = 'contraseña reseteada bastante larga también';
+const INITIAL_PIN = '3054';
+const RESET_PIN_VALUE = '6187';
 
 let actorUserId: string;
 let targetUserId: string;
@@ -72,7 +73,7 @@ beforeAll(async () => {
       username: ACTOR_USERNAME,
       role: 'ADMIN',
       status: 'ACTIVE',
-      passwordHash: await hashPassword('contraseña del actor de prueba también larga'),
+      pinHash: await hashPin('9931'),
     },
     select: { id: true },
   });
@@ -83,7 +84,7 @@ beforeAll(async () => {
       username: TARGET_USERNAME,
       role: 'EMPLOYEE',
       status: 'PENDING_ACTIVATION',
-      passwordHash: null,
+      pinHash: null,
     },
     select: { id: true },
   });
@@ -105,25 +106,26 @@ afterAll(async () => {
 });
 
 describe('adminUsersController — flujo real contra demo', () => {
-  it('activateUser: PENDING_ACTIVATION -> ACTIVE, guarda password hasheado, audita', async () => {
+  it('activateUser: PENDING_ACTIVATION -> ACTIVE, guarda el PIN hasheado (nunca en texto plano), audita', async () => {
     const { res } = fakeRes();
     const req = fakeReq({
       actingAsUserId: actorUserId,
       targetId: targetUserId,
-      body: { password: INITIAL_PASSWORD },
+      body: { pin: INITIAL_PIN },
     });
     await activateUser(req, res);
 
     const target = await prisma.user.findUniqueOrThrow({ where: { id: targetUserId } });
     expect(target.status).toBe('ACTIVE');
-    expect(target.passwordHash).not.toBeNull();
-    expect(target.passwordHash).not.toBe(INITIAL_PASSWORD);
+    expect(target.pinHash).not.toBeNull();
+    expect(target.pinHash).not.toBe(INITIAL_PIN);
 
     const audit = await prisma.auditLog.findMany({
       where: { entityId: targetUserId, action: 'admin.user.activated' },
     });
     expect(audit).toHaveLength(1);
-    expect(JSON.stringify(audit[0]?.newState)).not.toMatch(new RegExp(INITIAL_PASSWORD));
+    expect(JSON.stringify(audit[0]?.newState)).not.toMatch(new RegExp(INITIAL_PIN));
+    expect(JSON.stringify(audit)).not.toContain(INITIAL_PIN);
   });
 
   it('activateUser: una segunda activación (ya ACTIVE) es rechazada, no silenciosa', async () => {
@@ -131,13 +133,24 @@ describe('adminUsersController — flujo real contra demo', () => {
     const req = fakeReq({
       actingAsUserId: actorUserId,
       targetId: targetUserId,
-      body: { password: INITIAL_PASSWORD },
+      body: { pin: INITIAL_PIN },
     });
     await expect(activateUser(req, res)).rejects.toThrow();
   });
 
-  it('resetPassword: cambia el hash y revoca todas las sesiones activas del usuario', async () => {
-    // Sesión activa previa, simulando que el usuario ya estaba logueado.
+  it('el PIN inicial recién asignado funciona para iniciar sesión de verdad', async () => {
+    const result = await login(prisma, {
+      userId: targetUserId,
+      pin: INITIAL_PIN,
+      ipAddress: '127.0.0.1',
+      userAgent: 'vitest-integration',
+    });
+    expect(result.accessToken).toEqual(expect.any(String));
+  });
+
+  it('resetPin: cambia el hash, revoca todas las sesiones activas, y resetea intentos fallidos + bloqueo', async () => {
+    // Sesión activa previa, simulando que el usuario ya estaba logueado, y
+    // un historial de intentos fallidos con la cuenta a punto de bloquearse.
     await prisma.session.create({
       data: {
         userId: targetUserId,
@@ -145,25 +158,57 @@ describe('adminUsersController — flujo real contra demo', () => {
         expiresAt: new Date(Date.now() + 60_000),
       },
     });
+    await prisma.user.update({
+      where: { id: targetUserId },
+      data: { failedLoginAttempts: 4, lockedUntil: new Date(Date.now() + 60_000) },
+    });
 
     const { res } = fakeRes();
     const req = fakeReq({
       actingAsUserId: actorUserId,
       targetId: targetUserId,
-      body: { password: RESET_PASSWORD },
+      body: { pin: RESET_PIN_VALUE },
     });
-    await resetPassword(req, res);
+    await resetPin(req, res);
 
     const target = await prisma.user.findUniqueOrThrow({ where: { id: targetUserId } });
-    expect(target.passwordHash).not.toBeNull();
+    expect(target.pinHash).not.toBeNull();
+    expect(target.pinHash).not.toBe(INITIAL_PIN);
+    expect(target.failedLoginAttempts).toBe(0);
+    expect(target.lockedUntil).toBeNull();
 
     const sessions = await prisma.session.findMany({ where: { userId: targetUserId } });
     expect(sessions.every((s) => s.revokedAt !== null)).toBe(true);
 
     const audit = await prisma.auditLog.findMany({
-      where: { entityId: targetUserId, action: 'admin.user.password_reset' },
+      where: { entityId: targetUserId, action: 'admin.user.pin_reset' },
     });
     expect(audit.length).toBeGreaterThanOrEqual(1);
+    expect(JSON.stringify(audit)).not.toContain(RESET_PIN_VALUE);
+
+    const sessionsRevokedAudit = await prisma.auditLog.findMany({
+      where: { entityId: targetUserId, action: 'admin.user.sessions_revoked_by_pin_reset' },
+    });
+    expect(sessionsRevokedAudit.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('el PIN anterior deja de servir inmediatamente después del reset, y el nuevo sí funciona', async () => {
+    await expect(
+      login(prisma, {
+        userId: targetUserId,
+        pin: INITIAL_PIN,
+        ipAddress: '127.0.0.1',
+        userAgent: 'vitest-integration',
+      }),
+    ).rejects.toThrow();
+
+    const result = await login(prisma, {
+      userId: targetUserId,
+      pin: RESET_PIN_VALUE,
+      ipAddress: '127.0.0.1',
+      userAgent: 'vitest-integration',
+    });
+    expect(result.accessToken).toEqual(expect.any(String));
   });
 
   it('changeStatus: ACTIVE -> SUSPENDED revoca sesiones activas y audita la transición', async () => {
@@ -229,7 +274,7 @@ describe('adminUsersController — flujo real contra demo', () => {
     }
   });
 
-  it('listUsers: filtra por status sin exponer passwordHash', async () => {
+  it('listUsers: filtra por status sin exponer pinHash', async () => {
     const { res, getBody } = fakeRes();
     const req = fakeReq({
       actingAsUserId: actorUserId,
@@ -241,6 +286,6 @@ describe('adminUsersController — flujo real contra demo', () => {
     const payload = getBody() as { users: Array<Record<string, unknown>> };
     const testTargetRow = payload.users.find((u) => u.id === targetUserId);
     expect(testTargetRow).toBeDefined();
-    expect(testTargetRow).not.toHaveProperty('passwordHash');
+    expect(testTargetRow).not.toHaveProperty('pinHash');
   });
 });

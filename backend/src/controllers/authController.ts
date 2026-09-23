@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import {
+  getLoginOptions as getLoginOptionsService,
   getPublicUserById,
   login as loginService,
   logout as logoutService,
@@ -25,10 +26,22 @@ function readRefreshTokenCookie(req: Request): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
+/**
+ * Público, sin autenticación — solo lo mínimo para construir el selector de
+ * identidad (persona + PIN). Nunca incluye `pinHash`, `username`, estado
+ * completo, intentos fallidos, ni ningún otro dato interno — ver
+ * `auth/authService.ts`, `getLoginOptions`.
+ */
+export async function getLoginOptions(_req: Request, res: Response): Promise<void> {
+  const options = await getLoginOptionsService(prisma);
+  res.set('Cache-Control', 'no-store');
+  res.status(200).json({ options });
+}
+
 export async function postLogin(req: Request, res: Response): Promise<void> {
   const parsed = loginBodySchema.safeParse(req.body);
   if (!parsed.success) {
-    throw new ValidationError('El body de login debe incluir username y password.');
+    throw new ValidationError('El body de login debe incluir userId y un PIN de 4 dígitos.');
   }
 
   const result = await loginService(prisma, { ...parsed.data, ...requestMeta(req) });

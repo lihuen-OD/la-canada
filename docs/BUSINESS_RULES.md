@@ -18,6 +18,7 @@
   - Ver panel "Cumplimiento por persona" y "Tareas más incumplidas" en Desempeño.
   - Ver "Configuración" y "Datos del equipo".
   - Cambiar el PIN de admin y el PIN de cualquier persona (desde Configuración → Personas).
+  - **Actualización Etapa 3B.2**: se preserva "cambiar el PIN de cualquier persona es admin-only", pero se corrige deliberadamente un punto distinto — en el prototipo (`docs/PROJECT_CONTEXT.md`, sección de flujo de acceso) el PIN de un empleado *se definía solo, la primera vez que lo usaba*, sin intervención del admin. La reconstrucción no reproduce eso: el PIN inicial también lo asigna el administrador, al activar la cuenta (`POST /admin/users/:id/activate`) — un empleado nunca define ni cambia su propio PIN, ni siquiera la primera vez. Se documenta como una desviación intencional del comportamiento original (no un bug de esta etapa): asignar el PIN inicial es más consistente con el resto del modelo (el admin ya controla activación/estado/roles) y evita el caso sin trazar de "¿quién eligió este PIN?".
 - Acciones disponibles para **cualquier usuario logueado** (admin o equipo):
   - Tildar/destildar tareas propias; tildar tareas de otra persona (dispara el flujo "¿Quién completa esta tarea?", ver sección 4).
   - Registrar consumo/ingreso de stock (botón 📤 en cada ítem, sin gate de admin).

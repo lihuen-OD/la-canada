@@ -1,11 +1,11 @@
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { recordAuditLog } from '../auth/auditLog';
-import { hashPassword, validatePasswordPolicy } from '../auth/password';
+import { hashPin, validatePinPolicy } from '../auth/pin';
 import {
   activateBodySchema,
   listUsersQuerySchema,
-  resetPasswordBodySchema,
+  resetPinBodySchema,
   statusChangeBodySchema,
 } from '../auth/schemas';
 import { isAllowedStatusTransition, statusChangeRevokesSessions } from '../auth/userStatus';
@@ -29,7 +29,7 @@ function requireTargetId(req: Request): string {
   return id;
 }
 
-/** Listado paginado — nunca expone `passwordHash` (select explícito, nunca `include` de todo el modelo). */
+/** Listado paginado — nunca expone `pinHash` (select explícito, nunca `include` de todo el modelo). `username` sí se incluye acá (a diferencia de `GET /auth/login-options`): es una vista administrativa, no el selector público de login. */
 export async function listUsers(req: Request, res: Response): Promise<void> {
   const parsed = listUsersQuerySchema.safeParse(req.query);
   if (!parsed.success) {
@@ -61,14 +61,15 @@ export async function listUsers(req: Request, res: Response): Promise<void> {
   res.status(200).json({ users, pagination: { page, pageSize, total } });
 }
 
+/** El PIN inicial lo asigna el administrador al activar — nunca lo elige ni lo ve el propio usuario en este paso. */
 export async function activateUser(req: Request, res: Response): Promise<void> {
   if (!req.auth) throw new AuthenticationRequiredError();
   const targetId = requireTargetId(req);
   const parsed = activateBodySchema.safeParse(req.body);
   if (!parsed.success) {
-    throw new ValidationError('El body debe incluir una contraseña inicial válida.');
+    throw new ValidationError('El body debe incluir un PIN inicial de 4 dígitos.');
   }
-  const policy = validatePasswordPolicy(parsed.data.password);
+  const policy = validatePinPolicy(parsed.data.pin);
   if (!policy.ok) {
     throw new ValidationError(policy.reason);
   }
@@ -82,8 +83,8 @@ export async function activateUser(req: Request, res: Response): Promise<void> {
       );
     }
 
-    const passwordHash = await hashPassword(parsed.data.password);
-    await tx.user.update({ where: { id: targetId }, data: { status: 'ACTIVE', passwordHash } });
+    const pinHash = await hashPin(parsed.data.pin);
+    await tx.user.update({ where: { id: targetId }, data: { status: 'ACTIVE', pinHash } });
     await recordAuditLog(tx, {
       actorUserId: req.auth?.userId,
       action: 'admin.user.activated',
@@ -99,14 +100,21 @@ export async function activateUser(req: Request, res: Response): Promise<void> {
   res.status(200).json({ ok: true });
 }
 
-export async function resetPassword(req: Request, res: Response): Promise<void> {
+/**
+ * Cambio de PIN — exclusivo de ADMIN, nunca del propio empleado (no existe
+ * ningún endpoint de "cambiar mi propio PIN"). Transaccional: hash nuevo,
+ * revocación de todas las sesiones activas, y reseteo de intentos
+ * fallidos/bloqueo se confirman juntos o ninguno — nunca queda el PIN
+ * cambiado con las sesiones viejas todavía vigentes, ni al revés.
+ */
+export async function resetPin(req: Request, res: Response): Promise<void> {
   if (!req.auth) throw new AuthenticationRequiredError();
   const targetId = requireTargetId(req);
-  const parsed = resetPasswordBodySchema.safeParse(req.body);
+  const parsed = resetPinBodySchema.safeParse(req.body);
   if (!parsed.success) {
-    throw new ValidationError('El body debe incluir una contraseña nueva válida.');
+    throw new ValidationError('El body debe incluir un PIN nuevo de 4 dígitos.');
   }
-  const policy = validatePasswordPolicy(parsed.data.password);
+  const policy = validatePinPolicy(parsed.data.pin);
   if (!policy.ok) {
     throw new ValidationError(policy.reason);
   }
@@ -115,19 +123,32 @@ export async function resetPassword(req: Request, res: Response): Promise<void> 
     const user = await tx.user.findUnique({ where: { id: targetId } });
     if (!user) throw new NotFoundError('Usuario no encontrado.');
 
-    const passwordHash = await hashPassword(parsed.data.password);
-    await tx.user.update({ where: { id: targetId }, data: { passwordHash } });
-    await tx.session.updateMany({
+    const pinHash = await hashPin(parsed.data.pin);
+    await tx.user.update({
+      where: { id: targetId },
+      data: { pinHash, failedLoginAttempts: 0, lockedUntil: null },
+    });
+    const revoked = await tx.session.updateMany({
       where: { userId: targetId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
     await recordAuditLog(tx, {
       actorUserId: req.auth?.userId,
-      action: 'admin.user.password_reset',
+      action: 'admin.user.pin_reset',
       entityType: 'User',
       entityId: targetId,
       ...requestMeta(req),
     });
+    if (revoked.count > 0) {
+      await recordAuditLog(tx, {
+        actorUserId: req.auth?.userId,
+        action: 'admin.user.sessions_revoked_by_pin_reset',
+        entityType: 'Session',
+        entityId: targetId,
+        newState: { revokedSessionsCount: revoked.count },
+        ...requestMeta(req),
+      });
+    }
   });
 
   res.set('Cache-Control', 'no-store');

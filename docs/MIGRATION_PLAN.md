@@ -91,6 +91,25 @@ Tres problemas detectados en la revisión del PR — corregidos sin tocar el mod
   - **Tests**: suite unitaria completa (`backend/src/test/auth/`, sin conexión a Neon) más suite de integración contra `demo` (`backend/src/test/integration/{auth,adminUsers,bootstrapAdmin}.integration.test.ts`, guardada por `DATABASE_TARGET=demo`, siempre secuencial entre archivos, limpieza determinística verificada por conteo antes/después) — ver `docs/ARCHITECTURE.md` §14.11 para el detalle y para el bug real que solo la suite de integración pudo encontrar.
 - **No incluyó**: ninguna pantalla de login ni cambio funcional en `frontend/`, ninguna ejecución real de `auth:bootstrap-admin`, ninguna conexión a `production`, ningún uso de Object Storage, ningún despliegue, ninguna rama ni Pull Request nuevos (trabajo directo sobre `main`).
 
+### Corrección posterior de la Etapa 3B.1 (antes de la Etapa 3B.2)
+
+Revisión puntual, sin cambios de schema: (a) rotación concurrente del refresh token — dos `POST /auth/refresh` casi simultáneos con el mismo token podían ambos "ganar" y emitir cada uno un refresh token nuevo; corregido con una toma atómica de la sesión (`updateMany` condicionado por `id`+`revokedAt: null`+vigencia, en vez de un `update` incondicional), apoyada en la semántica de re-chequeo de Postgres bajo READ COMMITTED — sin necesitar `SERIALIZABLE`; (b) `requireAuth` ahora exige `session.userId === token.sub` (un JWT firmado correctamente pero con un `sub` que no coincide con el dueño real de la sesión se rechaza); (c) `JWT_ACCESS_SECRET` pasó a ser obligatoria en `config/env.ts` (única fuente de verdad, mismo patrón que `DATABASE_URL`) en vez de fallar tarde y en un lugar distinto dentro de `auth/config.ts`. Detalle completo en `docs/ARCHITECTURE.md`, sección 14.12.
+
+## Etapa 3B.2 — Corrección del modelo de credenciales: contraseña → PIN ✅ completada
+
+- **Objetivo**: reemplazar el login por usuario+contraseña (Etapa 3B.1) por selección de identidad + PIN numérico de 4 dígitos — decisión funcional del usuario, no un hallazgo de seguridad sobre la etapa anterior —, preservando íntegramente todo lo demás ya construido (JWT, refresh con rotación, sesiones revocables, cookies `HttpOnly`, autorización por rol, `session.userId === token.sub`). **Sin construir todavía la pantalla de login ni el selector visual** — eso queda para una etapa posterior.
+- **Resultado**:
+  - **PIN**: Argon2id (mismos parámetros que se usaban para contraseñas), política `^\d{4}$` exacta — nunca se transforma a número (preserva ceros iniciales). `backend/src/auth/password.ts` renombrado a `backend/src/auth/pin.ts`.
+  - **Protección de fuerza bruta**: contador de intentos fallidos + bloqueo de 15 minutos tras 5 fallos consecutivos, persistidos en Postgres (`User.failedLoginAttempts`/`User.lockedUntil`, no en memoria del proceso) además del rate limit por IP ya existente. Incremento atómico (`{ increment: 1 }`); la transición a "bloqueada" usa una escritura condicionada (mismo patrón que la toma atómica de sesión de refresh) para que, bajo intentos concurrentes que cruzan el umbral a la vez, como máximo uno quede marcado como el que aplicó el bloqueo y audite el evento — bug real de duplicación encontrado y corregido durante esta misma etapa (ver `docs/ARCHITECTURE.md` §14.13).
+  - **Selector público de identidad**: `GET /api/v1/auth/login-options` (nuevo, sin autenticación) — devuelve `{ id, displayName, role, colorHex }` de usuarios `ACTIVE` únicamente, nunca `pinHash`/`username`/estado completo/intentos fallidos. Un `ADMIN` sin `Employee` vinculado se muestra con la etiqueta genérica "Administrador".
+  - **Login**: `POST /api/v1/auth/login` pasa a recibir `{ userId, pin }` (antes `{ username, password }`) — ya no normaliza ni busca por `username`.
+  - **Administración**: `POST /admin/users/:id/activate` recibe `{ pin }`; `POST /admin/users/:id/reset-password` renombrado a `POST /admin/users/:id/reset-pin`, y además de revocar todas las sesiones ahora también resetea intentos fallidos/bloqueo, todo en una única transacción con auditoría separada para el cambio de PIN y para la revocación de sesiones que provocó.
+  - **`username`**: se revisaron todas sus referencias antes de decidir; se conserva como identificador técnico interno (clave del seed idempotente, visible solo en `GET /admin/users`) pero deja de exponerse en `login-options`/`/me`/la respuesta de login, y deja de ser lo que se ingresa para autenticarse.
+  - **Migración** `pin_authentication`: rename de columna `password_hash` → `pin_hash` (nunca drop+recreate) y de su constraint asociado, más las dos columnas nuevas de fuerza bruta. Generada offline (mismo procedimiento que `auth_session_security`), aplicada solo a `demo`. Detalle en `docs/DATABASE.md`, "Etapa 3B.2".
+  - **Bootstrap del primer admin**: adaptado a PIN con confirmación (se pide dos veces, nunca se imprime) — sigue sin ejecutarse.
+  - **Tests**: suite unitaria y de integración contra `demo` extendidas/reescritas para PIN, incluida una prueba real de 10 intentos fallidos concurrentes contra `demo` (sin incrementos perdidos, sin auditoría de bloqueo duplicada) — ver `docs/ARCHITECTURE.md` §14.11/§14.13.
+- **No incluyó**: ninguna pantalla de login ni selector visual en `frontend/`, ninguna ejecución real de `auth:bootstrap-admin`, ningún PIN asignado a los 4 usuarios reales (siguen `PENDING_ACTIVATION`), ninguna conexión a `production`, ningún uso de Object Storage, ningún despliegue, ninguna rama ni Pull Request nuevos (trabajo directo sobre `main`).
+
 ## Etapa 4 — Reconstruir el frontend sin alterar el diseño
 
 - **Objetivo**: recrear en React + TypeScript las 14 pantallas identificadas en `docs/PROJECT_CONTEXT.md` §3, preservando la paleta de colores, tipografías (Fraunces/Karla), layout mobile-first con navegación inferior/sidebar, y componentes visuales (cards, chips, modales tipo bottom-sheet, badges de estado).
@@ -208,3 +227,18 @@ Cambios de esta revisión:
 - [x] `npm run auth:bootstrap-admin` **no se ejecutó** en ningún momento de esta etapa — solo su núcleo puro se testeó, con limpieza determinística cuando llegó a crear un admin real de prueba contra `demo`.
 - [x] Documentación actualizada: `README.md`, `docs/ARCHITECTURE.md` (§5, §6, §8, §11, y nueva §14), `docs/SECURITY.md`, `docs/DATABASE.md`, este documento, y `AGENTS.md` ("Estado actual").
 - **No incluyó**: ninguna pantalla de login, ningún cambio funcional en `frontend/`, ninguna conexión a `production`, ningún uso de Object Storage, ningún despliegue, ninguna rama ni Pull Request (commit único directo sobre `main`).
+
+## Validaciones obligatorias de la Etapa 3B.2
+
+- [x] `prisma format` / `prisma validate` / `prisma generate` — en verde.
+- [x] Migración `pin_authentication` generada offline (rename de columna/constraint a mano, ver `docs/ARCHITECTURE.md` §14.13), inspeccionada antes de aplicar.
+- [x] Migración aplicada solo a `demo` (`prisma migrate deploy`); `prisma migrate status` sin drift.
+- [x] `npm run build`, `npm run typecheck`, `npm run lint`, `npm run format:check` — en verde sobre el monorepo completo.
+- [x] Suite unitaria del backend (`npm test`) — 222 tests en verde, sin conexión a Neon.
+- [x] Suite de integración autorizada contra `demo` (`npm run test:integration`) — 28 tests en verde, corrida dos veces para descartar flakiness; encontró y permitió corregir un bug real de duplicación del audit log de bloqueo bajo intentos concurrentes (ver `docs/ARCHITECTURE.md` §14.13).
+- [x] Verificado por SQL directo tras los tests: 4 usuarios reales del seed siguen `PENDING_ACTIVATION` con `pin_hash: NULL` (mismo valor que tenían como `password_hash`), 0 sesiones remanentes, 0 usuarios con prefijo de prueba.
+- [x] Escaneo de secretos y de PIN hardcodeados (`1234` y patrones equivalentes) sobre el diff completo — sin coincidencias.
+- [x] Confirmado que `.env` sigue sin trackear y que `.env.example` no cambió (esta etapa no agregó variables de entorno nuevas).
+- [x] `npm run auth:bootstrap-admin` **no se ejecutó** en ningún momento de esta etapa — solo su núcleo puro se testeó (unitariamente y contra `demo` con limpieza determinística).
+- [x] Documentación actualizada: `README.md`, `docs/ARCHITECTURE.md` (§5, §8, y nueva §14.1/§14.1a/§14.6a/§14.13), `docs/SECURITY.md`, `docs/DATABASE.md`, `docs/BUSINESS_RULES.md`, `docs/SEED_MANIFEST.md`, este documento, y `AGENTS.md` ("Estado actual").
+- **No incluyó**: ninguna pantalla de login ni selector visual en `frontend/`, ningún PIN asignado a los 4 usuarios reales, ninguna conexión a `production`, ningún uso de Object Storage, ningún despliegue, ninguna rama ni Pull Request (commit único directo sobre `main`).

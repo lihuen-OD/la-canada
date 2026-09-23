@@ -91,7 +91,7 @@ async function seedUsers(db: Tx, employeesByCode: Map<string, { id: string }>) {
           data: {
             username: seed.username,
             role: SystemRole.EMPLOYEE,
-            // status y passwordHash usan el default del schema:
+            // status y pinHash usan el default del schema:
             // PENDING_ACTIVATION / null — ver modelo User.
             employeeId: employee.id,
           },
