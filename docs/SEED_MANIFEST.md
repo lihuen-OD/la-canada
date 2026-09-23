@@ -1,6 +1,8 @@
 # SEED_MANIFEST.md — Manifiesto exacto del seed (Etapa 2)
 
-> Este documento lista, entidad por entidad, exactamente qué carga `backend/prisma/seed.ts` (vía los módulos de `backend/prisma/seed-data/`) y qué **no** carga. El seed **no se ejecutó** en esta etapa — este manifiesto describe lo que el código haría si se corriera, verificado por lectura del código y por los tests de `backend/src/test/seed-data.test.ts` / `seed-source-guards.test.ts` (que sí corren, sin base de datos).
+> Este documento lista, entidad por entidad, exactamente qué carga `backend/prisma/seed.ts` (vía los módulos de `backend/prisma/seed-data/`) y qué **no** carga. Escrito originalmente en la Etapa 2, cuando el seed **no se había ejecutado todavía** — describía lo que el código haría si se corriera, verificado por lectura del código y por los tests de `backend/src/test/seed-data.test.ts` / `seed-source-guards.test.ts` (que corren sin base de datos).
+>
+> **Actualización (Etapa 3A)**: el seed ya se ejecutó de verdad, dos veces, contra la rama `demo` de Neon. Los conteos de este documento se confirmaron exactos contra Postgres real (61 entidades maestras + 14 movimientos de apertura = 75 filas en la primera corrida; mismos conteos y cero duplicados en la segunda) — ver `docs/MIGRATION_PLAN.md`, "Etapa 3A", para el detalle de la verificación. Todo lo demás en este manifiesto (qué se siembra, qué se omite y por qué) sigue vigente sin cambios.
 
 ## Resumen
 

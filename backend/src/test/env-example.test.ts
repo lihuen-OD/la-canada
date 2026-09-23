@@ -45,3 +45,24 @@ describe('.env.example — Object Storage reemplaza a Google Drive', () => {
     }
   });
 });
+
+describe('.env.example — Neon (Etapa 3A): DATABASE_URL/DIRECT_URL nunca con valor real', () => {
+  // Guard directo contra la regresión detectada en esta misma etapa: un
+  // valor real de Neon (usuario, password y host reales) llegó a pegarse en
+  // `.env.example` por error, antes de commitearse. Este test falla si
+  // vuelve a pasar — no compara contra el valor puntual que se filtró (eso
+  // sería reintroducirlo como fixture), sino contra la *forma* de una
+  // connection string real.
+  it('DATABASE_URL y DIRECT_URL están presentes pero vacías', () => {
+    expect(ENV_EXAMPLE).toMatch(/^DATABASE_URL=$/m);
+    expect(ENV_EXAMPLE).toMatch(/^DIRECT_URL=$/m);
+  });
+
+  it('ninguna línea del archivo contiene una connection string de Postgres con credenciales', () => {
+    expect(ENV_EXAMPLE).not.toMatch(/postgres(ql)?:\/\/[^:\s]+:[^@\s]+@/i);
+  });
+
+  it('ninguna línea del archivo contiene un host de Neon real', () => {
+    expect(ENV_EXAMPLE).not.toMatch(/[a-z0-9-]+\.neon\.tech/i);
+  });
+});

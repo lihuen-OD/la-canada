@@ -10,8 +10,14 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:integration": "tsx src/scripts/guardDbCommand.ts --require DATABASE_URL --shape pooled --gate-target && vitest run --config vitest.integration.config.mts",
     "format": "prettier --write \"src/**/*.ts\" \"prisma/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"prisma/**/*.ts\""
+    "format:check": "prettier --check \"src/**/*.ts\" \"prisma/**/*.ts\"",
+    "db:check": "tsx src/scripts/checkDbConnection.ts",
+    "db:migrate:dev": "tsx src/scripts/guardDbCommand.ts --require DIRECT_URL --shape direct --gate-target && prisma migrate dev",
+    "db:migrate:deploy": "tsx src/scripts/guardDbCommand.ts --require DIRECT_URL --shape direct --gate-target && prisma migrate deploy",
+    "db:migrate:status": "tsx src/scripts/guardDbCommand.ts --require DIRECT_URL --shape direct && prisma migrate status",
+    "db:seed": "tsx src/scripts/guardDbCommand.ts --require DATABASE_URL --shape pooled --gate-target && prisma db seed"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
