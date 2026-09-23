@@ -1,35 +1,26 @@
 export interface AppEnv {
-  /** Base URL de la API del backend, ya con el prefijo de versión (ej: http://localhost:4000/api/v1). */
-  apiUrl: string;
   /** Modo de Vite actual (development / production / test). */
   mode: string;
 }
 
 /**
  * Función pura para poder testearla sin depender de `import.meta.env` global
- * (que no es trivial de mockear en Vitest). Valida que VITE_API_URL exista
- * y solo lee lo que Vite ya decidió exponer al cliente (variables
- * prefijadas con VITE_) — nunca distribuye nada que no sea explícitamente
- * público.
+ * (que no es trivial de mockear en Vitest).
+ *
+ * Ya no expone ninguna URL de backend (`VITE_API_URL` se eliminó — Etapa
+ * 3C): toda llamada a la API usa una ruta relativa bajo `/api` (ver
+ * `src/api/httpClient.ts`), resuelta en desarrollo por el proxy de Vite y en
+ * producción por el proxy de Netlify — nunca una variable `VITE_*` que
+ * exponga configuración de backend al bundle del cliente.
  */
 export function resolveEnv(rawEnv: ImportMetaEnv): AppEnv {
-  const apiUrl = rawEnv.VITE_API_URL;
-  if (!apiUrl) {
-    throw new Error(
-      'Falta la variable de entorno VITE_API_URL. Definila en el archivo .env de la raíz del ' +
-        'proyecto (ver .env.example) — el frontend la necesita para saber a qué backend llamar.',
-    );
-  }
-  return { apiUrl, mode: rawEnv.MODE };
+  return { mode: rawEnv.MODE };
 }
 
 let cachedEnv: AppEnv | undefined;
 
 /**
- * Se evalúa recién en el primer uso real, no al importar el módulo — así
- * un archivo puede importar de acá sin verse obligado a tener VITE_API_URL
- * disponible si nunca termina usándola (por ejemplo, en tests enfocados en
- * otra cosa).
+ * Se evalúa recién en el primer uso real, no al importar el módulo.
  */
 export function getAppEnv(): AppEnv {
   if (!cachedEnv) {

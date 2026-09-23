@@ -99,7 +99,7 @@ Principios que rigen esta arquitectura objetivo:
 
 ## 4. Separación frontend / backend / base de datos
 
-- **Frontend (Netlify)**: solo presentación y consumo de la API del backend vía HTTPS. No contiene ningún secreto. Se comunica con el backend mediante una URL de API configurada por variable de entorno de build (p. ej. `VITE_API_URL`).
+- **Frontend (Netlify)**: solo presentación y consumo de la API del backend vía HTTPS. No contiene ningún secreto. **Actualización Etapa 3C**: ya no se comunica mediante una URL de API absoluta configurada por variable de entorno — usa rutas relativas bajo `/api`, resueltas por un proxy (Vite en desarrollo, Netlify en producción — ver sección 14.14). Cero variables `VITE_*` en esta etapa.
 - **Backend (Render)**: dueño de toda la lógica de negocio (cálculo de períodos, estados de stock, desempeño, etc. — hoy vive en el cliente y debe migrar al servidor), de la autenticación/autorización, de la integración con Neon Object Storage, y del acceso a Postgres vía Prisma.
 - **Base de datos (Neon)**: solo accesible desde el backend (connection string en variable de entorno del backend, nunca expuesta al navegador).
 
@@ -242,18 +242,18 @@ Implementado y verificado en la Etapa 1 (no es solo un plan): hay un único `.en
 | Servicio | Variables que usa hoy | Origen en producción |
 |---|---|---|
 | Backend (Render) | `NODE_ENV`, `PORT`, `FRONTEND_URL`, `DATABASE_URL`, `JWT_ACCESS_SECRET` (todas obligatorias, misma fuente de verdad en `config/env.ts` — sin cualquiera de ellas el backend no arranca, ver sección 13.7 y 14.2); `DIRECT_URL`, `DATABASE_TARGET` (opcionales, solo scripts locales); `ACCESS_TOKEN_TTL`/`REFRESH_TOKEN_TTL`/`COOKIE_SAME_SITE` (opcionales, con default); `OBJECT_STORAGE_*` (previstas para una etapa futura) | Variables de entorno configuradas en el dashboard de Render para ese servicio — inyectadas directamente en `process.env` del proceso Node, sin ningún archivo |
-| Frontend (Netlify) | `VITE_API_URL` (única variable pública prevista en esta etapa) | Variable de entorno configurada en el dashboard de Netlify (Site settings → Environment variables) para ese sitio, inyectada en `process.env` durante el paso de build |
+| Frontend (Netlify) | Ninguna — **Actualización Etapa 3C**: `VITE_API_URL` se eliminó; el frontend usa rutas relativas bajo `/api`, resueltas por el proxy de Netlify en producción (sección 14.14), nunca una variable `VITE_*` con la URL del backend | — |
 
 **Por qué esto funciona sin un `.env` en producción — comprobado, no solo asumido:**
 
-- `dotenv` (backend, `backend/src/config/index.ts`) y `loadEnv` de Vite (frontend) dan prioridad a las variables ya presentes en `process.env` por sobre cualquier `.env` de archivo — así funcionan por diseño ambas librerías. Como el repositorio nunca commitea un `.env` real (`.gitignore`), en Netlify y Render simplemente no hay archivo que leer: `dotenv.config()` no encuentra el archivo, no lanza error, y no pisa nada — el proceso sigue con lo que la plataforma ya inyectó en `process.env`.
+- `dotenv` (backend, `backend/src/config/index.ts`) da prioridad a las variables ya presentes en `process.env` por sobre cualquier `.env` de archivo — así funciona por diseño. Como el repositorio nunca commitea un `.env` real (`.gitignore`), en Netlify y Render simplemente no hay archivo que leer: `dotenv.config()` no encuentra el archivo, no lanza error, y no pisa nada — el proceso sigue con lo que la plataforma ya inyectó en `process.env`.
 - El backend valida con Zod únicamente `NODE_ENV`, `PORT`, `FRONTEND_URL` y las variables previstas — **nunca lee ni declara ninguna variable `VITE_*`**. Verificado con un test dedicado (`backend/src/test/env.test.ts`): si por algún motivo una variable `VITE_*` llegara a estar presente en el entorno del proceso backend, el schema la descarta silenciosamente (Zod no incluye claves no declaradas en el resultado).
-- El frontend, por diseño de Vite, solo expone al bundle del cliente las variables con prefijo `VITE_` (`envPrefix` por defecto) — cualquier variable del backend (`DATABASE_URL`, `JWT_ACCESS_SECRET`, etc.) nunca llega a `import.meta.env` ni al código empaquetado, aunque estuviera presente en el entorno de build. `VITE_API_URL` es la única variable con ese prefijo en `.env.example`.
-- Verificado empíricamente sobre el build real (`frontend/dist`): ninguna cadena de las variables previstas para el backend (secretos, URLs internas) aparece en el bundle compilado.
+- El frontend, por diseño de Vite, solo expone al bundle del cliente las variables con prefijo `VITE_` (`envPrefix` por defecto) — cualquier variable del backend (`DATABASE_URL`, `JWT_ACCESS_SECRET`, etc.) nunca llega a `import.meta.env` ni al código empaquetado, aunque estuviera presente en el entorno de build. **Actualización Etapa 3C**: `.env.example` ya no declara ninguna variable `VITE_*` — el frontend no necesita ninguna para funcionar, ni en desarrollo (proxy de Vite) ni en producción (proxy de Netlify).
+- Verificado empíricamente sobre el build real (`frontend/dist`): ninguna cadena de las variables previstas para el backend (secretos, URLs internas), ni `localStorage`/`sessionStorage`, ni un PIN hardcodeado, aparece en el bundle compilado.
 
 **Configuración esperada al desplegar** (no ejecutada en esta etapa, es la referencia para cuando se despliegue):
 
-- **Netlify**: "Base directory" = `frontend`, build command = `npm run build` (o el equivalente desde la raíz apuntando al workspace), "Publish directory" = `frontend/dist`. Variable a configurar: `VITE_API_URL` apuntando a la URL pública del backend en Render (con el prefijo `/api/v1`).
+- **Netlify**: "Base directory" = `frontend`, build command = `npm run build` (o el equivalente desde la raíz apuntando al workspace), "Publish directory" = `frontend/dist`. Ninguna variable de entorno que configurar para que el frontend hable con el backend — eso lo resuelve el archivo de proxy/redirects (sección 14.14), no una variable de build.
 - **Render**: "Root Directory" = `backend`, build command = `npm run build` (o `npm install && npm run build` según el runner), start command = `npm run start`. Variables a configurar: `NODE_ENV=production`, `PORT` (Render suele inyectar el suyo propio y esperar que la app lo respete — `config.port` ya lee `process.env.PORT`), `FRONTEND_URL` apuntando a la URL pública del sitio en Netlify, y las de Neon/JWT/`OBJECT_STORAGE_*` (rama `production` del proyecto de Neon — ver sección 9.3) cuando correspondan en sus etapas.
 - Ambas plataformas clonan el repositorio completo (el monorepo entero), no solo el subdirectorio configurado como base/root — por eso `envDir: '../'` (frontend) y `resolve(process.cwd(), '../.env')` (backend) siguen apuntando a una ruta válida dentro del checkout en ambos casos, aunque ahí no encuentren ningún `.env` (y no lo necesitan). Esta afirmación se basa en el comportamiento estándar documentado de ambas plataformas para monorepos; no se validó contra una cuenta real de Netlify/Render en esta etapa porque no se realizó ningún despliegue.
 
@@ -392,7 +392,7 @@ Frontend en Netlify, backend en Render — dominios distintos en esta etapa. COR
 
 `COOKIE_SAME_SITE` (`lax`\|`strict`\|`none`) es configurable; si se deja vacía, se deriva `none` en producción (dominios cruzados reales) y `lax` en desarrollo local (mismo origen efectivo). La regla dura, verificada con un test dedicado (`deriveSecureFlag`): `SameSite=None` siempre fuerza `Secure=true`, sin excepción — nunca se desactiva esa protección "para que funcione".
 
-**Pendiente, documentado a propósito**: no se decidió todavía si la arquitectura final usa un proxy de Netlify (`_redirects`/Netlify Functions) para que frontend y backend compartan efectivamente el mismo origen público (evitando cookies cross-site del todo), o si se mantienen dominios separados con `SameSite=None; Secure`. Esa decisión queda para cuando se implemente la pantalla de login (fuera del alcance de esta etapa).
+**Pendiente, documentado a propósito**: no se decidió todavía si la arquitectura final usa un proxy de Netlify (`_redirects`/Netlify Functions) para que frontend y backend compartan efectivamente el mismo origen público (evitando cookies cross-site del todo), o si se mantienen dominios separados con `SameSite=None; Secure`. **Actualización Etapa 3C**: la pantalla de login ya existe y ya usa un proxy equivalente en desarrollo (Vite, ver sección 15.7) — la decisión de PRODUCCIÓN sigue pendiente porque falta la URL real de Render; sección 15.7 documenta exactamente qué regla habrá que agregar cuando exista.
 
 ### 14.9 Rate limiting, respuestas y auditoría
 
@@ -433,6 +433,68 @@ El modelo de credenciales visible cambió: ya no es usuario+contraseña, es sele
 **Bug real encontrado y corregido durante esta misma corrección**: la primera versión de la protección de fuerza bruta escribía una fila de auditoría `auth.login.locked` en **cada** intento fallido una vez superado el umbral de 5 (`failedLoginAttempts >= 5`), no solo en el que cruzó el umbral por primera vez — bajo una ráfaga de intentos concurrentes, varias solicitudes pueden cruzar el umbral con su propio incremento (el conteo en sí nunca se pierde gracias al operador atómico `increment`, pero decidir *cuál* solicitud "aplica" el bloqueo si no se atomiza también). Corregido con el mismo patrón de toma atómica que la rotación de refresh tokens (14.12, punto a): el bloqueo se aplica con un `updateMany` condicionado por `lockedUntil: null` o ya vencido, y solo la solicitud cuyo `count` da 1 se considera la que efectivamente bloqueó la cuenta y audita el evento. Encontrado por el test de integración real de 10 intentos concurrentes contra `demo` (`backend/src/test/integration/auth.integration.test.ts`) — un test unitario con Prisma en memoria (secuencial, sin condiciones de carrera reales) no lo hubiera detectado, igual que con el bug de 14.3.
 
 **Validaciones de esta corrección**: Prisma format/validate/generate, migración generada e inspeccionada, aplicada solo a `demo`, `migrate status` sin drift, build, typecheck, lint, suite unitaria completa (222 tests) y suite de integración autorizada contra `demo` (28 tests, corrida dos veces para descartar flakiness) en verde, `format:check` en verde, escaneo de secretos y de PIN hardcodeados sin coincidencias, `.env` sin trackear, 4 usuarios reales (siguen `PENDING_ACTIVATION`, sin PIN inventado) y 0 sesiones/usuarios de prueba confirmados por SQL directo tras correr los tests. No se creó ningún administrador real, no se ejecutó `npm run auth:bootstrap-admin`, `production` no se tocó, no se avanzó con ninguna pantalla de login funcional.
+
+## 15. Frontend de autenticación por PIN (Etapa 3C)
+
+Construido íntegramente sobre React 19 + `react-router-dom` v7 + Vitest/Testing Library, sin agregar ninguna librería nueva de estado global, HTTP ni UI (el proyecto no tenía ninguna de las tres antes de esta etapa, y no hizo falta para lo que pedía el flujo de login). Todavía no hay dashboard ni módulos de negocio — la única pantalla protegida es un punto de entrada temporal que confirma usuario/rol y ofrece cerrar sesión.
+
+### 15.1 Access token — solo en memoria
+
+`frontend/src/auth/accessTokenStore.ts`: una variable de módulo (no React state, no `localStorage`/`sessionStorage`/`IndexedDB`/cookie legible desde JS), con `getAccessToken`/`setAccessToken`/`clearAccessToken`/`subscribeToAccessToken`. Se pierde a propósito al recargar la página — la restauración de sesión (15.3) es lo que la repone, usando el refresh token opaco que el navegador nunca puede leer (cookie `HttpOnly`). El cliente HTTP (15.2) lo lee de forma síncrona para armar el header `Authorization`; ningún componente de React necesita acceso directo al valor del token (`AuthContext` expone `user`/`status`, nunca el token en sí).
+
+### 15.2 Cliente HTTP (`frontend/src/api/httpClient.ts`)
+
+Rutas relativas bajo `/api/v1` (nunca una URL absoluta del backend, nunca una variable `VITE_*`) — ver 15.7 para cómo se resuelven en desarrollo y qué falta para producción. `credentials: 'include'` siempre, para que la cookie del refresh token viaje en cada request. `Authorization: Bearer <token>` se agrega únicamente cuando la request se marca `authenticated: true` **y** hay un token en memoria — `login-options`/`login`/`refresh`/`logout` nunca lo agregan (estructuralmente: no pasan esa opción), así que tampoco pueden entrar nunca a la lógica de reintento de 15.4.
+
+Errores parseados en un `ApiError` tipado (`status`, `code`, `message`) reflejando la forma real del backend (`{ error: { message, code } }`, ver `backend/src/middleware/errorHandler.ts`) — nunca un mensaje inventado ni la respuesta cruda expuesta tal cual a la UI.
+
+### 15.3 Restauración de sesión al iniciar/recargar
+
+`AuthProvider` (`frontend/src/auth/AuthProvider.tsx`) intenta un único `POST /auth/refresh` al montar. Estados posibles:
+
+- Éxito → `GET /auth/me` (la respuesta de `/refresh` no trae `user`, a diferencia de `/login` — se pidió a propósito, ver `backend/src/controllers/authController.ts`) → `authenticated`.
+- Falla con un `ApiError` (sesión inexistente o vencida — el caso normal, más común la primera vez que alguien nunca inició sesión) → `anonymous`, sin ningún mensaje de error técnico.
+- Falla por un problema de red/conectividad (no un `ApiError`) → `sessionError`, con un botón "Reintentar" (`retryBootstrap`) que vuelve a intentar el mismo flujo de verdad.
+
+`AppRoutes` resuelve `bootstrapping`/`sessionError` ANTES de montar cualquier `<Routes>` — nunca hay un parpadeo del selector de login mientras todavía se está restaurando una sesión válida.
+
+### 15.4 Un único coordinador de refresh — StrictMode y 401 concurrentes
+
+`frontend/src/auth/refreshCoordinator.ts` expone `requestRefresh()`: single-flight real (una promesa de módulo, `inFlight`) que sirve **dos** disparadores distintos con el mismo mecanismo:
+
+1. **El doble montaje de efectos de React StrictMode** en desarrollo — sin esto, dispararía dos `POST /auth/refresh` reales con el mismo refresh token, y el backend trata una rotación concurrente como posible robo (`docs/ARCHITECTURE.md` §14.12): el "perdedor" de esa carrera puede terminar revocando todas las sesiones del usuario, incluida la que "ganó".
+2. **Varias requests autenticadas que reciben 401 casi al mismo tiempo** (`httpClient.ts`, `attemptWithRefresh`): comparten el mismo refresh en vez de disparar uno cada una, y cada request original se reintenta **como máximo una vez** — nunca hay loop, y un segundo 401 tras el reintento no dispara un segundo refresh.
+
+**Logout durante un refresh en vuelo**: `accessTokenStore` lleva una "época" (`epoch`) que se incrementa en cada `clearAccessToken()` (logout). `requestRefresh` captura la época al empezar y, si cambió cuando el refresh HTTP responde, descarta el resultado (nunca llama a `setAccessToken`, la promesa rechaza) — un refresh tardío nunca vuelve a autenticar a alguien que ya cerró sesión deliberadamente. Las tres garantías (single-flight StrictMode, reintento único tras 401, logout-durante-refresh) tienen test dedicado y pasan de forma determinística — no dependen de timing real de red, a diferencia del equivalente del lado del backend (§14.12), porque acá todo corre en el mismo proceso de JS.
+
+### 15.5 Selector de identidad (`GET /auth/login-options`)
+
+Consume la forma real de la respuesta, `{ options: LoginOption[] }` (nunca un array suelto). Solo usuarios `ACTIVE` — una lista vacía (el estado real actual: 0 usuarios activos, los 4 empleados reales siguen `PENDING_ACTIVATION` y no hay administrador todavía) se muestra como tal, nunca se completa con fixtures: "Todavía no hay usuarios habilitados para ingresar." + "El administrador debe crear su acceso inicial y habilitar a los integrantes del equipo." — sin ningún control para crear el administrador desde el frontend. `colorHex` se valida contra un patrón hex estricto antes de usarse en un estilo inline; cualquier valor que no matchee (incluido `null`) cae a un gris neutro fijo. El rol `ADMIN` se distingue con una insignia visual y semántica (`aria-label`), nunca solo por color.
+
+### 15.6 PIN — nunca en storage, nunca en logs
+
+El PIN vive únicamente como estado local de `PinEntryScreen` (nunca en `AuthContext`, nunca en `accessTokenStore`, nunca en la URL) — siempre `string` (un valor como `'0007'` nunca se convierte a número, en ningún punto del frontend ni del backend). Se limpia ante un login rechazado, al volver al selector, y al desmontar el componente. Nunca se muestra en texto plano (solo 4 indicadores de "lleno/vacío"). El login rechazado nunca distingue visualmente PIN incorrecto / identidad inexistente / cuenta bloqueada / estado no permitido — siempre el mensaje genérico del backend (`ApiError.message`); un error de red muestra un mensaje de conectividad distinto, nunca "PIN incorrecto". Doble envío evitado con una guarda síncrona (`ref`, no solo el `disabled` del DOM) — más allá de que el propio backend también es la autoridad final ante cualquier reintento.
+
+### 15.7 Proxy local de Vite (desarrollo) y proxy de Netlify (pendiente, producción)
+
+**Desarrollo** (`frontend/vite.config.ts`): `server.proxy['/api'] -> http://localhost:4000` (mismo puerto que `PORT` en `.env.example`), sin `rewrite` — el prefijo `/api/v1` llega intacto al backend, que lo necesita (monta ahí sus rutas). `changeOrigin: true` reescribe el header `Host`, nunca el header `Origin` (el navegador lo sigue mandando como el origen real de la página) — necesario para que `validateOrigin`/CORS del backend validen contra `FRONTEND_URL`. Verificado en vivo (backend + frontend corriendo de verdad): `GET /api/v1/auth/login-options` a través del proxy devuelve exactamente lo mismo que pegarle directo al backend, con `access-control-allow-origin`/`access-control-allow-credentials` correctos.
+
+**Producción (pendiente, documentado a propósito — no se decide en esta etapa)**: falta la URL real de Render para escribir la regla. Cuando exista, hace falta un archivo de redirects de Netlify (`frontend/public/_redirects` o `netlify.toml`) con, como mínimo:
+
+```
+/api/*  https://<url-real-de-render>/api/:splat  200
+/*      /index.html                              200
+```
+
+Con la regla de `/api/*` **antes** que el catch-all de SPA (`/* -> /index.html`) — si el orden se invierte, cualquier request a `/api/...` recibiría el `index.html` de la SPA en vez de llegar al backend, y el frontend interpretaría eso como una respuesta JSON inválida. `FRONTEND_URL` en Render deberá coincidir exactamente con la URL pública real de Netlify (mismo requisito que ya exige `validateOrigin`/CORS en desarrollo, sección 14.8) — un mismatch rompe `/auth/refresh`/`/auth/logout` con `403 AUTH_ORIGIN_INVALID`, no con un error obvio de conexión. El header `Origin` se preserva igual que en desarrollo (Netlify's proxy reenvía la request tal cual la mandó el navegador). Verificación pendiente para cuando exista el despliegue real: confirmar que la respuesta de `/auth/login`/`/auth/refresh` trae `Set-Cookie` con los atributos esperados (`HttpOnly`, `Secure`, `SameSite=None` en cross-site real — ver `docs/ARCHITECTURE.md` §14.8), que un `refresh` posterior efectivamente manda esa cookie de vuelta, y que `logout` la limpia (`document.cookie` nunca debería mostrar `lc_refresh_token`, precisamente porque es `HttpOnly`). No se decide todavía si la arquitectura final usa este proxy de Netlify o un dominio propio compartido (mismo punto pendiente que §14.8).
+
+### 15.8 Rutas protegidas y autorización por rol
+
+`ProtectedRoute` (`frontend/src/routes/ProtectedRoute.tsx`): solo se monta cuando `status` ya está resuelto a `anonymous`/`authenticated` (`AppRoutes` filtra `bootstrapping`/`sessionError` antes) — `authenticated` renderiza `<Outlet/>`, cualquier otro estado redirige a `/login`. Nunca decide en base a un rol leído del JWT del lado del cliente — la fuente es siempre `user` tal como lo devolvió el backend (`/login` o `/me`). `RequireRole` (`frontend/src/routes/RequireRole.tsx`): utilidad preparada para rutas admin-only de etapas futuras, sin ningún consumidor real todavía (no hay módulos administrativos que proteger en esta etapa).
+
+### 15.9 Tests y validaciones
+
+66 tests nuevos (Vitest + Testing Library), entre ellos: single-flight de `requestRefresh` bajo llamadas concurrentes, descarte de un refresh tardío tras logout, StrictMode real (`<StrictMode>` + `render`) confirmando un único `POST /auth/refresh`, reintento único tras 401 y ausencia de loop ante un segundo 401, parseo del error real del backend, selector con estado vacío/error/carga real, conservación del cero inicial del PIN, prevención de doble envío, y ausencia de `localStorage`/`sessionStorage` en cualquier punto del flujo. Suite completa del backend (222 unitarios + 28 de integración contra `demo`) sigue en verde, sin cambios de schema en esta etapa.
 
 **c) Build offline roto.** `prisma.config.ts` resolvía `DIRECT_URL` de forma eager (vía el helper `env()` de `prisma/config`), así que `prisma format`/`validate`/`generate` — que no tocan ninguna base — fallaban igual sin un `.env`. Se corrigió armando `datasource` de forma condicional (`process.env.DIRECT_URL` leído directo, sin el helper que lanza; `datasource` se omite por completo si falta, **sin URL de reemplazo hardcodeada ni connection string ficticia guardada**). Verificado con un entorno real sin `DATABASE_URL`/`DIRECT_URL`/`DATABASE_TARGET` (`.env` movido a un backup temporal fuera del repo y restaurado después, sin tocar su contenido): instalación, `prisma generate`, `prisma validate`, build, typecheck, lint, tests unitarios y `format:check` funcionan igual — ninguno requiere Neon. Solo conexión (`db:check`), migraciones, seed y tests de integración necesitan las variables reales, y fallan con un mensaje claro (nunca con una connection string) si faltan.
 

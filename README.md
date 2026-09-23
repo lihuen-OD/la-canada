@@ -7,9 +7,9 @@ Sistema de gestión operativa para la propiedad "La Cañada": tareas del equipo,
 El proyecto está en transición desde un prototipo de un único archivo (`index.html`, HTML + CSS + JS embebido, conectado directamente a Supabase) hacia una aplicación profesional full stack.
 
 - **`index.html`/`legacy/index.original.html` (el prototipo original) fueron retirados del repositorio.** Contenían una URL y una API key reales de Supabase hardcodeadas en texto plano (ver `docs/SECURITY.md`); una vez confirmado que todo su contenido funcional, visual y de datos ya estaba migrado a `docs/`, al modelo Prisma y al seed, se eliminaron del árbol de trabajo **y de todo el historial de Git** (Etapa 2.3 — ver `docs/MIGRATION_PLAN.md`). La referencia de diseño y comportamiento del prototipo vive ahora exclusivamente en `docs/` (`PROJECT_CONTEXT.md`, `BUSINESS_RULES.md`, `DATABASE.md`, `DATA_INVENTORY.md`).
-- **Todavía no hay pantallas de negocio implementadas** en `frontend/` — las Etapas 1 y 2 del plan de migración crearon la estructura profesional base y el modelo de datos + seed; la Etapa 3B.1 agregó autenticación real en el backend (ver más abajo), sin tocar el frontend.
-- **El modelo de datos ya está migrado contra Neon, rama `demo` exclusivamente** (Etapa 3A, con un ajuste de `Session` en la Etapa 3B.1): `backend/prisma/schema.prisma` (22 modelos, 11 enums), migraciones aplicadas, y el seed ya ejecutado dos veces (idempotencia confirmada). `production` no se toca en esta etapa — ver "Base de datos (Prisma + Neon)" más abajo.
-- **Autenticación real implementada en el backend (Etapa 3B.1), con el modelo de credenciales corregido a PIN (Etapa 3B.2)**: selección de identidad (`GET /auth/login-options`) + PIN de 4 dígitos (ya no usuario+contraseña), refresh con rotación (token opaco, nunca un JWT), logout, `/me`, administración de usuarios (activar con PIN, `reset-pin`, cambiar estado), bloqueo persistente por intentos fallidos, y bootstrap del primer administrador (construido y testeado, **nunca ejecutado** — ver `docs/MIGRATION_PLAN.md`, "Etapa 3B.2"). **No hay todavía pantalla de login ni ningún cambio funcional en el frontend** — eso queda para una etapa posterior, autorizada explícitamente.
+- **Todavía no hay dashboard ni módulos de negocio implementados** en `frontend/` (ni reales ni mock) — eso sigue siendo la Etapa 4. Lo que sí existe, completo, es el flujo de autenticación (Etapa 3C, ver más abajo).
+- **El modelo de datos ya está migrado contra Neon, rama `demo` exclusivamente** (Etapa 3A, con ajustes de `Session`/`User` en 3B.1/3B.2): `backend/prisma/schema.prisma` (22 modelos, 11 enums), migraciones aplicadas, y el seed ya ejecutado dos veces (idempotencia confirmada). `production` no se toca en esta etapa — ver "Base de datos (Prisma + Neon)" más abajo.
+- **Autenticación real de punta a punta**: backend (Etapa 3B.1, modelo de credenciales corregido a PIN en 3B.2) + frontend (Etapa 3C). Selección de identidad (`GET /auth/login-options`) + PIN de 4 dígitos, access token en memoria, refresh con rotación (token opaco, nunca un JWT) y single-flight real, logout, `/me`, administración de usuarios (activar con PIN, `reset-pin`, cambiar estado), bloqueo persistente por intentos fallidos, rutas protegidas. Bootstrap del primer administrador construido y testeado, **nunca ejecutado** (ver `docs/MIGRATION_PLAN.md`, "Etapa 3B.2"/"Etapa 3C"). Los 4 empleados reales siguen `PENDING_ACTIVATION`, sin PIN — hoy `login-options` devuelve una lista vacía real, no un fixture.
 - **Los datos reales** (personas, tareas, stock, catálogos, etc.) ya están cargados en `demo`, exactamente como los describe `docs/SEED_MANIFEST.md` (61 entidades maestras + 14 movimientos de apertura = 75 filas).
 
 Ver `docs/PROJECT_CONTEXT.md`, `docs/ARCHITECTURE.md` y `docs/MIGRATION_PLAN.md` para el contexto completo y las próximas etapas.
@@ -63,16 +63,15 @@ cp .env.example .env
 ```
 
 - El **backend** lo carga explícitamente desde la raíz (`backend/src/config/index.ts`), sin importar desde qué workspace se ejecute el script.
-- El **frontend** (Vite) también lo lee desde la raíz gracias a `envDir` en `frontend/vite.config.ts` — solo las variables prefijadas con `VITE_` llegan al navegador; el resto queda exclusivamente en el backend.
+- El **frontend** (Vite) también lo lee desde la raíz gracias a `envDir` en `frontend/vite.config.ts` — solo las variables prefijadas con `VITE_` llegan al navegador; el resto queda exclusivamente en el backend. **Desde la Etapa 3C, el frontend no necesita ninguna variable `VITE_*`**: habla con el backend por rutas relativas bajo `/api`, resueltas por el proxy de Vite en desarrollo (`frontend/vite.config.ts`) y por el proxy de Netlify en producción (pendiente, ver `frontend/README.md`).
 
 Variables usadas en esta etapa:
 
 | Variable | Usada por | Obligatoria ahora |
 |---|---|---|
 | `NODE_ENV` | Backend | No (default `development`) |
-| `PORT` | Backend | No (default `4000`) |
-| `FRONTEND_URL` | Backend (CORS) | **Sí** — sin ella el backend no arranca |
-| `VITE_API_URL` | Frontend | Sí, para que el cliente HTTP sepa a qué backend llamar |
+| `PORT` | Backend | No (default `4000`) — también el destino del proxy de Vite en desarrollo |
+| `FRONTEND_URL` | Backend (CORS, `validateOrigin`) | **Sí** — sin ella el backend no arranca. Debe coincidir exactamente con el origen real del frontend (`http://localhost:5173` en desarrollo) |
 | `DATABASE_URL` | Backend (runtime, pooled) y seed | **Sí, sin excepción** — el backend no arranca sin ella (falla temprano y con mensaje claro, ver `backend/src/config/env.ts`) |
 | `DIRECT_URL` | Prisma Migrate exclusivamente (directa, sin pooler) | Solo para correr migraciones — el servidor nunca la necesita para arrancar |
 | `DATABASE_TARGET` | Gate de seguridad de `db:migrate:*`/`db:seed`/`test:integration` (`demo`\|`production`) | Sí, para esos comandos — deben rechazar su ejecución si no es exactamente `demo` |
@@ -98,6 +97,8 @@ npm run dev
 npm run dev:frontend   # Vite dev server, http://localhost:5173
 npm run dev:backend    # Express con recarga automática, http://localhost:4000
 ```
+
+Con ambos corriendo, abrir `http://localhost:5173` muestra el flujo de login real (selector de identidad + PIN) — el proxy de Vite (`frontend/vite.config.ts`) reenvía `/api/*` al backend. Con los datos actuales de `demo` (4 empleados `PENDING_ACTIVATION`, sin administrador), el selector muestra su estado vacío real ("Todavía no hay usuarios habilitados para ingresar.") hasta que se ejecute `npm run auth:bootstrap-admin` y se active al menos un usuario — ninguno de los dos pasos se hizo como parte de ninguna etapa hasta ahora.
 
 ## Build
 
@@ -178,16 +179,23 @@ npm run db:seed            # corre backend/prisma/seed.ts (registrado en prisma.
 
 Prisma 7 movió la configuración de conexión fuera de `schema.prisma` a `backend/prisma.config.ts` — ver `docs/ARCHITECTURE.md` §10 para el detalle de este y otros cambios de la versión instalada.
 
-## Autenticación (Etapa 3B.1, modelo de credenciales corregido a PIN en la Etapa 3B.2)
+## Autenticación (backend: Etapas 3B.1/3B.2 · frontend: Etapa 3C)
 
-Implementada en el backend, sin ninguna pantalla ni cambio funcional en el frontend todavía. Detalle completo en `docs/ARCHITECTURE.md` ("Autenticación") y `docs/SECURITY.md`.
+De punta a punta: backend + frontend. Detalle completo en `docs/ARCHITECTURE.md` (secciones 14 y 15), `docs/SECURITY.md` y `frontend/README.md`.
 
+**Backend**:
 - **Identidad + PIN, no usuario+contraseña**: la persona selecciona su identidad (`GET /api/v1/auth/login-options`) e ingresa un PIN numérico de 4 dígitos — mismo patrón de acceso que el prototipo original, pero con PIN individual (nunca compartido/predeterminado), hash Argon2id, y bloqueo persistente por intentos fallidos.
 - **Access token**: JWT (HS256, vía `jose`), corta duración (default 12 min), claims mínimos (`sub`, `sid`, `role`, `iat`, `exp`), issuer/audience propios.
 - **Refresh token**: opaco (no JWT), 256 bits aleatorios, enviado solo por cookie `HttpOnly` (`lc_refresh_token`, `Path=/api/v1/auth`) — en base solo se guarda su hash SHA-256. Rota en cada uso (protegido contra rotación concurrente); reusar un token ya rotado revoca todas las sesiones activas de ese usuario (posible robo).
 - **Fuerza bruta**: 5 PIN incorrectos consecutivos bloquean la cuenta 15 minutos (contador y bloqueo persistidos en Postgres, no en memoria — sobreviven a un reinicio de Render), además del rate limit por IP ya existente en `/auth/login`.
 - **Endpoints**: `GET /api/v1/auth/login-options` (público, selector de identidad), `POST /api/v1/auth/login` (`{ userId, pin }`), `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`; administración (`ADMIN`) en `/api/v1/admin/users` (listado, activar con PIN, `reset-pin`, cambiar estado) — ningún endpoint permite que un empleado cambie su propio PIN.
-- **Primer administrador**: `npm run auth:bootstrap-admin` (interactivo, PIN oculto con confirmación) — se niega si ya existe un `ADMIN` activo. No se ejecutó como parte de esta etapa ni de la anterior; solo se construyó y testeó.
+- **Primer administrador**: `npm run auth:bootstrap-admin` (interactivo, PIN oculto con confirmación) — se niega si ya existe un `ADMIN` activo. No se ejecutó nunca; solo se construyó y testeó.
+
+**Frontend** (Etapa 3C — selector de identidad, teclado de PIN, sesión, logout; sin dashboard todavía):
+- **Access token solo en memoria** (`frontend/src/auth/accessTokenStore.ts`) — nunca `localStorage`/`sessionStorage`/`IndexedDB`. Se pierde al recargar a propósito; la restauración de sesión (`POST /auth/refresh`, single-flight) lo repone.
+- **Un único refresh en vuelo, siempre**: mismo mecanismo evita que React StrictMode dispare dos `refresh` reales al montar, y que varios 401 simultáneos disparen uno cada uno — con reintento único por request y sin loops.
+- **Rutas protegidas**: anónimo → login; autenticado → área protegida; restaurando sesión → pantalla de carga estable (nunca parpadea el login).
+- **Proxy local de Vite**: `/api -> http://localhost:PORT` — el frontend nunca usa una URL absoluta ni una variable `VITE_*` para hablar con el backend.
 
 ## Seguridad de esta etapa
 
