@@ -31,9 +31,10 @@ describe('AuthenticatedHome', () => {
 
     renderHome();
 
-    expect(screen.getByText('Coke')).toBeInTheDocument();
-    expect(screen.getByText(/rol: equipo/i)).toBeInTheDocument();
-    expect(screen.getByText('Sesión iniciada')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Hola, Coke' })).toBeInTheDocument();
+    // Rol traducido, como texto (no solo un color).
+    expect(screen.getByText('Equipo')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Sesión iniciada');
   });
 
   it('un ADMIN sin Employee vinculado se muestra con la etiqueta genérica, nunca con el username', () => {
@@ -42,9 +43,12 @@ describe('AuthenticatedHome', () => {
       logout: vi.fn(),
     });
 
-    renderHome();
+    const { container } = renderHome();
 
-    expect(screen.getByText('Administrador')).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'Hola, Administrador' }),
+    ).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/@|username/i);
   });
 
   it('el botón "Cerrar sesión" llama a logout', async () => {
@@ -67,9 +71,38 @@ describe('AuthenticatedHome', () => {
       logout: vi.fn(),
     });
 
+    const { container } = renderHome();
+    const content = container.textContent ?? '';
+    expect(content).not.toMatch(/tarea|stock|gallina|mascota|evento|novedad|clima|foto/i);
+    // Sin KPI ni cifras de ningún tipo: ningún número se renderiza en la pantalla temporal.
+    expect(content).not.toMatch(/\d/);
+  });
+
+  it('no renderiza <main> propio: vive dentro del app shell, que ya lo provee', () => {
+    useAuthMock.mockReturnValue({
+      user: { id: 'user-1', role: 'EMPLOYEE', status: 'ACTIVE', employee: null },
+      logout: vi.fn(),
+    });
+
     renderHome();
-    const content = screen.getByRole('main').textContent ?? '';
-    expect(content).not.toMatch(/tarea|stock|gallina|mascota/i);
+    expect(screen.queryByRole('main')).not.toBeInTheDocument();
+  });
+
+  it('"Cerrar sesión" no permite un segundo envío mientras el primero sigue en curso', async () => {
+    const logout = vi.fn().mockReturnValue(new Promise(() => {}));
+    useAuthMock.mockReturnValue({
+      user: { id: 'user-1', role: 'EMPLOYEE', status: 'ACTIVE', employee: null },
+      logout,
+    });
+
+    renderHome();
+    const user = userEvent.setup();
+    const button = screen.getByRole('button', { name: /cerrar sesión/i });
+    await user.click(button);
+    await user.click(button);
+
+    expect(logout).toHaveBeenCalledTimes(1);
+    expect(button).toBeDisabled();
   });
 
   it('un ADMIN ve el enlace de administración de usuarios', () => {

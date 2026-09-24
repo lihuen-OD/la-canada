@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { fetchLoginOptions } from '../../api/authApi';
 import type { LoginOption } from '../../api/types';
+import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
 import { IdentityCard } from './IdentityCard';
 
 type LoadState =
@@ -16,7 +17,8 @@ interface IdentitySelectorProps {
  * `backend/src/controllers/authController.ts`). Nunca inventa personas ni
  * completa la lista con datos de relleno: una lista vacía es un estado
  * real (todavía no hay nadie activado) y se muestra como tal, no se
- * reemplaza por fixtures.
+ * reemplaza por fixtures ni ofrece ningún botón (el primer administrador
+ * se crea fuera del navegador).
  */
 export function IdentitySelector({ onSelect }: IdentitySelectorProps) {
   const [state, setState] = useState<LoadState>({ status: 'loading' });
@@ -40,42 +42,31 @@ export function IdentitySelector({ onSelect }: IdentitySelectorProps) {
   }, [fetchOptions]);
 
   if (state.status === 'loading') {
-    return (
-      <p className="identity-selector__message" role="status" aria-live="polite">
-        Cargando identidades…
-      </p>
-    );
+    return <LoadingState label="Cargando identidades…" />;
   }
 
   if (state.status === 'error') {
-    return (
-      <div className="identity-selector__message" role="alert">
-        <p>No pudimos cargar las identidades habilitadas.</p>
-        <button type="button" className="button button--primary" onClick={retry}>
-          Reintentar
-        </button>
-      </div>
-    );
+    return <ErrorState title="No pudimos cargar las identidades habilitadas." onRetry={retry} />;
   }
 
   if (state.options.length === 0) {
     return (
-      <div className="identity-selector__message">
-        <p>Todavía no hay usuarios habilitados para ingresar.</p>
-        <p className="identity-selector__hint">
-          El administrador debe crear su acceso inicial y habilitar a los integrantes del equipo.
-        </p>
-      </div>
+      <EmptyState
+        title="Todavía no hay usuarios habilitados para ingresar."
+        description="El administrador debe crear su acceso inicial y habilitar a los integrantes del equipo."
+      />
     );
   }
 
   return (
-    <div className="identity-selector__grid" role="list">
+    // `role="list"` explícito: Safari/VoiceOver descarta la semántica de
+    // lista en un <ul> con `list-style: none`.
+    <ul className="identity-list" role="list" aria-label="Identidades habilitadas">
       {state.options.map((option) => (
-        <div role="listitem" key={option.id}>
+        <li key={option.id}>
           <IdentityCard option={option} onSelect={onSelect} />
-        </div>
+        </li>
       ))}
-    </div>
+    </ul>
   );
 }

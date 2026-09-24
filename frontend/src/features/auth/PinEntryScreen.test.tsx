@@ -138,4 +138,48 @@ describe('PinEntryScreen', () => {
     });
     expect(screen.getByText(/verificando/i)).toBeInTheDocument();
   });
+
+  it('nunca muestra el PIN: solo la cantidad de dígitos, ni en texto ni en atributos', async () => {
+    loginMock.mockReturnValue(new Promise(() => {}));
+    const { container } = render(<PinEntryScreen option={OPTION} onBack={vi.fn()} />);
+    const user = userEvent.setup();
+
+    await user.keyboard('907');
+
+    expect(screen.getByRole('img', { name: 'PIN: 3 de 4 dígitos ingresados' })).toBeInTheDocument();
+    // Ningún nodo de texto ni atributo contiene la secuencia ingresada.
+    expect(container.innerHTML).not.toContain('907');
+    expect(container.querySelector('input')).toBeNull();
+  });
+
+  it('conserva ceros iniciales ingresados desde el teclado físico', async () => {
+    loginMock.mockReturnValue(new Promise(() => {}));
+    render(<PinEntryScreen option={OPTION} onBack={vi.fn()} />);
+    const user = userEvent.setup();
+
+    await user.keyboard('0042');
+
+    await waitFor(() => expect(loginMock).toHaveBeenCalledWith('user-1', '0042'));
+    expect(typeof loginMock.mock.calls[0]?.[1]).toBe('string');
+  });
+
+  it('teclado en pantalla navegable con Tab y activable con Enter/Espacio', async () => {
+    loginMock.mockReturnValue(new Promise(() => {}));
+    render(<PinEntryScreen option={OPTION} onBack={vi.fn()} />);
+    const user = userEvent.setup();
+
+    await user.tab(); // "Volver"
+    expect(screen.getByRole('button', { name: /volver/i })).toHaveFocus();
+    await user.tab(); // Dígito 1
+    expect(screen.getByRole('button', { name: 'Dígito 1' })).toHaveFocus();
+    await user.keyboard(' ');
+    expect(screen.getByRole('img', { name: 'PIN: 1 de 4 dígitos ingresados' })).toBeInTheDocument();
+  });
+
+  it('la pantalla de PIN es un grupo con el nombre de la identidad elegida', () => {
+    render(<PinEntryScreen option={OPTION} onBack={vi.fn()} />);
+    expect(screen.getByRole('group', { name: 'Coke' })).toHaveAccessibleDescription(
+      'Ingresá tu PIN de 4 dígitos',
+    );
+  });
 });

@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useAuth } from '../../auth/useAuth';
 import { ApiError } from '../../api/httpClient';
 import type { LoginOption } from '../../api/types';
+import { Avatar } from '../../components/ui/Avatar';
+import { Button } from '../../components/ui/Button';
+import { Spinner } from '../../components/ui/Spinner';
+import { AlertIcon, ArrowLeftIcon } from '../../components/ui/icons';
 import { PinPad } from './PinPad';
 
 const PIN_LENGTH = 4;
@@ -27,6 +31,8 @@ export function PinEntryScreen({ option, onBack }: PinEntryScreenProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const submittingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const nameId = useId();
+  const instructionsId = useId();
 
   const clearPin = useCallback(() => setPin(''), []);
 
@@ -129,16 +135,40 @@ export function PinEntryScreen({ option, onBack }: PinEntryScreenProps) {
   }, [appendDigit, removeLastDigit, handleBack, submit, pin, isSubmitting]);
 
   return (
-    <div className="pin-entry" ref={containerRef} tabIndex={-1}>
-      <button type="button" className="pin-entry__back" onClick={handleBack}>
-        ← Volver
-      </button>
+    <div
+      className="pin-entry"
+      ref={containerRef}
+      tabIndex={-1}
+      aria-labelledby={nameId}
+      aria-describedby={instructionsId}
+      role="group"
+    >
+      <Button
+        variant="ghost"
+        className="pin-entry__back"
+        icon={<ArrowLeftIcon />}
+        onClick={handleBack}
+      >
+        Volver
+      </Button>
 
-      <p className="pin-entry__name">{option.displayName}</p>
-      <p className="pin-entry__instructions" id="pin-instructions">
+      <div className="pin-entry__identity">
+        <Avatar
+          name={option.displayName}
+          colorHex={option.colorHex}
+          size="lg"
+          variant={option.role === 'ADMIN' ? 'admin' : 'person'}
+        />
+        <p className="pin-entry__name" id={nameId}>
+          {option.displayName}
+        </p>
+      </div>
+      <p className="pin-entry__instructions" id={instructionsId}>
         Ingresá tu PIN de 4 dígitos
       </p>
 
+      {/* Solo cantidad de dígitos, nunca su valor; todos los puntos se
+          llenan igual para no permitir inferir qué tecla se usó. */}
       <div
         className="pin-entry__dots"
         role="img"
@@ -153,9 +183,19 @@ export function PinEntryScreen({ option, onBack }: PinEntryScreenProps) {
         ))}
       </div>
 
-      <div aria-live="assertive" className="pin-entry__status">
-        {isSubmitting ? <span role="status">Verificando…</span> : null}
-        {errorMessage ? <span role="alert">{errorMessage}</span> : null}
+      <div aria-live="assertive" className="live-status">
+        {isSubmitting ? (
+          <span role="status">
+            <Spinner size="sm" />
+            Verificando…
+          </span>
+        ) : null}
+        {errorMessage ? (
+          <span role="alert">
+            <AlertIcon size="sm" />
+            {errorMessage}
+          </span>
+        ) : null}
       </div>
 
       <PinPad

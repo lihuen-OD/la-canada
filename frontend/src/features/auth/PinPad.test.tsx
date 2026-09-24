@@ -54,4 +54,14 @@ describe('PinPad', () => {
       expect(button).toBeDisabled();
     }
   });
+
+  it('cuadrícula completa: los 10 dígitos más borrar y limpiar, cada uno con nombre propio', () => {
+    render(<PinPad onDigit={vi.fn()} onBackspace={vi.fn()} onClear={vi.fn()} disabled={false} />);
+
+    const group = screen.getByRole('group', { name: 'Teclado numérico' });
+    expect(group.querySelectorAll('button')).toHaveLength(12);
+    for (const digit of ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']) {
+      expect(screen.getByRole('button', { name: `Dígito ${digit}` })).toBeInTheDocument();
+    }
+  });
 });

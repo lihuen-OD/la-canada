@@ -244,4 +244,36 @@ describe('AdminUsersScreen', () => {
     expect(document.body.textContent).not.toMatch(/\$argon2/i);
     expect(document.body.textContent).not.toMatch(/pinHash/i);
   });
+
+  it('estructura semántica válida: región con nombre, lista y un ítem por usuario', async () => {
+    fetchAdminUsersMock.mockResolvedValue(listResponse([PENDING, ACTIVE, ADMIN_SELF]));
+    renderScreen();
+
+    const region = await screen.findByRole('region', { name: 'Usuarios del sistema' });
+    const list = within(region).getByRole('list');
+    const items = within(list).getAllByRole('listitem');
+    expect(items).toHaveLength(3);
+    expect(screen.getByRole('heading', { level: 1, name: 'Usuarios' })).toBeInTheDocument();
+    // Cada fila expone nombre, rol y estado como texto propio.
+    expect(within(items[0] as HTMLElement).getByText('Coke')).toBeInTheDocument();
+    expect(
+      within(items[0] as HTMLElement).getByText('Pendiente de activación'),
+    ).toBeInTheDocument();
+    expect(within(items[0] as HTMLElement).getByText('Equipo')).toBeInTheDocument();
+  });
+
+  it('tras una mutación exitosa refresca sin volver a "Cargando…" (sin salto de layout)', async () => {
+    fetchAdminUsersMock.mockResolvedValueOnce(listResponse([ACTIVE]));
+    changeUserStatusMock.mockResolvedValue({ ok: true });
+    renderScreen();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('button', { name: 'Suspender' }));
+    fetchAdminUsersMock.mockReturnValueOnce(new Promise(() => {}));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Suspender' }));
+
+    await waitFor(() => expect(fetchAdminUsersMock).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/cargando usuarios/i)).not.toBeInTheDocument();
+    expect(screen.getByText('Fresa')).toBeInTheDocument();
+  });
 });

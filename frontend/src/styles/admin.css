@@ -1,0 +1,163 @@
+/* Administración de usuarios (features/admin/*).
+   Contenedor <560px: una tarjeta por usuario. 560–859px (tablet): grilla de
+   dos tarjetas. ≥860px: filas tipo tabla dentro de una única tarjeta, con
+   encabezados de columna — umbral elegido para que las tres acciones de una
+   fila entren en una sola línea. Se usa una
+   container query para que el cambio dependa del ancho real disponible
+   (con o sin sidebar), no del viewport. */
+
+.admin-users__feedback {
+  margin-bottom: var(--space-4);
+}
+
+.admin-users__feedback:empty {
+  margin-bottom: 0;
+}
+
+.admin-users__table {
+  container-type: inline-size;
+}
+
+.admin-users__columns {
+  display: none;
+}
+
+.admin-users__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-user {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.admin-user__identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.admin-user__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.admin-user__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.admin-user__username,
+.admin-user__hint {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.admin-user__badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.admin-user__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.admin-user__actions .button {
+  flex: 1 1 auto;
+}
+
+.admin-user__lockout-hint {
+  flex-basis: 100%;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+@container (min-width: 560px) and (max-width: 859px) {
+  .admin-users__list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+
+@container (min-width: 860px) {
+  .admin-users__panel {
+    overflow: hidden;
+    background: var(--color-surface);
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+
+  .admin-users__columns,
+  .admin-user {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) minmax(0, 2.2fr);
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-3) var(--space-5);
+  }
+
+  .admin-users__columns {
+    background: var(--color-surface-muted);
+    border-bottom: var(--border-width) solid var(--color-border);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-bold);
+    letter-spacing: var(--letter-spacing-label);
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+  }
+
+  .admin-users__columns > :last-child {
+    text-align: right;
+  }
+
+  .admin-users__list {
+    gap: 0;
+  }
+
+  .admin-user {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .admin-user + .admin-user {
+    border-top: var(--border-width) solid var(--color-border);
+  }
+
+  .admin-user__actions {
+    justify-content: flex-end;
+  }
+
+  .admin-user__actions .button {
+    flex: 0 0 auto;
+  }
+
+  .admin-user__lockout-hint {
+    text-align: right;
+  }
+}

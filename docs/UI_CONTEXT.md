@@ -72,6 +72,19 @@ Escala orientativa:
 
 No usar únicamente color para comunicar estados. Acompañar con texto, icono o etiqueta.
 
+### Aclaraciones de contraste (Etapa 3E)
+
+Medido al implementar los tokens (`frontend/src/styles/tokens.css`). La paleta de arriba se conserva exacta; solo se agregan variantes derivadas donde un valor original no alcanza WCAG AA en el uso concreto:
+
+| Uso | Valor original | Ratio medido | Variante usada |
+| --- | --- | --- | --- |
+| Texto secundario sobre `cream-50` / `cream-100` | `#7a6e62` | 4.49:1 / 4.03:1 | `#6f6458` (5.22:1 / 4.69:1). `#7a6e62` se mantiene para iconos y el avatar neutro. |
+| Texto de advertencia sobre `#fef9e7` | `#c89a0a` | 2.46:1 | `#7a5b00` (5.99:1). `#c89a0a` queda como acento (borde del aviso). |
+| Borde de inputs (componente de interfaz, 3:1) | `#d8cfc4` | 1.54:1 | `#958676` (3.53:1 sobre blanco). `#d8cfc4` sigue siendo el borde de tarjetas y separadores. |
+| Texto de error sobre verde bosque (login) | `#c0392b` | 2.6:1 aprox. | `#f4b4ab` (8.2:1). |
+
+El resto de los pares usados cumple AA sin cambios (p. ej. blanco sobre `#2d5a35` 8.0:1, `#7ab587` sobre `#1a2e1e` 6.05:1, `#c0392b` sobre `#fdecea` 4.76:1, `#2c6e8b` sobre `#e8f4f8` 5.05:1, `#8b5e3c` sobre `#f2ece5` 4.76:1).
+
 ## Fundamentos de componentes
 
 - Radio de tarjeta principal: 16 px.

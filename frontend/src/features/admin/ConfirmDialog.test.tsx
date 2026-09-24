@@ -100,4 +100,41 @@ describe('ConfirmDialog', () => {
 
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
+
+  it('no se cierra con Escape mientras la operación está en curso', async () => {
+    const onCancel = vi.fn();
+    render(
+      <ConfirmDialog
+        title="Suspender a Coke"
+        description="Descripción"
+        confirmLabel="Suspender"
+        onCancel={onCancel}
+        onConfirm={vi.fn().mockReturnValue(new Promise(() => {}))}
+      />,
+    );
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Suspender' }));
+    await user.keyboard('{Escape}');
+
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancelar' })).toBeDisabled();
+  });
+
+  it('describe el efecto concreto como descripción accesible del diálogo', () => {
+    render(
+      <ConfirmDialog
+        title="Suspender a Coke"
+        description="Dejará de poder ingresar."
+        confirmLabel="Suspender"
+        tone="danger"
+        onCancel={vi.fn()}
+        onConfirm={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('dialog', { name: 'Suspender a Coke' })).toHaveAccessibleDescription(
+      'Dejará de poder ingresar.',
+    );
+  });
 });

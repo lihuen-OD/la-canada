@@ -1,5 +1,13 @@
+import { useId } from 'react';
 import type { AdminUserListItem } from '../../api/adminTypes';
 import type { UserStatus } from '../../api/types';
+import { getRoleLabel } from '../../auth/userDisplay';
+import { Avatar } from '../../components/ui/Avatar';
+import { Badge } from '../../components/ui/Badge';
+import type { BadgeTone } from '../../components/ui/Badge';
+import { Button } from '../../components/ui/Button';
+import type { ButtonVariant } from '../../components/ui/buttonStyles';
+import { KeyIcon } from '../../components/ui/icons';
 import {
   getAllowedStatusTransitions,
   getStatusLabel,
@@ -17,12 +25,23 @@ interface AdminUserRowProps {
   onChangeStatus: (user: AdminUserListItem, nextStatus: UserStatus) => void;
 }
 
-const STATUS_BADGE_MODIFIER: Record<UserStatus, string> = {
-  PENDING_ACTIVATION: 'pending',
-  ACTIVE: 'active',
-  SUSPENDED: 'suspended',
-  DEACTIVATED: 'deactivated',
+/** Tono de cada estado — siempre acompañado de su etiqueta en español. */
+const STATUS_TONE: Record<UserStatus, BadgeTone> = {
+  PENDING_ACTIVATION: 'info',
+  ACTIVE: 'positive',
+  SUSPENDED: 'warning',
+  DEACTIVATED: 'danger',
 };
+
+/** Jerarquía de la acción que lleva a cada estado: cortar el acceso es destructivo. */
+const TRANSITION_VARIANT: Record<UserStatus, ButtonVariant> = {
+  PENDING_ACTIVATION: 'ghost', // nunca se ofrece (ninguna transición real apunta acá)
+  ACTIVE: 'primary',
+  SUSPENDED: 'secondary',
+  DEACTIVATED: 'danger',
+};
+
+const SELF_LOCKOUT_MESSAGE = 'No podés dejar el sistema sin ningún administrador activo.';
 
 export function AdminUserRow({
   user,
@@ -32,71 +51,77 @@ export function AdminUserRow({
   onResetPin,
   onChangeStatus,
 }: AdminUserRowProps) {
+  const lockoutHintId = useId();
   const displayName = user.employee?.displayName ?? user.username;
   const transitions = getAllowedStatusTransitions(user.status);
+  const isAdminAccount = user.role === 'ADMIN' && !user.employee;
+
+  const isLockedOut = (nextStatus: UserStatus) =>
+    isSelf && user.role === 'ADMIN' && statusChangeRevokesSessions(nextStatus) && wouldSelfLockout;
+  const showLockoutHint = transitions.some(isLockedOut);
 
   return (
-    <li className="admin-user-row">
-      <div className="admin-user-row__identity">
-        <p className="admin-user-row__name">
-          {displayName}
-          {isSelf ? ' (vos)' : ''}
-        </p>
-        <p className="admin-user-row__username">@{user.username}</p>
-        {user.role === 'ADMIN' && !user.employee ? (
-          <p className="admin-user-row__hint">Sin persona vinculada</p>
-        ) : null}
+    <li className="admin-user">
+      <div className="admin-user__identity">
+        {/* El listado administrativo no incluye `colorHex` (ver api/adminTypes.ts): avatar neutro. */}
+        <Avatar name={displayName} variant={isAdminAccount ? 'admin' : 'person'} />
+        <div className="admin-user__text">
+          <p className="admin-user__name">
+            <span>{displayName}</span>
+            {isSelf ? <Badge tone="neutral">Tu cuenta</Badge> : null}
+          </p>
+          <p className="admin-user__username">@{user.username}</p>
+          {isAdminAccount ? <p className="admin-user__hint">Sin persona vinculada</p> : null}
+        </div>
       </div>
 
-      <div className="admin-user-row__badges">
-        <span className={`badge badge--role-${user.role.toLowerCase()}`}>
-          {user.role === 'ADMIN' ? 'Administrador' : 'Equipo'}
-        </span>
-        <span className={`badge badge--status-${STATUS_BADGE_MODIFIER[user.status]}`}>
+      <div className="admin-user__badges">
+        <Badge tone={user.role === 'ADMIN' ? 'earth' : 'neutral'}>{getRoleLabel(user.role)}</Badge>
+        <Badge tone={STATUS_TONE[user.status]} dot>
           {getStatusLabel(user.status)}
-        </span>
+        </Badge>
       </div>
 
-      <div className="admin-user-row__actions">
+      <div className="admin-user__actions">
         {user.status === 'PENDING_ACTIVATION' ? (
-          <button type="button" className="button button--primary" onClick={() => onActivate(user)}>
+          <Button size="sm" icon={<KeyIcon size="sm" />} onClick={() => onActivate(user)}>
             Activar y asignar PIN
-          </button>
+          </Button>
         ) : null}
 
         {user.status === 'ACTIVE' ? (
-          <button
-            type="button"
-            className="button button--secondary"
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<KeyIcon size="sm" />}
             onClick={() => onResetPin(user)}
           >
             Cambiar PIN
-          </button>
+          </Button>
         ) : null}
 
         {transitions.map((nextStatus) => {
-          const disabledBySelfLockout =
-            isSelf &&
-            user.role === 'ADMIN' &&
-            statusChangeRevokesSessions(nextStatus) &&
-            wouldSelfLockout;
+          const disabledBySelfLockout = isLockedOut(nextStatus);
           return (
-            <button
+            <Button
               key={nextStatus}
-              type="button"
-              className="button button--tertiary"
+              size="sm"
+              variant={TRANSITION_VARIANT[nextStatus]}
               disabled={disabledBySelfLockout}
-              title={
-                disabledBySelfLockout
-                  ? 'No podés dejar el sistema sin ningún administrador activo.'
-                  : undefined
-              }
+              title={disabledBySelfLockout ? SELF_LOCKOUT_MESSAGE : undefined}
+              aria-describedby={disabledBySelfLockout ? lockoutHintId : undefined}
               onClick={() => onChangeStatus(user, nextStatus)}
             >
               {getTransitionActionLabel(nextStatus)}
-            </button>
+            </Button>
           );
         })}
+
+        {showLockoutHint ? (
+          <p className="admin-user__lockout-hint" id={lockoutHintId}>
+            {SELF_LOCKOUT_MESSAGE}
+          </p>
+        ) : null}
       </div>
     </li>
   );

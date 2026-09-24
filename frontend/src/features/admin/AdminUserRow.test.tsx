@@ -124,4 +124,40 @@ describe('AdminUserRow', () => {
     expect(screen.getByRole('button', { name: 'Suspender' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Deshabilitar' })).toBeDisabled();
   });
+
+  it.each([
+    ['PENDING_ACTIVATION', 'Pendiente de activación'],
+    ['ACTIVE', 'Activo'],
+    ['SUSPENDED', 'Suspendido'],
+    ['DEACTIVATED', 'Deshabilitado'],
+  ] as const)('estado %s: la etiqueta incluye texto legible, no solo color', (status, label) => {
+    render(
+      <ul>
+        <AdminUserRow
+          user={makeUser({ status })}
+          isSelf={false}
+          wouldSelfLockout={false}
+          {...noop}
+        />
+      </ul>,
+    );
+    expect(screen.getByText(label)).toBeInTheDocument();
+  });
+
+  it('la cuenta propia se marca con texto, y el bloqueo por auto-lockout se explica al lado del botón', () => {
+    render(
+      <ul>
+        <AdminUserRow
+          user={makeUser({ status: 'ACTIVE', role: 'ADMIN', employee: null, username: 'admin' })}
+          isSelf
+          wouldSelfLockout
+          {...noop}
+        />
+      </ul>,
+    );
+    expect(screen.getByText('Tu cuenta')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Suspender' })).toHaveAccessibleDescription(
+      'No podés dejar el sistema sin ningún administrador activo.',
+    );
+  });
 });

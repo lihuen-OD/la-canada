@@ -1,6 +1,8 @@
 import { useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Modal } from '../../components/Modal';
+import { Button } from '../../components/ui/Button';
+import { Modal } from '../../components/ui/Modal';
+import { AlertIcon } from '../../components/ui/icons';
 import { ApiError } from '../../api/httpClient';
 
 const NETWORK_ERROR_MESSAGE = 'No se pudo conectar. Intentá de nuevo.';
@@ -9,6 +11,8 @@ export interface ConfirmDialogProps {
   title: string;
   description: ReactNode;
   confirmLabel: string;
+  /** `danger`: la acción corta el acceso de alguien (suspender/deshabilitar). Solo cambia la jerarquía visual. */
+  tone?: 'default' | 'danger';
   onCancel: () => void;
   onConfirm: () => Promise<void>;
 }
@@ -18,6 +22,7 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel,
+  tone = 'default',
   onCancel,
   onConfirm,
 }: ConfirmDialogProps) {
@@ -25,6 +30,7 @@ export function ConfirmDialog({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const submittingRef = useRef(false);
   const titleId = useId();
+  const descriptionId = useId();
 
   function handleCancel(): void {
     if (submittingRef.current) return;
@@ -48,35 +54,41 @@ export function ConfirmDialog({
   }
 
   return (
-    <Modal titleId={titleId} onRequestClose={handleCancel} closeDisabled={isSubmitting}>
-      <div className="confirm-dialog">
-        <h2 id={titleId} className="confirm-dialog__title">
+    <Modal
+      titleId={titleId}
+      descriptionId={descriptionId}
+      onRequestClose={handleCancel}
+      closeDisabled={isSubmitting}
+    >
+      <div className="dialog">
+        <h2 id={titleId} className="dialog__title">
           {title}
         </h2>
-        <p className="confirm-dialog__description">{description}</p>
+        <p className="dialog__description" id={descriptionId}>
+          {description}
+        </p>
 
-        <div aria-live="assertive" className="confirm-dialog__status">
+        <div aria-live="assertive" className="live-status live-status--start">
           {isSubmitting ? <span role="status">Aplicando…</span> : null}
-          {errorMessage ? <span role="alert">{errorMessage}</span> : null}
+          {errorMessage ? (
+            <span role="alert">
+              <AlertIcon size="sm" />
+              {errorMessage}
+            </span>
+          ) : null}
         </div>
 
-        <div className="confirm-dialog__actions">
-          <button
-            type="button"
-            className="button button--secondary"
-            onClick={handleCancel}
-            disabled={isSubmitting}
-          >
+        <div className="dialog__actions">
+          <Button variant="secondary" onClick={handleCancel} disabled={isSubmitting}>
             Cancelar
-          </button>
-          <button
-            type="button"
-            className="button button--primary"
+          </Button>
+          <Button
+            variant={tone === 'danger' ? 'danger' : 'primary'}
             onClick={handleConfirm}
-            disabled={isSubmitting}
+            loading={isSubmitting}
           >
             {confirmLabel}
-          </button>
+          </Button>
         </div>
       </div>
     </Modal>

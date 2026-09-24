@@ -1,0 +1,206 @@
+/* Tokens de diseño de La Cañada — fuente de verdad visual: docs/UI_CONTEXT.md.
+
+   Este es el ÚNICO archivo de estilos donde aparecen valores literales de
+   color (hex/rgb). El resto de las hojas consume exclusivamente los tokens
+   semánticos (`--color-*`, `--space-*`, etc.) — lo verifica
+   `src/styles/styles.test.ts`.
+
+   Breakpoints (las custom properties no se pueden usar dentro de @media,
+   por eso se documentan acá y se repiten literalmente en cada hoja):
+   - 600px  → modal centrado en vez de bottom sheet; header con más contexto.
+   - 900px  → layout de escritorio: sidebar fija de 210px en vez de nav inferior.
+   - Contenedor (container query, independiente de si hay sidebar): el
+     listado administrativo pasa a grilla de 2 tarjetas desde 560px y a
+     filas tipo tabla desde 860px. */
+
+:root {
+  /* ── Paleta base (docs/UI_CONTEXT.md, "Paleta original") ─────────────── */
+  --forest-950: #1a2e1e;
+  --forest-700: #2d5a35;
+  --forest-600: #4a7c59;
+  --forest-400: #7ab587;
+  --forest-300: #9ccaa6;
+  --forest-100: #e8f2ea;
+
+  --cream-50: #f7f3ed;
+  --cream-100: #ede7dd;
+  --white: #ffffff;
+  --border-warm: #d8cfc4;
+  --ink-950: #1e1a16;
+  --ink-500: #7a6e62;
+  --earth-600: #8b5e3c;
+  --earth-100: #f2ece5;
+
+  --red-600: #c0392b;
+  --red-100: #fdecea;
+  --amber-600: #c89a0a;
+  --amber-100: #fef9e7;
+  --blue-600: #2c6e8b;
+  --blue-100: #e8f4f8;
+
+  /* Variantes derivadas SOLO para alcanzar contraste WCAG AA donde el valor
+     original no llega (medido, ver docs/UI_CONTEXT.md, "Aclaraciones de
+     contraste"): #7a6e62 da 4.49:1 sobre crema; #c89a0a da 2.46:1 como
+     texto; #d8cfc4 no llega a 3:1 como borde de un control. */
+  --ink-600: #6f6458;
+  --amber-800: #7a5b00;
+  --border-strong: #958676;
+  /* Texto de error legible sobre verde bosque (8.2:1). */
+  --red-200: #f4b4ab;
+
+  /* Translúcidos sobre verde bosque (login, header, navegación). */
+  --on-forest-surface: rgba(255, 255, 255, 0.07);
+  --on-forest-surface-hover: rgba(255, 255, 255, 0.12);
+  --on-forest-surface-pressed: rgba(255, 255, 255, 0.18);
+  --on-forest-border: rgba(247, 243, 237, 0.16);
+  --on-forest-muted: rgba(247, 243, 237, 0.72);
+  --on-forest-dot: rgba(247, 243, 237, 0.55);
+  --on-forest-active: rgba(122, 181, 135, 0.14);
+  --overlay-warm: rgba(30, 26, 22, 0.55);
+  --shadow-color: rgba(30, 26, 22, 0.08);
+  --shadow-color-strong: rgba(30, 26, 22, 0.16);
+
+  /* ── Colores semánticos ──────────────────────────────────────────────── */
+  --color-bg: var(--cream-50);
+  --color-surface: var(--white);
+  --color-surface-muted: var(--cream-100);
+  --color-surface-hover: var(--cream-50);
+  --color-surface-pressed: var(--cream-100);
+  --color-border: var(--border-warm);
+  --color-border-control: var(--border-strong);
+  --color-text: var(--ink-950);
+  --color-text-muted: var(--ink-600);
+  --color-icon-muted: var(--ink-500);
+
+  --color-brand: var(--forest-950);
+  --color-on-brand: var(--cream-50);
+  --color-on-brand-muted: var(--on-forest-muted);
+  --color-brand-accent: var(--forest-400);
+
+  --color-action: var(--forest-700);
+  --color-action-hover: var(--forest-950);
+  --color-on-action: var(--white);
+  --color-focus: var(--forest-700);
+
+  --color-positive: var(--forest-700);
+  --color-positive-bg: var(--forest-100);
+  --color-warning: var(--amber-800);
+  --color-warning-accent: var(--amber-600);
+  --color-warning-bg: var(--amber-100);
+  --color-danger: var(--red-600);
+  --color-danger-bg: var(--red-100);
+  --color-info: var(--blue-600);
+  --color-info-bg: var(--blue-100);
+  --color-earth: var(--earth-600);
+  --color-earth-bg: var(--earth-100);
+  --color-neutral: var(--ink-600);
+  --color-neutral-bg: var(--cream-100);
+
+  --color-avatar-fallback: var(--ink-500);
+  --color-avatar-admin: var(--earth-600);
+  --color-overlay: var(--overlay-warm);
+
+  /* ── Tipografía ──────────────────────────────────────────────────────── */
+  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --font-body:
+    'Karla', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  --font-size-xs: 0.6875rem; /* 11px — etiquetas pequeñas */
+  --font-size-sm: 0.8125rem; /* 13px — texto auxiliar */
+  --font-size-md: 0.9375rem; /* 15px — cuerpo */
+  --font-size-lg: 1.0625rem; /* 17px — título de sección */
+  --font-size-xl: 1.375rem; /* 22px — título de página (móvil) */
+  --font-size-2xl: 1.625rem; /* 26px — título de página (escritorio) */
+  --font-size-brand: 1.25rem; /* 20px — marca en header */
+  --font-size-brand-hero: 2rem; /* 32px — marca en login */
+  --font-size-pin-key: 1.5rem;
+
+  --font-weight-regular: 400;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --line-height-tight: 1.2;
+  --line-height-base: 1.5;
+  --letter-spacing-label: 0.04em;
+
+  /* ── Espaciado (escala de 4px) ───────────────────────────────────────── */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 2rem;
+  --space-8: 2.5rem;
+  --space-9: 3rem;
+
+  --page-gutter: 1rem; /* 16px móvil (guía: 14–18px) */
+  --page-gutter-desktop: 2.125rem; /* 34px */
+  --page-padding-block-desktop: 1.625rem; /* 26px */
+
+  /* ── Forma ───────────────────────────────────────────────────────────── */
+  --radius-control: 10px;
+  --radius-card: 16px;
+  --radius-sheet: 22px;
+  --radius-pill: 999px;
+  --border-width: 1px;
+  --border-width-control: 1.5px;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+
+  --shadow-card: 0 1px 4px var(--shadow-color);
+  --shadow-raised: 0 4px 16px var(--shadow-color-strong);
+  --shadow-sheet: 0 -8px 32px var(--shadow-color-strong);
+
+  /* ── Alturas y anchos ────────────────────────────────────────────────── */
+  --tap-target: 44px;
+  --header-height: 54px;
+  --bottom-nav-height: 66px;
+  --sidebar-width: 210px;
+  --content-max-width: 1200px;
+  --modal-max-width: 460px;
+  --login-card-max-width: 26rem;
+  --pin-key-size: 4.25rem;
+  --pin-dot-size: 0.875rem;
+  --avatar-sm: 26px;
+  --avatar-md: 36px;
+  --avatar-lg: 52px;
+  --icon-sm: 16px;
+  --icon-md: 20px;
+  --icon-lg: 22px;
+  --icon-xl: 40px;
+
+  /* ── Capas ───────────────────────────────────────────────────────────── */
+  --z-header: 30;
+  --z-nav: 30;
+  --z-overlay: 100;
+  --z-skip-link: 200;
+
+  /* ── Movimiento (150–250ms; anulado por prefers-reduced-motion) ───────── */
+  --duration-fast: 150ms;
+  --duration-base: 200ms;
+  --duration-slow: 250ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* Contexto invertido: superficies sobre verde bosque (login, splash,
+   header, navegación). Redefine los mismos tokens semánticos, así los
+   componentes compartidos (botones, estados, foco) se adaptan sin
+   variantes duplicadas. */
+.theme-inverse {
+  --color-surface: var(--on-forest-surface);
+  --color-surface-muted: var(--on-forest-surface);
+  --color-surface-hover: var(--on-forest-surface-hover);
+  --color-surface-pressed: var(--on-forest-surface-pressed);
+  --color-border: var(--on-forest-border);
+  --color-border-control: var(--on-forest-dot);
+  --color-text: var(--cream-50);
+  --color-text-muted: var(--on-forest-muted);
+  --color-icon-muted: var(--on-forest-muted);
+  --color-action: var(--forest-400);
+  --color-action-hover: var(--forest-300);
+  --color-on-action: var(--forest-950);
+  --color-focus: var(--forest-400);
+  --color-danger: var(--red-200);
+  --color-danger-bg: var(--on-forest-surface);
+}

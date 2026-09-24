@@ -2,25 +2,30 @@
 
 React 19 + TypeScript + Vite + `react-router-dom`. Ver el `README.md` de la raíz para instalación/ejecución del monorepo completo; este archivo documenta específicamente lo que vive en `frontend/`.
 
-## Estado actual (Etapas 3C/3D)
+## Estado actual (Etapas 3C/3D/3E)
 
-Implementado: el flujo completo de autenticación por selección de identidad + PIN (Etapa 3C), conectado al backend real, y la administración de usuarios en `/admin/users` (Etapa 3D — listar, activar con PIN, cambiar PIN, cambiar estado, todo exclusivo de `ADMIN`). **No implementado todavía**: dashboard ni ningún módulo de negocio (real ni mock) — eso es la Etapa 4 (ver `docs/MIGRATION_PLAN.md`, raíz del repo).
+Implementado: el flujo completo de autenticación por selección de identidad + PIN (Etapa 3C), conectado al backend real, la administración de usuarios en `/admin/users` (Etapa 3D — listar, activar con PIN, cambiar PIN, cambiar estado, todo exclusivo de `ADMIN`), y la reconciliación visual de todas esas pantallas con la identidad original documentada en `docs/UI_CONTEXT.md` (Etapa 3E — tokens, fuentes locales, componentes compartidos, app shell). **No implementado todavía**: dashboard ni ningún módulo de negocio (real ni mock) — ver `docs/MIGRATION_PLAN.md`, raíz del repo.
 
 ## Estructura
 
 ```text
 src/
 ├── api/               Cliente HTTP genérico (httpClient.ts) + wrappers de endpoints (authApi.ts, adminApi.ts) + tipos (types.ts, adminTypes.ts)
+├── app/                AppProviders + AppShell (header, navegación inferior/sidebar, contenido — Etapa 3E)
 ├── auth/               Estado de autenticación: accessTokenStore (token en memoria), refreshCoordinator
-│                       (single-flight de /auth/refresh), authContext/AuthProvider/useAuth
-├── components/         Pantallas de estado global (carga inicial, error de restauración de sesión) + Modal.tsx (diálogo accesible genérico)
+│                       (single-flight de /auth/refresh), authContext/AuthProvider/useAuth, userDisplay (nombre/rol visibles)
+├── components/
+│   ├── ui/              Primitivas compartidas (Etapa 3E): Button (+ buttonStyles), Card, Badge, Avatar, Modal,
+│   │                     StateMessage (EmptyState/ErrorState/LoadingState), PageHeader, Brand, Spinner, icons
+│   └── *.tsx            Pantallas de estado global: restauración de sesión y error de conectividad
 ├── features/
 │   ├── admin/           Administración de usuarios (Etapa 3D): AdminUsersScreen, AdminUserRow, PinDialog,
 │   │                     ConfirmDialog, AccessDeniedScreen, userStatusTransitions (espejo de la matriz real del backend)
-│   ├── auth/            Selector de identidad, teclado de PIN, pantalla de login
-│   └── home/            Área autenticada temporal (punto de entrada, no el dashboard definitivo) — con enlace a "Administrar usuarios" solo para ADMIN
-├── routes/             AppRoutes, ProtectedRoute, RequireRole (consumido por primera vez en esta etapa, para /admin/users)
-├── styles/              global.css — paleta y tipografía nuevas, ver nota más abajo
+│   ├── auth/            Selector de identidad, teclado de PIN, pantalla de login, LogoutButton
+│   └── home/            Inicio autenticado TEMPORAL (no el Inicio definitivo) — con acceso a Usuarios solo para ADMIN
+├── routes/             AppRoutes, ProtectedRoute, RequireRole, navigation.ts (única fuente de rutas/roles/menú)
+├── styles/              tokens.css + base/components/app-shell/auth/home/admin.css, entrada única global.css
+├── utils/               color.ts (validación de colorHex con fallback neutro)
 └── test/                setup.ts (Testing Library + jest-dom)
 ```
 
@@ -68,17 +73,29 @@ Detalle completo en `docs/ARCHITECTURE.md` (sección 15) y `docs/SECURITY.md`, e
 - **Cambiar PIN** (`POST /admin/users/:id/reset-pin`): mismo componente de PIN (`features/admin/PinDialog.tsx`), con advertencia explícita de que cierra todas las sesiones activas de esa persona. Nunca pide ni puede mostrar el PIN anterior.
 - **Cambiar estado** (`PATCH /admin/users/:id/status`): solo ofrece las transiciones que el backend realmente permite (espejo en `features/admin/userStatusTransitions.ts`, el backend sigue siendo la autoridad — una desincronización accidental de este archivo solo puede resultar en un botón de más que el backend igual rechaza, nunca en una acción indebida aceptada), con confirmación previa (`ConfirmDialog`) indicando si revoca sesiones. Nunca ofrece una transición que dejaría al sistema sin ningún `ADMIN` activo.
 - **Cambio sobre la propia cuenta**: si la acción (cambiar el propio PIN, o cambiar el propio estado a uno que revoca sesiones) afecta a la sesión con la que el `ADMIN` está navegando, `AdminUsersScreen` llama al `logout()` ya existente de `AuthProvider` en vez de refrescar la lista — reutiliza el mismo mecanismo de siempre (limpia el token en memoria, incrementa la "época" para que un refresh tardío no vuelva a autenticar, redirige a login), sin ningún código nuevo para esto.
-- **Componente de PIN reutilizable** (`PinDialog.tsx`, dentro de `components/Modal.tsx`): foco inicial y contenido dentro del diálogo, Escape para cerrar (bloqueado mientras se envía), `input type="password" inputMode="numeric" pattern="\d*" autoComplete="one-time-code"` — nunca `type="number"` (convertiría el PIN a número y perdería ceros iniciales) y `autoComplete="one-time-code"` evita que el navegador lo trate como una contraseña guardable. Mensajes de estado con `aria-live`.
+- **Componente de PIN reutilizable** (`PinDialog.tsx`, dentro de `components/ui/Modal.tsx` — movido ahí en la Etapa 3E): foco inicial y contenido dentro del diálogo, Escape para cerrar (bloqueado mientras se envía), `input type="password" inputMode="numeric" pattern="\d*" autoComplete="one-time-code"` — nunca `type="number"` (convertiría el PIN a número y perdería ceros iniciales) y `autoComplete="one-time-code"` evita que el navegador lo trate como una contraseña guardable. Mensajes de estado con `aria-live`.
 
-## Paleta y tipografía — nota importante
+## Sistema visual (Etapa 3E)
 
-`src/styles/global.css` usa una paleta y tipografía **nuevas**, definidas en esta etapa — **no es una reconstrucción del diseño original**. El prototipo real (`index.html`/`legacy/index.original.html`, con paleta y tipografías Fraunces/Karla) fue retirado del repositorio y de todo el historial de Git en la Etapa 2.3 (ver `AGENTS.md`, regla 9) y no es recuperable desde acá. Reconciliar con el diseño original, si el usuario lo aporta, queda para la Etapa 4.
+La fuente de verdad visual es `docs/UI_CONTEXT.md` (raíz del repo). Esta sección documenta cómo quedó implementada, sin repetir esa guía.
+
+- **Tokens** (`src/styles/tokens.css`): paleta original exacta (`--forest-*`, `--cream-*`, `--ink-*`, `--earth-*`, estados), tokens semánticos (`--color-bg`, `--color-surface`, `--color-text-muted`, `--color-action`, `--color-positive`/`warning`/`danger`/`info`…), tipografía, espaciado (escala de 4px), radios (16px tarjetas, 10px controles, 22px bottom sheet), sombras, alturas (44px táctil, header 54px, nav 66px, sidebar 210px, contenido ≤1200px, modal 460px), capas (z-index) y movimiento (150/200/250ms). Es el **único** archivo con colores literales — `src/styles/styles.test.ts` falla si aparece un hex/rgb en otra hoja o en un componente. Tres variantes derivadas existen solo para contraste AA (ver `docs/UI_CONTEXT.md`, "Aclaraciones de contraste"). `.theme-inverse` redefine los mismos tokens semánticos para superficies sobre verde bosque (login, header, navegación), así los componentes no necesitan variantes "oscuras" duplicadas.
+- **Breakpoints**: 600px (modal centrado en vez de bottom sheet; header con rol y texto de "Cerrar sesión"), 900px (sidebar de escritorio en vez de navegación inferior). El listado administrativo usa *container queries* (grilla de 2 tarjetas desde 560px de contenedor, filas tipo tabla desde 860px) para depender del ancho real disponible, con o sin sidebar.
+- **Fuentes**: `@fontsource/fraunces` y `@fontsource/karla` (dependencias del workspace), importadas en `global.css` — solo subset latin (cubre español) y solo los pesos usados: Fraunces 600 normal/itálica, Karla 400/600/700. Se empaquetan como assets locales (~81 kB en woff2 en total; el navegador baja solo las caras que usa); ninguna petición a Google Fonts en runtime.
+- **Componentes compartidos** (`src/components/ui/`): `Button` (primario/secundario/destructivo/fantasma, `loading` que deshabilita sin cambiar el nombre accesible, alto mínimo 44px; `buttonClassName` para estilizar un `<Link>` como botón), `Card`, `Badge` (el texto es obligatorio por tipo), `Avatar` (inicial + color validado o escudo para la cuenta admin; siempre decorativo), `Modal` (bottom sheet/centrado, portal, foco contenido, Escape bloqueado al enviar, foco devuelto al cerrar, scroll de fondo bloqueado, sin cierre por click en el overlay), `EmptyState`/`ErrorState`/`LoadingState`, `PageHeader` (único `<h1>` de cada pantalla), `Brand`, iconos SVG propios (sin dependencia).
+- **App shell** (`src/app/AppShell.tsx`, ruta de layout dentro de `ProtectedRoute`): header verde bosque con marca, identidad discreta y "Cerrar sesión"; un único `<nav>` que en móvil es barra inferior (con safe areas) y en escritorio sidebar; `<main>` con enlace "Saltar al contenido". Los destinos salen de `src/routes/navigation.ts` (`APP_ROUTES`), la misma configuración que `AppRoutes` usa para declarar la ruta y su rol requerido — hoy solo Inicio y Usuarios (este último solo para `ADMIN`); nunca se muestran módulos futuros.
+- **Pantallas alineadas**: restauración de sesión y error de conectividad (mismo fondo verde que el login, sin salto de color), selector de identidad, ingreso de PIN (teclado de 3 columnas con "Limpiar · 0 · Borrar", 4 indicadores idénticos), estados de carga/vacío/error, Inicio temporal, acceso denegado, administración de usuarios (tarjetas en móvil, tabla en escritorio), diálogos de activación, cambio de PIN y cambio de estado.
+- **Límites de validación**: jsdom no aplica CSS (`css: false`), así que los tests verifican semántica y comportamiento, más guardas estructurales sobre el código de estilos; no hay axe ni pruebas de regresión visual por píxel. La revisión visual se hizo con Chrome headless por DevTools Protocol (login y PIN contra el backend real; Inicio/Usuarios/modales con respuestas sintéticas interceptadas en ese navegador, sin tocar backend ni base) y requiere además aprobación humana.
+
+## Build de producción
+
+`npm run build` = typecheck + `node scripts/build.mjs`, que fija `NODE_ENV=production` antes de cargar Vite: el `.env` de la raíz puede definir `NODE_ENV=development` (lo usa el backend) y Vite lo aplicaría al build, generando el build de desarrollo de React. No invocar `vite build` directo: si el resultado no es de producción, una guarda en `vite.config.ts` corta el build con un mensaje claro. Regresión cubierta por `src/test/productionBuild.test.ts`. Detalle en `docs/ARCHITECTURE.md` §17.2.
 
 ## Desarrollo
 
 ```bash
 npm run dev --workspace=frontend      # Vite dev server, http://localhost:5173
-npm run build --workspace=frontend    # typecheck + build de producción -> dist/
+npm run build --workspace=frontend    # typecheck + build de producción (siempre NODE_ENV=production) -> dist/
 npm run test --workspace=frontend     # Vitest + Testing Library
 npm run typecheck --workspace=frontend
 npm run lint --workspace=frontend     # (compartido en la raíz — ver eslint.config.js)
@@ -90,3 +107,5 @@ O, desde la raíz del monorepo, `npm run dev`/`npm run build`/`npm run test`/etc
 ## Tests
 
 Vitest + `@testing-library/react` + `@testing-library/user-event`, mismo estilo que ya usaba el resto del proyecto (`describe`/`it` en español, mocks vía `vi.mock`/`vi.stubGlobal`). Cobertura de la Etapa 3C: estados del selector de identidad (carga/vacío/error/cargado), teclado de PIN (pantalla y físico, incluido el cero inicial), prevención de doble envío, ausencia de `localStorage`/`sessionStorage`, single-flight de refresh bajo concurrencia real (incluido un test con `<StrictMode>` real), reintento único tras 401 sin loops, logout durante un refresh en vuelo, rutas protegidas. Cobertura nueva de la Etapa 3D (`/admin/users`): acceso exclusivo de `ADMIN` (anónimo → login, `EMPLOYEE` → acceso denegado), listado real sin datos inventados, estados de pantalla (carga/vacío/error con reintento), activación con validación de 4 dígitos exactos y preservación del cero inicial, coincidencia de PIN/confirmación, doble envío bloqueado, limpieza de PIN al cancelar/fallar, advertencia de revocación de sesiones en el cambio de PIN, transiciones de estado limitadas a las que el backend permite, auto-bloqueo nunca ofrecido, cambio sobre la propia cuenta terminando en `logout()` en vez de refrescar la lista, accesibilidad del diálogo (foco inicial, Escape, `aria-live`).
+
+Cobertura nueva de la Etapa 3E: app shell (solo destinos implementados, Usuarios únicamente para `ADMIN`, `aria-current` en el destino activo, landmarks), rutas futuras redirigidas, acceso denegado con salida segura, selector con una/varias identidades, nombres largos y `colorHex` inválido, teclado navegable por Tab y con ceros iniciales, PIN nunca presente en el DOM, `Modal` (foco contenido, Escape, foco restaurado, bloqueo durante el envío), badges con texto, estructura semántica del listado, Inicio sin cifras ni datos de negocio, y guardas de estilos (colores solo en tokens, `prefers-reduced-motion`, fuentes locales, zoom no bloqueado).

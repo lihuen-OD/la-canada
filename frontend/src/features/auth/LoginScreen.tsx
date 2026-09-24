@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { LoginOption } from '../../api/types';
+import { Brand } from '../../components/ui/Brand';
 import { IdentitySelector } from './IdentitySelector';
 import { PinEntryScreen } from './PinEntryScreen';
 
@@ -13,19 +14,24 @@ export function LoginScreen() {
   const [selectedOption, setSelectedOption] = useState<LoginOption | null>(null);
 
   return (
-    <main className="login-screen">
-      <div className="login-screen__brand">
-        <h1 className="login-screen__title">La Cañada</h1>
-        <p className="login-screen__subtitle">
-          {selectedOption ? 'Ingresá tu PIN para continuar.' : 'Elegí tu identidad para ingresar.'}
-        </p>
-      </div>
+    <main className="login-screen theme-inverse">
+      <div className="login-screen__inner">
+        <div className="login-screen__brand">
+          <Brand as="h1" size="hero" />
+          <p className="login-screen__tagline">Sistema de gestión</p>
+        </div>
 
-      {selectedOption ? (
-        <PinEntryScreen option={selectedOption} onBack={() => setSelectedOption(null)} />
-      ) : (
-        <IdentitySelector onSelect={setSelectedOption} />
-      )}
+        <section className="login-card" aria-label="Ingreso">
+          {selectedOption ? (
+            <PinEntryScreen option={selectedOption} onBack={() => setSelectedOption(null)} />
+          ) : (
+            <>
+              <p className="login-card__instruction">Elegí tu identidad para ingresar.</p>
+              <IdentitySelector onSelect={setSelectedOption} />
+            </>
+          )}
+        </section>
+      </div>
     </main>
   );
 }

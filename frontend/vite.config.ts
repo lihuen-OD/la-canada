@@ -2,8 +2,28 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
+import type { Plugin } from 'vite';
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Guarda de regresión: ningún `vite build` puede terminar con el build de
+ * desarrollo de React. Si el `.env` define `NODE_ENV=development` y se
+ * invoca `vite build` directo (sin `scripts/build.mjs`), Vite resolvería
+ * `isProduction: false` — acá se corta con un mensaje claro en vez de
+ * generar en silencio un bundle de desarrollo.
+ */
+const requireProductionBuild: Plugin = {
+  name: 'la-canada:require-production-build',
+  configResolved(config) {
+    if (config.command === 'build' && !config.isProduction) {
+      throw new Error(
+        'El build no quedó en modo producción (NODE_ENV tomado de un .env). ' +
+          'Usá `npm run build`, que fija NODE_ENV=production antes de cargar Vite.',
+      );
+    }
+  },
+};
 
 export default defineConfig({
   root: rootDir,
@@ -11,7 +31,7 @@ export default defineConfig({
   // vez del .env local de este workspace — manejo centralizado de variables
   // de entorno para todo el proyecto, compartido con el backend.
   envDir: path.resolve(rootDir, '..'),
-  plugins: [react()],
+  plugins: [react(), requireProductionBuild],
   server: {
     proxy: {
       // Todas las llamadas del frontend usan rutas relativas bajo /api (ver

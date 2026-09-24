@@ -125,7 +125,7 @@ Revisión puntual, sin cambios de schema: (a) rotación concurrente del refresh 
   - **Tests**: 66 tests nuevos (Vitest + Testing Library) — single-flight bajo concurrencia real (incluido un test con `<StrictMode>` real), reintento único tras 401, logout-durante-refresh, estados del selector (carga/vacío/error/cargado), teclado físico y en pantalla, cero `localStorage`/`sessionStorage`. Suite completa del backend (222 + 28) sigue en verde, sin cambios de schema.
 - **No incluyó**: ningún dashboard ni módulo de negocio (real o mock), ninguna migración ni cambio de schema, ningún admin/PIN real asignado, ninguna conexión a `production`, ningún despliegue, ninguna rama ni Pull Request (trabajo directo sobre `main`).
 
-## Etapa 3D — Administración de usuarios y puesta en funcionamiento controlada del acceso 🟡 código completado — bootstrap del admin pendiente de ejecución manual
+## Etapa 3D — Administración de usuarios y puesta en funcionamiento controlada del acceso ✅ completada — bootstrap del admin ejecutado manualmente por el usuario
 
 - **Objetivo**: construir el módulo de frontend para que un `ADMIN` administre a los 4 usuarios reales (activar con PIN, cambiar PIN, cambiar estado) sin necesitar nunca conocer ni recuperar un PIN ajeno, y preparar — sin ejecutar — el proceso para crear el primer administrador real de `demo`.
 - **Resultado (código, tests, documentación)**:
@@ -148,12 +148,28 @@ Con el código de esta etapa ya validado (ver checklist más abajo), crear el pr
 3. El agente se detiene en este punto y espera la confirmación explícita del usuario de que el paso se completó — nunca ejecuta el script, nunca pide el PIN para "verificarlo", nunca lo registra de ninguna forma.
 4. Verificación posterior (el agente, únicamente por consulta a la base o a `GET /admin/users`, sin poder recuperar el PIN en ningún momento): existe exactamente un `ADMIN` `ACTIVE` con `pinHash` no nulo; aparece en `GET /auth/login-options`; los 4 empleados siguen `PENDING_ACTIVATION`; el conteo de filas cambió solo por ese usuario nuevo más las filas de auditoría legítimas del propio bootstrap.
 
+**Estado posterior (registrado en la Etapa 3E):** el usuario ejecutó personalmente el bootstrap interactivo y creó el primer `ADMIN` real de `demo`. No se vuelve a ejecutar. Observado desde el frontend real: `GET /auth/login-options` devuelve exactamente una identidad, con rol `ADMIN` (ningún empleado `ACTIVE`). En la Etapa 3E no se consultó la base directamente; ninguna acción de esa etapa activó empleados ni asignó PIN.
+
+## Etapa 3E — Reconciliación visual del frontend con la identidad original 🟡 implementada y validada técnicamente — pendiente de aprobación visual humana y commit
+
+- **Objetivo**: alinear todas las pantallas frontend ya existentes con la identidad original recuperada en `docs/UI_CONTEXT.md` (nueva fuente de verdad visual), sin cambiar su funcionamiento: restauración de sesión, selector de identidad, ingreso de PIN, estados de carga/vacío/error, Inicio temporal, acceso denegado, administración de usuarios, diálogos de activación/cambio de PIN/cambio de estado, navegación mínima y cierre de sesión.
+- **Resultado**:
+  - **Tokens CSS** (`frontend/src/styles/tokens.css`): paleta original exacta + tokens semánticos, tipografía, espaciado, radios, sombras, alturas, z-index, movimiento. Único archivo con colores literales (verificado por test). Tres variantes derivadas solo para contraste AA, documentadas en `docs/UI_CONTEXT.md` ("Aclaraciones de contraste").
+  - **Fuentes locales**: `@fontsource/fraunces` (600 normal/itálica) y `@fontsource/karla` (400/600/700), solo subset latin — sin peticiones a Google Fonts.
+  - **Componentes compartidos** (`frontend/src/components/ui/`): `Button`, `Card`, `Badge`, `Avatar`, `Modal` (movido desde `components/`), `EmptyState`/`ErrorState`/`LoadingState`, `PageHeader`, `Brand`, `Spinner`, iconos SVG propios.
+  - **App shell** (`frontend/src/app/AppShell.tsx`): header verde bosque, navegación inferior en móvil / sidebar de 210px en escritorio, solo con destinos implementados (Inicio; Usuarios solo para `ADMIN`) desde una configuración tipada única (`frontend/src/routes/navigation.ts`) que también define el rol exigido por la ruta.
+  - **Pantallas alineadas**: todas las listadas en el objetivo. Inicio sigue marcado como temporal (sin KPI ni datos de negocio).
+  - **Build de producción garantizado**: `npm run build` siempre genera el build de producción de React aunque el `.env` defina `NODE_ENV=development` (`frontend/scripts/build.mjs` + guarda en `vite.config.ts`, ver `docs/ARCHITECTURE.md` §17.2).
+  - **Tests**: 189 tests de frontend (111 previos, conservados o adaptados a la nueva semántica sin debilitar lo que verificaban + 78 nuevos). Backend sin cambios (222 tests).
+- **Detalle técnico**: `docs/ARCHITECTURE.md` §17 y `frontend/README.md`, "Sistema visual (Etapa 3E)".
+- **No incluyó**: ningún cambio de backend, contratos API, autenticación, refresh, cookies, roles, permisos, Prisma, migraciones, seed ni datos reales; ninguna nueva ejecución del bootstrap; ningún PIN asignado ni usuario activado/suspendido; ninguna conexión a `production`; ningún uso de Object Storage; ningún módulo de negocio (Tareas, Stock, etc.) ni navegación hacia ellos.
+
 ## Etapa 4 — Reconstruir el frontend sin alterar el diseño
 
 - **Objetivo**: recrear en React + TypeScript las 14 pantallas identificadas en `docs/PROJECT_CONTEXT.md` §3, preservando la paleta de colores, tipografías (Fraunces/Karla), layout mobile-first con navegación inferior/sidebar, y componentes visuales (cards, chips, modales tipo bottom-sheet, badges de estado). **Actualización Etapa 3C**: el flujo de autenticación (selector de identidad + PIN, sesión, rutas protegidas) ya está construido — esta etapa es exclusivamente el dashboard y los módulos de negocio, no vuelve a tocar el login.
 - **Alcance sugerido**:
-  - Extraer el sistema de diseño (`:root` de `index.html`) a tokens reutilizables (CSS variables o equivalente en el stack elegido) — la paleta nueva y provisoria de la pantalla de login (Etapa 3C, `frontend/src/styles/global.css`) no pretende ser esa reconstrucción; queda a revisar/reconciliar acá si el usuario aporta el diseño original.
-  - Reconstruir componentes visuales genéricos primero (Card, Chip, Modal, Badge, Avatar, KPI) y luego las pantallas, reemplazando la pantalla técnica temporal de la Etapa 1 (ya reemplazada parcialmente por la Etapa 3C: `/` ahora es el área autenticada temporal, no `StatusScreen`).
+  - ~~Extraer el sistema de diseño a tokens reutilizables~~ — **hecho en la Etapa 3E** (`frontend/src/styles/tokens.css`, a partir de `docs/UI_CONTEXT.md`). Los módulos nuevos consumen esos tokens y componentes; no crean paletas propias.
+  - Componentes visuales genéricos: `Card`, `Modal`, `Badge`, `Avatar`, estados y app shell ya existen (Etapa 3E). Quedan por construir cuando un módulo real los necesite: chips/filtros, KPI (con datos reales) y FAB contextual. `/` sigue siendo el Inicio temporal hasta que exista el módulo Inicio real.
   - El frontend consume **solo** la API del backend (nunca Prisma/Postgres directo) — corrige el hallazgo central de `docs/SECURITY.md`.
 - **No incluye**: rediseñar la interfaz; cualquier cambio visual respecto al original requiere pedido explícito del usuario (regla 6 de `AGENTS.md`).
 
@@ -309,3 +325,18 @@ Cambios de esta revisión:
 - [x] `npm run auth:bootstrap-admin` **no se ejecutó** en ningún momento de esta etapa — solo se confirmó que su implementación previa (Etapas 3B.1/3B.2) sigue intacta.
 - [x] Documentación actualizada: `AGENTS.md` ("Estado actual"), `README.md`, `frontend/README.md`, `docs/ARCHITECTURE.md` (nueva §14.6b y nueva §16), `docs/SECURITY.md`, `docs/BUSINESS_RULES.md` (§1), este documento.
 - **No incluyó**: ningún cambio de schema ni migración, ninguna activación ni PIN asignado a los 4 empleados reales, ninguna conexión a `production`, ningún uso de Object Storage, ningún despliegue, ninguna rama ni Pull Request (commit único directo sobre `main`), ninguna ejecución real del bootstrap del administrador.
+
+## Validaciones obligatorias de la Etapa 3E
+
+- [x] Verificación inicial: rama `main` sincronizada con `origin/main`, working tree limpio, `docs/UI_CONTEXT.md` ya commiteado (`1e99cd5`) antes de empezar. Resultado base registrado antes de tocar código: 111 tests de frontend en verde, typecheck/lint/format:check limpios.
+- [x] `npm install` (solo se agregaron `@fontsource/fraunces` y `@fontsource/karla` al workspace `frontend`).
+- [x] `npm run build` (frontend + backend), `npm run typecheck`, `npm run lint`, `npm run format:check` — en verde sobre el monorepo completo.
+- [x] `README.md` raíz actualizado al estado real (administrador de `demo` ya creado por el usuario, `login-options` no vacío, empleados pendientes salvo activación manual) — sin username, PIN, hashes ni datos sensibles.
+- [x] Tests de frontend: 189 en verde. Tests de backend: 222 en verde, sin cambios de código de backend.
+- [x] Bundle de producción (con `NODE_ENV=production`): JS 280.36 → 290.69 kB (gzip 88.27 → 91.27 kB); CSS 8.35 → 27.58 kB (gzip 5.62 kB); 5 caras tipográficas como assets locales (~81 kB en woff2, descargadas solo si se usan). **Hallazgo preexistente, corregido en esta etapa**: `npm run build` con un `.env` que define `NODE_ENV=development` generaba el build de desarrollo de React (~518 kB). Ahora `npm run build` pasa por `frontend/scripts/build.mjs` (fija `NODE_ENV=production` antes de cargar Vite) y una guarda en `vite.config.ts` hace fallar cualquier `vite build` que no sea de producción — verificado con el `.env` real (sin leerlo ni modificarlo): 290.70 kB, cero marcadores de desarrollo de React; test de regresión `frontend/src/test/productionBuild.test.ts` (comprobado que falla sin la corrección). Ver `docs/ARCHITECTURE.md` §17.2.
+- [x] Escaneo sobre `frontend/src`, el diff y el bundle de producción: sin `localStorage`/`sessionStorage` (solo menciones en comentarios), sin PIN hardcodeado ni `1234`, sin `dangerouslySetInnerHTML`/`innerHTML` en código propio (las coincidencias del bundle son internas de React), sin URL/clave de Supabase ni de Neon, sin tokens ni secretos, sin datos mock en runtime (los fixtures sintéticos están solo en tests), sin peticiones a Google Fonts.
+- [x] `git diff --check` sin advertencias; ningún `dist/`, cobertura, captura, log ni archivo temporal trackeado (las capturas de la revisión visual quedaron fuera del repo).
+- [x] Revisión visual automatizada (Chrome headless vía DevTools Protocol, backend y Vite reales) en 360×800, 390×844, 768×1024, 1366×768, 1920×1080 y 844×390: sin scroll horizontal, sin objetivos táctiles < 44px, fuentes locales cargadas. Login y PIN contra el backend real (sin enviar ningún PIN); Inicio/Usuarios/diálogos/acceso denegado con respuestas sintéticas interceptadas en ese navegador (sin tocar backend ni base). Corrigió tres detalles: marca partida en el header a 360px, acciones apretadas del listado a 768px, etiqueta "Administrador" redundante para la cuenta admin sin persona vinculada.
+- [ ] Aprobación visual humana (login, selección de Administrador, teclado PIN, Inicio, Usuarios, diálogo de PIN, diálogo de confirmación, vista móvil).
+- [ ] Commit único (`style: align frontend with La Cañada visual identity`) y push a `origin/main`, solo después de la aprobación.
+- **No incluyó**: ninguna escritura en la base (ni seed, ni migraciones, ni `db push`, ni bootstrap, ni cambios de PIN/estado), ninguna conexión a `production`, ningún uso de Object Storage, ningún módulo de negocio.

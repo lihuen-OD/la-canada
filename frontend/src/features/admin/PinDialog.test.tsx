@@ -257,4 +257,44 @@ describe('PinDialog', () => {
 
     expect(await screen.findByRole('status')).toHaveTextContent(/guardando/i);
   });
+
+  it('no se cierra con Escape mientras se guarda, y los controles quedan deshabilitados', async () => {
+    const onCancel = vi.fn();
+    render(
+      <PinDialog
+        mode="activate"
+        targetDisplayName="Coke"
+        isSelf={false}
+        onCancel={onCancel}
+        onSubmit={vi.fn().mockReturnValue(new Promise(() => {}))}
+      />,
+    );
+    const user = userEvent.setup();
+
+    await user.type(getPinInput(), '1234');
+    await user.type(getConfirmInput(), '1234');
+    await user.click(screen.getByRole('button', { name: 'Activar' }));
+    await user.keyboard('{Escape}');
+
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(getPinInput()).toBeDisabled();
+    expect(getConfirmInput()).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancelar' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Activar' })).toBeDisabled();
+  });
+
+  it('modo reset: la advertencia es la descripción accesible del diálogo', () => {
+    render(
+      <PinDialog
+        mode="reset"
+        targetDisplayName="Coke"
+        isSelf={false}
+        onCancel={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('dialog', { name: 'Cambiar PIN de Coke' })).toHaveAccessibleDescription(
+      /se cerrarán todas las sesiones activas/i,
+    );
+  });
 });

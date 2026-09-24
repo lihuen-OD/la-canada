@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Modal } from '../../components/Modal';
+import { Button } from '../../components/ui/Button';
+import { Modal } from '../../components/ui/Modal';
+import { AlertIcon } from '../../components/ui/icons';
 import { ApiError } from '../../api/httpClient';
 
 const PIN_PATTERN = /^\d{4}$/;
@@ -81,24 +83,37 @@ export function PinDialog({ mode, targetDisplayName, isSelf, onCancel, onSubmit 
   const heading =
     mode === 'activate' ? `Activar a ${targetDisplayName}` : `Cambiar PIN de ${targetDisplayName}`;
 
+  const warningId = `${titleId}-warning`;
+
   return (
-    <Modal titleId={titleId} onRequestClose={handleCancel} closeDisabled={isSubmitting}>
-      <form onSubmit={handleSubmit} className="pin-dialog">
-        <h2 id={titleId} className="pin-dialog__title">
+    <Modal
+      titleId={titleId}
+      descriptionId={mode === 'reset' ? warningId : undefined}
+      onRequestClose={handleCancel}
+      closeDisabled={isSubmitting}
+    >
+      <form onSubmit={handleSubmit} className="dialog">
+        <h2 id={titleId} className="dialog__title">
           {heading}
         </h2>
 
         {mode === 'reset' ? (
-          <p className="pin-dialog__warning" role="note">
-            Al cambiar el PIN se cerrarán todas las sesiones activas de esta persona.
-            {isSelf ? ' Incluida tu propia sesión actual: volverás a la pantalla de login.' : ''}
+          <p className="notice notice--warning" role="note" id={warningId}>
+            <AlertIcon size="sm" />
+            <span>
+              Al cambiar el PIN se cerrarán todas las sesiones activas de esta persona.
+              {isSelf ? ' Incluida tu propia sesión actual: volverás a la pantalla de login.' : ''}
+            </span>
           </p>
         ) : null}
 
-        <div className="pin-dialog__field">
-          <label htmlFor={`${titleId}-pin`}>PIN nuevo (4 dígitos)</label>
+        <div className="field">
+          <label className="field__label" htmlFor={`${titleId}-pin`}>
+            PIN nuevo (4 dígitos)
+          </label>
           <input
             id={`${titleId}-pin`}
+            className="field__input field__input--pin"
             type="password"
             inputMode="numeric"
             pattern="\d*"
@@ -114,10 +129,13 @@ export function PinDialog({ mode, targetDisplayName, isSelf, onCancel, onSubmit 
           />
         </div>
 
-        <div className="pin-dialog__field">
-          <label htmlFor={`${titleId}-confirm`}>Confirmar PIN</label>
+        <div className="field">
+          <label className="field__label" htmlFor={`${titleId}-confirm`}>
+            Confirmar PIN
+          </label>
           <input
             id={`${titleId}-confirm`}
+            className="field__input field__input--pin"
             type="password"
             inputMode="numeric"
             pattern="\d*"
@@ -133,23 +151,23 @@ export function PinDialog({ mode, targetDisplayName, isSelf, onCancel, onSubmit 
           />
         </div>
 
-        <div aria-live="assertive" className="pin-dialog__status">
+        <div aria-live="assertive" className="live-status live-status--start">
           {isSubmitting ? <span role="status">Guardando…</span> : null}
-          {errorMessage ? <span role="alert">{errorMessage}</span> : null}
+          {errorMessage ? (
+            <span role="alert">
+              <AlertIcon size="sm" />
+              {errorMessage}
+            </span>
+          ) : null}
         </div>
 
-        <div className="pin-dialog__actions">
-          <button
-            type="button"
-            className="button button--secondary"
-            onClick={handleCancel}
-            disabled={isSubmitting}
-          >
+        <div className="dialog__actions">
+          <Button variant="secondary" onClick={handleCancel} disabled={isSubmitting}>
             Cancelar
-          </button>
-          <button type="submit" className="button button--primary" disabled={isSubmitting}>
+          </Button>
+          <Button type="submit" loading={isSubmitting}>
             {mode === 'activate' ? 'Activar' : 'Guardar PIN'}
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>

@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { activateUser, changeUserStatus, fetchAdminUsers, resetUserPin } from '../../api/adminApi';
 import type { AdminUserListItem } from '../../api/adminTypes';
 import type { UserStatus } from '../../api/types';
 import { useAuth } from '../../auth/useAuth';
+import { Card } from '../../components/ui/Card';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
+import { CheckCircleIcon } from '../../components/ui/icons';
 import { AdminUserRow } from './AdminUserRow';
 import { PinDialog } from './PinDialog';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -68,7 +71,9 @@ export function AdminUsersScreen() {
     }
     closeDialog();
     setSuccessMessage(message);
-    retry();
+    // Refresco en segundo plano: el listado actual sigue visible hasta que
+    // llega el nuevo, sin pasar por "Cargando…" (evita un salto de layout).
+    load();
   }
 
   const users = state.status === 'loaded' ? state.users : [];
@@ -83,53 +88,67 @@ export function AdminUsersScreen() {
   }
 
   return (
-    <main className="admin-users">
-      <div className="admin-users__header">
-        <Link to="/" className="admin-users__back">
-          ← Volver
-        </Link>
-        <h1 className="admin-users__title">Usuarios</h1>
-      </div>
+    <div className="admin-users">
+      <PageHeader
+        title="Usuarios"
+        description="Activá cuentas, asigná el PIN de cada persona y gestioná su estado de acceso."
+      />
 
       <div aria-live="polite" className="admin-users__feedback">
-        {successMessage ? <p role="status">{successMessage}</p> : null}
+        {successMessage ? (
+          <p role="status" className="notice notice--positive">
+            <CheckCircleIcon size="sm" />
+            {successMessage}
+          </p>
+        ) : null}
       </div>
 
       {state.status === 'loading' ? (
-        <p role="status" aria-live="polite">
-          Cargando usuarios…
-        </p>
+        <Card>
+          <LoadingState label="Cargando usuarios…" />
+        </Card>
       ) : null}
 
       {state.status === 'error' ? (
-        <div role="alert">
-          <p>No pudimos cargar la lista de usuarios.</p>
-          <button type="button" className="button button--primary" onClick={retry}>
-            Reintentar
-          </button>
-        </div>
+        <Card>
+          <ErrorState title="No pudimos cargar la lista de usuarios." onRetry={retry} />
+        </Card>
       ) : null}
 
       {state.status === 'loaded' && users.length === 0 ? (
-        <p>Todavía no hay usuarios cargados.</p>
+        <Card>
+          <EmptyState title="Todavía no hay usuarios cargados." />
+        </Card>
       ) : null}
 
       {state.status === 'loaded' && users.length > 0 ? (
-        <ul className="admin-users__list" role="list">
-          {users.map((user) => (
-            <AdminUserRow
-              key={user.id}
-              user={user}
-              isSelf={currentUser?.id === user.id}
-              wouldSelfLockout={wouldSelfLockout(user.id)}
-              onActivate={(target) => setDialog({ type: 'activate', user: target })}
-              onResetPin={(target) => setDialog({ type: 'reset', user: target })}
-              onChangeStatus={(target, nextStatus) =>
-                setDialog({ type: 'status', user: target, nextStatus })
-              }
-            />
-          ))}
-        </ul>
+        <section className="admin-users__table" aria-label="Usuarios del sistema">
+          <div className="admin-users__panel">
+            {/* Encabezados visuales de columna (solo en el layout de filas):
+                cada fila ya expone rol y estado como texto, así que no se
+                duplican para lectores de pantalla. */}
+            <div className="admin-users__columns" aria-hidden="true">
+              <span>Persona</span>
+              <span>Rol y estado</span>
+              <span>Acciones</span>
+            </div>
+            <ul className="admin-users__list" role="list">
+              {users.map((user) => (
+                <AdminUserRow
+                  key={user.id}
+                  user={user}
+                  isSelf={currentUser?.id === user.id}
+                  wouldSelfLockout={wouldSelfLockout(user.id)}
+                  onActivate={(target) => setDialog({ type: 'activate', user: target })}
+                  onResetPin={(target) => setDialog({ type: 'reset', user: target })}
+                  onChangeStatus={(target, nextStatus) =>
+                    setDialog({ type: 'status', user: target, nextStatus })
+                  }
+                />
+              ))}
+            </ul>
+          </div>
+        </section>
       ) : null}
 
       {dialog.type === 'activate' ? (
@@ -174,6 +193,7 @@ export function AdminUsersScreen() {
             </>
           }
           confirmLabel={getTransitionActionLabel(dialog.nextStatus)}
+          tone={statusChangeRevokesSessions(dialog.nextStatus) ? 'danger' : 'default'}
           onCancel={closeDialog}
           onConfirm={async () => {
             await changeUserStatus(dialog.user.id, dialog.nextStatus);
@@ -185,6 +205,6 @@ export function AdminUsersScreen() {
           }}
         />
       ) : null}
-    </main>
+    </div>
   );
 }
