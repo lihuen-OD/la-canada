@@ -246,15 +246,16 @@ model Employee {
   profile  EmployeeProfile?
   children EmployeeChild[]
 
-  assignedTasks           Task[]                @relation("TaskAssignee")
-  assignedTaskExecutions  TaskExecution[]       @relation("TaskExecutionAssignedTo")
-  completedTaskExecutions TaskExecution[]       @relation("TaskExecutionCompletedBy")
+  assignedTasks           Task[]                 @relation("TaskAssignee")
+  taskPlanningIntervals   TaskPlanningInterval[]
+  assignedTaskExecutions  TaskExecution[]        @relation("TaskExecutionAssignedTo")
+  completedTaskExecutions TaskExecution[]        @relation("TaskExecutionCompletedBy")
   authoredNewsReports     NewsReport[]
   stockMovements          StockMovement[]
   eggCollections          EggCollection[]
   animalMedicalRecords    AnimalMedicalRecord[]
-  uploadedFiles           FileAsset[]           @relation("FileUploadedByEmployee")
-  taggedFiles             FileAsset[]           @relation("FileTaggedEmployee")
+  uploadedFiles           FileAsset[]            @relation("FileUploadedByEmployee")
+  taggedFiles             FileAsset[]            @relation("FileTaggedEmployee")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -383,8 +384,9 @@ model Task {
   frequency   TaskFrequency
   active      Boolean       @default(true)
 
-  executions TaskExecution[]
-  files      FileAsset[]
+  executions        TaskExecution[]
+  planningIntervals TaskPlanningInterval[]
+  files             FileAsset[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -394,6 +396,25 @@ model Task {
   @@unique([employeeId, description])
   @@index([employeeId])
   @@map("tasks")
+}
+
+/// Historial bitemporal simplificado de la planificación operativa. Cada
+/// intervalo representa una asignación/frecuencia activa; `validTo = null`
+/// identifica el único intervalo vigente de una tarea activa.
+model TaskPlanningInterval {
+  id         String        @id @default(uuid()) @db.Uuid
+  taskId     String        @map("task_id") @db.Uuid
+  task       Task          @relation(fields: [taskId], references: [id])
+  employeeId String        @map("employee_id") @db.Uuid
+  employee   Employee      @relation(fields: [employeeId], references: [id])
+  frequency  TaskFrequency
+  validFrom  DateTime      @map("valid_from")
+  validTo    DateTime?     @map("valid_to")
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  @@index([taskId, validFrom])
+  @@index([employeeId, validFrom])
+  @@map("task_planning_intervals")
 }
 
 /// Una ejecución = el estado de cumplimiento de una tarea para un período

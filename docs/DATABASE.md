@@ -463,6 +463,10 @@ Migración `20260924120000_task_execution_reversal` (generada offline con `prism
 - **CHECK nuevos**: `completed = (reverted_at IS NULL)`; `(reverted_at IS NULL) = (reverted_by_user_id IS NULL)`; `completed_at IS NOT NULL AND completed_by_employee_id IS NOT NULL` (una reversión nunca borra fecha ni ejecutor). Probados contra `demo` en `tasks.integration.test.ts`.
 - `assignedEmployeeId` sigue siendo un snapshot inmutable (fila 9); verificado que reasignar la tarea no lo modifica.
 
+### Etapa 4B — historial de planificación
+
+La migración `20260924170000_task_planning_history` crea `task_planning_intervals`. El backfill inicia cada intervalo en `Task.createdAt`; las activas quedan abiertas y las inactivas cierran en `updatedAt` (mínimo 1 ms). Las métricas son confiables desde la creación registrada de cada tarea, nunca antes. Un CHECK valida el rango y un índice único parcial impide dos intervalos abiertos por tarea.
+
 ### Qué queda pendiente para la Etapa 3 (autenticación) en adelante
 
 - Enforcement a nivel de servicio de las filas 2, 6, 9, 11, 14, 15 de la matriz de invariantes.

@@ -285,6 +285,14 @@ export async function createTask(
         'El responsable no existe o no está activo.',
       );
       const task = await tx.task.create({ data: input, select: { id: true } });
+      await tx.taskPlanningInterval.create({
+        data: {
+          taskId: task.id,
+          employeeId: input.employeeId,
+          frequency: input.frequency,
+          validFrom: now,
+        },
+      });
       await recordAuditLog(tx, {
         actorUserId: actor.userId,
         action: 'task.created',
@@ -324,7 +332,7 @@ export async function updateTask(
     await prisma.$transaction(async (tx) => {
       const current = await tx.task.findUnique({
         where: { id: taskId },
-        select: { description: true, employeeId: true, frequency: true },
+        select: { description: true, employeeId: true, frequency: true, active: true },
       });
       if (!current) throw new NotFoundError('Tarea no encontrada.');
 
@@ -345,6 +353,20 @@ export async function updateTask(
           changes.employeeId,
           'El responsable no existe o no está activo.',
         );
+      }
+      if (current.active && (changes.employeeId || changes.frequency)) {
+        await tx.taskPlanningInterval.updateMany({
+          where: { taskId, validTo: null },
+          data: { validTo: now },
+        });
+        await tx.taskPlanningInterval.create({
+          data: {
+            taskId,
+            employeeId: changes.employeeId ?? current.employeeId,
+            frequency: changes.frequency ?? current.frequency,
+            validFrom: now,
+          },
+        });
       }
       await tx.task.update({ where: { id: taskId }, data: changes });
       await recordAuditLog(tx, {
@@ -374,9 +396,27 @@ export async function setTaskActive(
 ) {
   requireAdmin(actor);
   await prisma.$transaction(async (tx) => {
-    const current = await tx.task.findUnique({ where: { id: taskId }, select: { active: true } });
+    const current = await tx.task.findUnique({
+      where: { id: taskId },
+      select: { active: true, employeeId: true, frequency: true },
+    });
     if (!current) throw new NotFoundError('Tarea no encontrada.');
     if (current.active === active) return;
+    if (active) {
+      await tx.taskPlanningInterval.create({
+        data: {
+          taskId,
+          employeeId: current.employeeId,
+          frequency: current.frequency,
+          validFrom: now,
+        },
+      });
+    } else {
+      await tx.taskPlanningInterval.updateMany({
+        where: { taskId, validTo: null },
+        data: { validTo: now },
+      });
+    }
     await tx.task.update({ where: { id: taskId }, data: { active } });
     await recordAuditLog(tx, {
       actorUserId: actor.userId,

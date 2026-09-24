@@ -8,6 +8,7 @@ import { AuthenticatedHome } from '../features/home/AuthenticatedHome';
 import { AccessDeniedScreen } from '../features/admin/AccessDeniedScreen';
 import { AdminUsersScreen } from '../features/admin/AdminUsersScreen';
 import { TasksScreen } from '../features/tasks/TasksScreen';
+import { PerformanceScreen } from '../features/tasks/PerformanceScreen';
 import { APP_ROUTES } from './navigation';
 import { ProtectedRoute } from './ProtectedRoute';
 import { RequireRole } from './RequireRole';
@@ -41,6 +42,7 @@ export function AppRoutes() {
         <Route element={<AppShell />}>
           <Route index element={<AuthenticatedHome />} />
           <Route path={APP_ROUTES.tasks.path} element={<TasksScreen />} />
+          <Route path="/tasks/performance" element={<PerformanceScreen />} />
           <Route
             path={APP_ROUTES.adminUsers.path}
             element={

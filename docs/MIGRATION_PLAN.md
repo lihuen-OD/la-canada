@@ -171,6 +171,13 @@ Con el código de esta etapa ya validado (ver checklist más abajo), crear el pr
 - **Resultado**: backend (`/api/v1/tasks`, ver `docs/ARCHITECTURE.md` §18), migración `task_execution_reversal` (ver `docs/DATABASE.md`, "Etapa 4A"), `BUSINESS_TIME_ZONE`, frontend `/tasks` con ✅ en la navegación, filtros, listado, diálogos de alta/edición/completado/reversión/desactivación e historial 📅.
 - **No incluyó**: Desempeño (ranking, rachas, % acumulado), ninguna modificación de las 10 tareas reales ni de los 4 empleados reales, ninguna ejecución real registrada, ningún seed, ninguna conexión a `production`, ningún uso de Object Storage, ningún commit ni push (a cargo del usuario tras la aprobación).
 
+## Etapa 4B — Desempeño de tareas 🟡 implementado y validado — pendiente de revisión visual humana y commit
+
+- Historial `TaskPlanningInterval` con backfill desde fechas reales y restricciones SQL.
+- API de cumplimiento ponderado, trabajo realizado, coberturas, ayuda, racha, tendencia y urgentes/únicas separadas.
+- `/tasks/performance` como pestaña secundaria, sin mutaciones ni destino principal nuevo.
+- No incluye Stock, Dashboard, premios, sanciones, pagos, notificaciones ni exportaciones.
+
 ## Etapa 4 — Reconstruir el frontend sin alterar el diseño
 
 - **Objetivo**: recrear en React + TypeScript las 14 pantallas identificadas en `docs/PROJECT_CONTEXT.md` §3, preservando la paleta de colores, tipografías (Fraunces/Karla), layout mobile-first con navegación inferior/sidebar, y componentes visuales (cards, chips, modales tipo bottom-sheet, badges de estado). **Actualización Etapa 3C**: el flujo de autenticación (selector de identidad + PIN, sesión, rutas protegidas) ya está construido — esta etapa es exclusivamente el dashboard y los módulos de negocio, no vuelve a tocar el login.

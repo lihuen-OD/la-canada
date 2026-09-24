@@ -13,7 +13,7 @@ import { addDays, computePeriodKey, formatLocalDate, toLocalDate } from '../../l
  * completa, `requireAuth` real con sesiones y JWT reales de usuarios
  * SINTÉTICOS). Reglas de datos:
  *  - todo lo creado lleva el prefijo `[test-4a-<RUN_ID>]` / `test-4a-<RUN_ID>`;
- *  - nunca se completa, reasigna ni edita ninguna de las 10 tareas reales
+ *  - nunca se completa, reasigna ni edita ninguna tarea preexistente
  *    (solo aparecen en respuestas de lectura);
  *  - `afterAll` borra ejecuciones, auditorías, tareas, sesiones, usuarios y
  *    empleados sintéticos, y verifica que los conteos globales y las tareas
@@ -173,6 +173,7 @@ afterAll(async () => {
     },
   });
   await prisma.taskExecution.deleteMany({ where: { taskId: { in: taskIds } } });
+  await prisma.taskPlanningInterval.deleteMany({ where: { taskId: { in: taskIds } } });
   await prisma.task.deleteMany({ where: { id: { in: taskIds } } });
   await prisma.session.deleteMany({ where: { userId: { in: syntheticUserIds } } });
   await prisma.user.deleteMany({ where: { id: { in: syntheticUserIds } } });
@@ -187,14 +188,14 @@ afterAll(async () => {
   expect(await snapshotRealTasks()).toEqual(realTasksBefore);
   expect(
     await prisma.task.count({ where: { NOT: { description: { startsWith: '[test-4a-' } } } }),
-  ).toBe(10);
+  ).toBe((realTasksBefore as unknown[]).length);
 });
 
 describe('tareas — visibilidad y filtros', () => {
-  it('EMPLOYEE lista las tareas activas (incluidas las 10 reales, sin modificarlas)', async () => {
+  it('EMPLOYEE lista las tareas activas preexistentes, sin modificarlas', async () => {
     const response = await request(app).get('/api/v1/tasks').set(as(employeeA));
     expect(response.status).toBe(200);
-    expect(response.body.tasks.length).toBeGreaterThanOrEqual(10);
+    expect(response.body.tasks.length).toBeGreaterThanOrEqual((realTasksBefore as unknown[]).length);
     expect(response.body.tasks.every((task: { active: boolean }) => task.active)).toBe(true);
     expect(response.body.period.timeZone).toBe(TZ);
   });

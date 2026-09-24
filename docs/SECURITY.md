@@ -183,3 +183,7 @@ Detalle técnico completo en `docs/ARCHITECTURE.md`, sección 16.
 - **Trazabilidad sin borrado**: sin borrado físico de tareas ni de ejecuciones; las reversiones quedan marcadas en la fila y auditadas (`task.created/updated/activated/deactivated/completed/completion_reverted`), diferenciando actor (`actorUserId`), responsable asignado y ejecutor. Las auditorías guardan IDs y campos cambiados, nunca tokens, PIN, headers, cookies ni objetos Prisma completos.
 - **Entrada**: descripciones y motivos normalizados, sin HTML ni caracteres de control, con longitud máxima; React los renderiza como texto (sin `dangerouslySetInnerHTML`, verificado por test estático). Errores siempre `{ message, code }`, nunca Prisma crudo (verificado en integración).
 - **Zona horaria**: `BUSINESS_TIME_ZONE` es backend-only (sin prefijo `VITE_`), sin datos sensibles.
+
+## Actualización — Desempeño (Etapa 4B)
+
+Endpoints autenticados y rango Zod de hasta 90 días. El backend fuerza sesión → User → Employee: un EMPLOYEE no consulta otro ID ni recibe nombres/métricas ajenas. Sin SQL dinámico, objetos Prisma crudos, secretos ni storage del cliente.

@@ -145,3 +145,11 @@ export class DuplicateTaskError extends AppError {
     });
   }
 }
+
+export class EmployeeLinkRequiredError extends AppError {
+  constructor() {
+    super('Tu usuario no tiene un empleado activo vinculado.', 409, {
+      code: 'EMPLOYEE_LINK_REQUIRED',
+    });
+  }
+}

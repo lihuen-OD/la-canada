@@ -619,6 +619,8 @@ Endpoint propio y liviano. Diarias y semanales: un slot por período con `expect
 
 `/tasks` para todo usuario autenticado, en la navegación con el emoji ✅ del prototipo (decorativo; nombre accesible "Tareas"). Filtros por persona (chips con avatar y pendientes, desplazables) y frecuencia (las cinco del enum) sobre la lista ya cargada; el historial pide su endpoint con la persona elegida. Sin actualizaciones optimistas: cada operación espera la respuesta real y vuelve a pedir la lista; doble envío bloqueado con guardas síncronas. EMPLOYEE completa sin diálogo y nunca envía un ejecutor; ADMIN elige el ejecutor entre empleados activos reales. Deshacer siempre pide confirmación. Un 401 que sobrevive al refresh-y-reintento de `httpClient` dispara el `logout()` existente. Sin librería nueva de datos ni de UI (solo la primitiva `Chip`).
 
-### 18.7 Pendiente (Etapa 4B)
+## 19. Desempeño (Etapa 4B)
 
-Desempeño: ranking, rachas, porcentaje acumulado y "tareas más incumplidas". No se implementó nada de eso; el historial ya expone `expected/completed` por semana como base correcta.
+`TaskPlanningInterval` versiona responsable, frecuencia y vigencia. Crear/reactivar abre; reasignar o cambiar frecuencia cierra y abre; desactivar cierra, siempre dentro de la transacción de `Task`. Un índice parcial permite un solo intervalo abierto.
+
+`GET /performance/summary?from&to` y `GET /performance/employees/:employeeId?from&to` aceptan hasta 90 días y usan `BUSINESS_TIME_ZONE`. ADMIN ve el equipo; EMPLOYEE queda forzado al Employee de su sesión. El backend genera ocurrencias y DTO; el frontend no recalcula métricas.

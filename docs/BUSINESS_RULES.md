@@ -189,6 +189,13 @@ Tres orígenes distintos de eventos tipo `cumple`, todos automáticos:
 
 Repetido aquí por completitud del pedido original — el detalle completo y el bug verificado están en la sección 6.
 
+## Actualización Etapa 4B — Desempeño
+
+- Denominador: DAILY/WEEKLY/MONTHLY esperadas según planificación histórica. URGENT/ONE_TIME se informan aparte.
+- Cumplimiento = completadas asignadas / esperadas asignadas; el equipo usa totales ponderados. Cero esperadas devuelve `null` ("Sin datos").
+- Una completada usa `assignedEmployeeId`; un pendiente usa el responsable vigente al cierre, o ahora si sigue abierto. La cobertura suma trabajo a quien realizó y cumplimiento/ayuda a quien la tenía asignada.
+- Reversiones no cuentan. La racha considera solo DAILY: hoy incompleto no rompe la racha cerrada ayer y un día sin tareas no suma ni corta.
+
 ## 20. Otras reglas encontradas
 
 - **Clima → recomendaciones de jardín** (`rndClima()`, línea 1650-1665): reglas fijas sobre datos de Open-Meteo — no regar si llovió/lloverá suficiente, no fumigar si hay lluvia prevista al día siguiente o viento >25 km/h, regar temprano si la máxima supera 32°, proteger plantas si la máxima es menor a 10°.

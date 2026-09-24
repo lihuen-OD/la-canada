@@ -240,6 +240,8 @@ La implementación React actual debe reconciliarse visualmente con esta referenc
 
 ### Tareas
 
+Desempeño se integra mediante navegación secundaria `✅ Tareas | 📊 Desempeño`, sin destino principal nuevo. Reutiliza tarjetas blancas, cifras Fraunces, avatares, chips desplazables y barras; apila a 360 px y usa grilla desde 768 px.
+
 - Filtro horizontal por persona con avatar y cantidad pendiente.
 - Filtros por frecuencia mediante chips.
 - Lista de tareas dentro de tarjetas.

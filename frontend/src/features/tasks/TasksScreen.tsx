@@ -33,6 +33,7 @@ import type { FrequencyFilter, PersonFilter } from './TaskFilters';
 import { TaskFormDialog } from './TaskFormDialog';
 import { TaskHistory } from './TaskHistory';
 import { TaskItem } from './TaskItem';
+import { TasksSubnav } from './TasksSubnav';
 
 type LoadState =
   | { status: 'loading' }
@@ -174,6 +175,7 @@ export function TasksScreen() {
     return (
       <div className="tasks">
         {header}
+        <TasksSubnav active="tasks" />
         <Card>
           <LoadingState label="Cargando tareas…" />
         </Card>
@@ -185,6 +187,7 @@ export function TasksScreen() {
     return (
       <div className="tasks">
         {header}
+        <TasksSubnav active="tasks" />
         <Card>
           <ErrorState
             title="No pudimos cargar las tareas."
@@ -212,6 +215,7 @@ export function TasksScreen() {
   return (
     <div className="tasks">
       {header}
+      <TasksSubnav active="tasks" />
 
       <div aria-live="polite" className="tasks__notice">
         {notice ? (

@@ -2,6 +2,8 @@
 
 React 19 + TypeScript + Vite + `react-router-dom`. Ver el `README.md` de la raíz para instalación/ejecución del monorepo completo; este archivo documenta específicamente lo que vive en `frontend/`.
 
+La Etapa 4B agrega `/tasks/performance`, dentro de Tareas mediante navegación secundaria. Ofrece períodos de 7/30/90 días, resumen ADMIN y vista propia EMPLOYEE; consume DTO del backend y no recalcula porcentajes ni rachas.
+
 ## Estado actual (Etapas 3C/3D/3E)
 
 Implementado: el flujo completo de autenticación por selección de identidad + PIN (Etapa 3C), conectado al backend real, la administración de usuarios en `/admin/users` (Etapa 3D — listar, activar con PIN, cambiar PIN, cambiar estado, todo exclusivo de `ADMIN`), y la reconciliación visual de todas esas pantallas con la identidad original documentada en `docs/UI_CONTEXT.md` (Etapa 3E — tokens, fuentes locales, componentes compartidos, app shell). **No implementado todavía**: dashboard ni ningún módulo de negocio (real ni mock) — ver `docs/MIGRATION_PLAN.md`, raíz del repo.

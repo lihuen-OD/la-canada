@@ -1,0 +1,111 @@
+.performance {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.tasks-subnav {
+  display: flex;
+  gap: var(--space-1);
+  overflow-x: auto;
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+.tasks-subnav a {
+  min-height: var(--tap-target);
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.tasks-subnav a.active {
+  border-bottom: var(--border-width-control) solid var(--color-action);
+  color: var(--color-action);
+  font-weight: var(--font-weight-bold);
+}
+.performance__note {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+.performance__summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.performance__summary .card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.performance__summary strong,
+.performance-person__score strong {
+  font-family: var(--font-display);
+  font-size: var(--font-size-2xl);
+  color: var(--color-action);
+}
+.performance-list,
+.performance-detail {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.performance-person {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--tap-target);
+  padding: var(--space-3) 0;
+  border: 0;
+  border-bottom: var(--border-width) solid var(--color-border);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.performance-person__identity,
+.performance-person__score {
+  display: flex;
+  flex-direction: column;
+}
+.performance-person__score {
+  text-align: right;
+}
+.performance-person small,
+.performance-person__facts {
+  color: var(--color-text-muted);
+}
+.performance-person progress,
+.performance-person__facts {
+  grid-column: 2 / -1;
+  width: 100%;
+}
+.performance-person progress {
+  accent-color: var(--color-action);
+}
+.performance-person__facts {
+  font-size: var(--font-size-sm);
+}
+.performance-detail__header,
+.performance-detail li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.performance-detail li {
+  padding: var(--space-3) 0;
+  border-top: var(--border-width) solid var(--color-border);
+}
+.performance-detail li > span:first-child {
+  display: flex;
+  flex-direction: column;
+}
+.performance-detail small {
+  color: var(--color-text-muted);
+}
+@media (min-width: 48rem) {
+  .performance__summary {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
