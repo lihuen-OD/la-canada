@@ -164,6 +164,13 @@ Con el código de esta etapa ya validado (ver checklist más abajo), crear el pr
 - **Detalle técnico**: `docs/ARCHITECTURE.md` §17 y `frontend/README.md`, "Sistema visual (Etapa 3E)".
 - **No incluyó**: ningún cambio de backend, contratos API, autenticación, refresh, cookies, roles, permisos, Prisma, migraciones, seed ni datos reales; ninguna nueva ejecución del bootstrap; ningún PIN asignado ni usuario activado/suspendido; ninguna conexión a `production`; ningún uso de Object Storage; ningún módulo de negocio (Tareas, Stock, etc.) ni navegación hacia ellos.
 
+## Etapa 4A — Módulo Tareas operativo de punta a punta 🟡 implementado y validado — pendiente de revisión visual humana y commit
+
+- **Objetivo**: primer módulo de negocio real: listar las tareas reales de `demo`, filtrar por responsable y frecuencia, crear/editar/desactivar/reactivar (ADMIN), completar con snapshot de asignación y ejecutor real, revertir sin perder trazabilidad, historial semanal, sin duplicados por período. Sin Desempeño (Etapa 4B).
+- **Decisiones aprobadas por el usuario antes de implementar**: (1) migración "una fila por evento" con índice único parcial; (2) un `EMPLOYEE` solo revierte en el período vigente; (3) motivo obligatorio solo para correcciones de `ADMIN`; (4) historial con todas las frecuencias.
+- **Resultado**: backend (`/api/v1/tasks`, ver `docs/ARCHITECTURE.md` §18), migración `task_execution_reversal` (ver `docs/DATABASE.md`, "Etapa 4A"), `BUSINESS_TIME_ZONE`, frontend `/tasks` con ✅ en la navegación, filtros, listado, diálogos de alta/edición/completado/reversión/desactivación e historial 📅.
+- **No incluyó**: Desempeño (ranking, rachas, % acumulado), ninguna modificación de las 10 tareas reales ni de los 4 empleados reales, ninguna ejecución real registrada, ningún seed, ninguna conexión a `production`, ningún uso de Object Storage, ningún commit ni push (a cargo del usuario tras la aprobación).
+
 ## Etapa 4 — Reconstruir el frontend sin alterar el diseño
 
 - **Objetivo**: recrear en React + TypeScript las 14 pantallas identificadas en `docs/PROJECT_CONTEXT.md` §3, preservando la paleta de colores, tipografías (Fraunces/Karla), layout mobile-first con navegación inferior/sidebar, y componentes visuales (cards, chips, modales tipo bottom-sheet, badges de estado). **Actualización Etapa 3C**: el flujo de autenticación (selector de identidad + PIN, sesión, rutas protegidas) ya está construido — esta etapa es exclusivamente el dashboard y los módulos de negocio, no vuelve a tocar el login.
@@ -340,3 +347,14 @@ Cambios de esta revisión:
 - [ ] Aprobación visual humana (login, selección de Administrador, teclado PIN, Inicio, Usuarios, diálogo de PIN, diálogo de confirmación, vista móvil).
 - [ ] Commit único (`style: align frontend with La Cañada visual identity`) y push a `origin/main`, solo después de la aprobación.
 - **No incluyó**: ninguna escritura en la base (ni seed, ni migraciones, ni `db push`, ni bootstrap, ni cambios de PIN/estado), ninguna conexión a `production`, ningún uso de Object Storage, ningún módulo de negocio.
+
+## Validaciones obligatorias de la Etapa 4A
+
+- [x] Verificación inicial: `main` sincronizada con `origin/main`, working tree limpio, `DATABASE_TARGET=demo`, 3 migraciones al día, 10 tareas reales (4 diarias, 3 semanales, 2 mensuales, 1 urgente) sin duplicados, 0 ejecuciones.
+- [x] `prisma format`/`validate`/`generate`; migración generada offline e inspeccionada; `migrate deploy` solo en `demo`; `migrate status` al día; `migrate diff` contra la base real vacío (sin drift).
+- [x] `npm run build`, `typecheck`, `lint`, `format:check` — en verde.
+- [x] Tests: frontend 226, backend unitarios 264, integración contra `demo` 54 (22 nuevos de tareas, incluida la carrera de 8 finalizaciones simultáneas) — la de integración corrida dos veces.
+- [x] Tras los tests: 10 tareas reales idénticas (id, descripción, responsable, frecuencia, estado, `updatedAt`), 0 ejecuciones, conteos de usuarios/sesiones/empleados/auditorías de vuelta a su línea base (las únicas auditorías nuevas en `demo` son un login/logout del administrador real hecho por el usuario).
+- [x] Escaneo de secretos, URLs de Neon/Supabase, PIN/`1234`, storage, `dangerouslySetInnerHTML`, SQL crudo, UUIDs hardcodeados, datos mock en runtime y errores de Prisma expuestos — sin hallazgos nuevos.
+- [x] Revisión visual automatizada (Chrome headless, respuestas sintéticas interceptadas, sin escritura en la base) de `/tasks` y sus diálogos en 360/390/768/1366/1920 px: sin scroll horizontal de página, sin objetivos táctiles < 44px.
+- [ ] Revisión visual humana y commit (`feat: implement task management module`) a cargo del usuario.

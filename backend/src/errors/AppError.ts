@@ -113,3 +113,35 @@ export class SelfLockoutError extends AppError {
     );
   }
 }
+
+/** Ya existe una ejecución vigente de esa tarea para el período actual (incluye la carrera de dos finalizaciones simultáneas). */
+export class TaskAlreadyCompletedError extends AppError {
+  constructor() {
+    super('Esta tarea ya fue completada para el período actual.', 409, {
+      code: 'TASK_ALREADY_COMPLETED',
+    });
+  }
+}
+
+/** Una tarea desactivada no se puede completar hasta reactivarla. */
+export class TaskInactiveError extends AppError {
+  constructor() {
+    super('La tarea está desactivada.', 409, { code: 'TASK_INACTIVE' });
+  }
+}
+
+/** La ejecución ya fue revertida (o nunca estuvo vigente). */
+export class TaskExecutionNotActiveError extends AppError {
+  constructor() {
+    super('Esta finalización ya fue revertida.', 409, { code: 'TASK_EXECUTION_NOT_ACTIVE' });
+  }
+}
+
+/** Mismo responsable con una tarea de descripción idéntica (`@@unique([employeeId, description])`). */
+export class DuplicateTaskError extends AppError {
+  constructor() {
+    super('Ese responsable ya tiene una tarea con la misma descripción.', 409, {
+      code: 'TASK_DUPLICATE',
+    });
+  }
+}

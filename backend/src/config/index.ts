@@ -30,5 +30,7 @@ export const config = {
    * usa "none" en producción (requiere Secure, ver config/cookies.ts) y
    * "lax" en desarrollo local (alcanza porque ahí no es cross-site).
    */
+  /** Zona IANA de negocio para períodos de tareas (ver `lib/businessTime.ts`). */
+  businessTimeZone: env.BUSINESS_TIME_ZONE,
   cookieSameSite: env.COOKIE_SAME_SITE ?? (env.NODE_ENV === 'production' ? 'none' : 'lax'),
 } as const;

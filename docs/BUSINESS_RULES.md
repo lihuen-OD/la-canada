@@ -66,6 +66,19 @@ Cada combinación tarea+período tiene a lo sumo una fila en `ejecuciones` (`get
 - Cubre las **últimas 8 semanas** (`getSemanas()`, línea 1184), seleccionables por un `<select>`.
 - Calendario mensual en Configuración (`rndCal()`, línea 1676) marca visualmente los días que "tendrían" tareas según una heurística: diaria siempre, semanal en días hábiles (lunes a viernes), mensual el día 1 (línea 1685). **⚠️ DUDA** — esta heurística no refleja el cálculo real de `getPeriodo` (que ancla la semanal al lunes específico, no a "todo día hábil"); es solo un indicador visual aproximado, no una fuente de verdad de cumplimiento.
 
+### Actualización Etapa 4A — reglas implementadas de Tareas (§2–§5)
+
+Implementado en `backend/src/tasks/tasksService.ts` (detalle técnico en `docs/ARCHITECTURE.md` §18). Diferencias deliberadas respecto del prototipo, aprobadas por el usuario:
+
+- **Visibilidad**: todo usuario autenticado ve las tareas activas de todas las personas (igual que el prototipo, ver ⚠️ DUDA de §1 — sin cambios). Solo `ADMIN` ve desactivadas.
+- **Administración**: crear, editar (descripción, responsable, frecuencia), desactivar y reactivar son exclusivos de `ADMIN`. Sin borrado físico (el prototipo borraba la tarea y sus ejecuciones).
+- **Quién completó**: un `EMPLOYEE` siempre queda registrado como ejecutor (sale de su sesión; no puede elegir a otra persona). Puede completar tareas asignadas a otra persona si las hizo él — reemplaza el modal "¿Quién completa esta tarea?" del prototipo, que permitía elegir a cualquiera. Un `ADMIN` sí elige el ejecutor (empleado activo) y queda como actor en la auditoría — corrige la ⚠️ DUDA de §4 (`compPid = null` para el admin). Sin nota opcional en esta etapa (el campo `note` del modelo queda sin usar).
+- **Reversión** (el prototipo solo "destildaba"): nunca borra; queda marcada y auditada. Un `EMPLOYEE` solo deshace lo que completó él y solo en el período vigente, motivo opcional; un `ADMIN` corrige cualquier ejecución con motivo obligatorio.
+- **Urgentes y únicas**: una sola finalización vigente (clave fija `URGENT`/`ONE_TIME`); una urgente completada sigue visible como completada; una única completada sale del listado operativo (como en el prototipo), se conserva en base, aparece en el historial de la semana en que se completó y un `ADMIN` la ve con "Incluir desactivadas y únicas ya completadas".
+- **Historial**: semana lunes–domingo con selector de 8 semanas (como el prototipo), pero incluye todas las frecuencias (diarias/semanales por período; mensuales, urgentes y únicas por fecha de finalización) y un conteo realizadas/esperadas real.
+- **Períodos**: misma estrategia que §3, calculada solo en el backend y en la zona horaria de negocio (`BUSINESS_TIME_ZONE`, Argentina), nunca en el navegador ni en UTC.
+- **Desempeño (§6)**: sigue sin implementarse — Etapa 4B.
+
 ## 6. Desempeño (⚠️ módulo con lógica rota, verificado en código)
 
 - Panel "Desempeño" dentro de Tareas, con períodos seleccionables de 7/14/30 días (`desempPeriodo`).

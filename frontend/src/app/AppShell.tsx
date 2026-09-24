@@ -9,8 +9,18 @@ import { LogoutButton } from '../features/auth/LogoutButton';
 import { APP_ROUTES, getVisibleNavigation } from '../routes/navigation';
 import type { NavIconName } from '../routes/navigation';
 
+/** Emoji del prototipo — decorativo; el nombre accesible es siempre la etiqueta de texto. */
+function TasksNavEmoji() {
+  return (
+    <span className="nav-emoji" aria-hidden="true">
+      ✅
+    </span>
+  );
+}
+
 const NAV_ICONS: Record<NavIconName, ComponentType<{ size?: 'lg' }>> = {
   home: HomeIcon,
+  tasks: TasksNavEmoji,
   users: UsersIcon,
 };
 

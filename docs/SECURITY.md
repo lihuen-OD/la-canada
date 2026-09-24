@@ -174,3 +174,12 @@ Primer módulo de frontend que ejecuta mutaciones administrativas reales (activa
 - **Ningún dato mock ni fixture en tiempo de ejecución**: el listado viene exclusivamente de `GET /admin/users` real; los 4 empleados reales siguen `PENDING_ACTIVATION` y no se activaron ni se les asignó PIN como parte de esta etapa.
 
 Detalle técnico completo en `docs/ARCHITECTURE.md`, sección 16.
+
+## Actualización — módulo Tareas (Etapa 4A)
+
+- **Ningún endpoint de tareas es público** (`requireAuth` en todo el router, test dedicado por ruta). Los permisos por rol se deciden en el backend con el rol y el empleado leídos de la base; el frontend solo oculta lo que igual se rechazaría.
+- **El ejecutor no se puede falsificar**: para un `EMPLOYEE`, `completedByEmployeeId` sale siempre de sesión → `User` → `employeeId`; un `employeeId` ajeno en el body → 403, cualquier campo no previsto (`completedByEmployeeId`, `periodKey`) → 400 (Zod `.strict()`). Solo un `ADMIN` indica el ejecutor, y el backend verifica que exista y esté activo.
+- **Integridad bajo concurrencia**: el índice único parcial es la defensa final; la segunda finalización simultánea responde 409 controlado y revierte su transacción completa (probado con 8 requests reales simultáneas contra `demo`).
+- **Trazabilidad sin borrado**: sin borrado físico de tareas ni de ejecuciones; las reversiones quedan marcadas en la fila y auditadas (`task.created/updated/activated/deactivated/completed/completion_reverted`), diferenciando actor (`actorUserId`), responsable asignado y ejecutor. Las auditorías guardan IDs y campos cambiados, nunca tokens, PIN, headers, cookies ni objetos Prisma completos.
+- **Entrada**: descripciones y motivos normalizados, sin HTML ni caracteres de control, con longitud máxima; React los renderiza como texto (sin `dangerouslySetInnerHTML`, verificado por test estático). Errores siempre `{ message, code }`, nunca Prisma crudo (verificado en integración).
+- **Zona horaria**: `BUSINESS_TIME_ZONE` es backend-only (sin prefijo `VITE_`), sin datos sensibles.

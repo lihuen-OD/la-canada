@@ -1,6 +1,6 @@
 import type { SystemRole } from '../api/types';
 
-export type NavIconName = 'home' | 'users';
+export type NavIconName = 'home' | 'tasks' | 'users';
 
 export interface AppRouteDefinition {
   path: string;
@@ -16,7 +16,7 @@ export interface AppRouteDefinition {
  * `AppShell` para armar la navegación — así nunca pueden divergir (un
  * destino del menú sin ruta, o una ruta admin-only visible para
  * cualquiera). Nunca se agregan acá destinos de módulos que todavía no
- * existen (Tareas, Stock, etc.), ni siquiera deshabilitados: cada módulo
+ * existen (Stock, Gallinero, etc.), ni siquiera deshabilitados: cada módulo
  * suma su entrada en la etapa en que se construye.
  *
  * El backend sigue siendo la autoridad final: filtrar el menú solo evita
@@ -24,10 +24,15 @@ export interface AppRouteDefinition {
  */
 export const APP_ROUTES = {
   home: { path: '/', label: 'Inicio', icon: 'home' },
+  tasks: { path: '/tasks', label: 'Tareas', icon: 'tasks' },
   adminUsers: { path: '/admin/users', label: 'Usuarios', icon: 'users', requiredRole: 'ADMIN' },
 } as const satisfies Record<string, AppRouteDefinition>;
 
-const NAVIGATION_ORDER: readonly AppRouteDefinition[] = [APP_ROUTES.home, APP_ROUTES.adminUsers];
+const NAVIGATION_ORDER: readonly AppRouteDefinition[] = [
+  APP_ROUTES.home,
+  APP_ROUTES.tasks,
+  APP_ROUTES.adminUsers,
+];
 
 export function getVisibleNavigation(
   hasRole: (role: SystemRole) => boolean,

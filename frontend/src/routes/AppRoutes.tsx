@@ -7,6 +7,7 @@ import { LoginScreen } from '../features/auth/LoginScreen';
 import { AuthenticatedHome } from '../features/home/AuthenticatedHome';
 import { AccessDeniedScreen } from '../features/admin/AccessDeniedScreen';
 import { AdminUsersScreen } from '../features/admin/AdminUsersScreen';
+import { TasksScreen } from '../features/tasks/TasksScreen';
 import { APP_ROUTES } from './navigation';
 import { ProtectedRoute } from './ProtectedRoute';
 import { RequireRole } from './RequireRole';
@@ -39,6 +40,7 @@ export function AppRoutes() {
       <Route path={APP_ROUTES.home.path} element={<ProtectedRoute />}>
         <Route element={<AppShell />}>
           <Route index element={<AuthenticatedHome />} />
+          <Route path={APP_ROUTES.tasks.path} element={<TasksScreen />} />
           <Route
             path={APP_ROUTES.adminUsers.path}
             element={

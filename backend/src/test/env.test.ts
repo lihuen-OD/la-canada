@@ -256,3 +256,31 @@ describe('loadEnv — autenticación (Etapa 3B.1, corregido en el hardening post
     ).toThrow();
   });
 });
+
+describe('loadEnv — BUSINESS_TIME_ZONE (Etapa 4A)', () => {
+  const base = {
+    FRONTEND_URL: 'http://localhost:5173',
+    DATABASE_URL: VALID_DATABASE_URL,
+    JWT_ACCESS_SECRET: VALID_JWT_SECRET,
+  };
+
+  it('por defecto usa la zona IANA de Argentina (vacía o ausente)', () => {
+    expect(loadEnv(base).BUSINESS_TIME_ZONE).toBe('America/Argentina/Buenos_Aires');
+    expect(loadEnv({ ...base, BUSINESS_TIME_ZONE: '' }).BUSINESS_TIME_ZONE).toBe(
+      'America/Argentina/Buenos_Aires',
+    );
+  });
+
+  it('acepta otra zona IANA válida', () => {
+    expect(loadEnv({ ...base, BUSINESS_TIME_ZONE: 'America/Montevideo' }).BUSINESS_TIME_ZONE).toBe(
+      'America/Montevideo',
+    );
+  });
+
+  it.each(['-03:00', 'UTC-3', 'GMT-03:00', 'America/No_Existe', 'Buenos Aires'])(
+    'rechaza %s (offsets fijos o zonas inexistentes) al iniciar',
+    (value) => {
+      expect(() => loadEnv({ ...base, BUSINESS_TIME_ZONE: value })).toThrow(/BUSINESS_TIME_ZONE/);
+    },
+  );
+});

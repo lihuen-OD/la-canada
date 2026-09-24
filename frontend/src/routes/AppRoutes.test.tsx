@@ -83,10 +83,10 @@ describe('AppRoutes (con app shell real)', () => {
   });
 
   it('rutas de módulos futuros no existen: redirigen al Inicio (autenticado)', () => {
-    renderAt('/tareas', 'authenticated', 'ADMIN');
+    renderAt('/stock', 'authenticated', 'ADMIN');
 
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/hola/i);
-    expect(document.body.textContent).not.toMatch(/tareas/i);
+    expect(document.body.textContent).not.toMatch(/stock/i);
   });
 
   it('rutas de módulos futuros no existen: redirigen al login (anónimo)', () => {

@@ -19,6 +19,19 @@ import { z } from 'zod';
 function emptyStringToUndefined(value: unknown): unknown {
   return value === '' ? undefined : value;
 }
+export const DEFAULT_BUSINESS_TIME_ZONE = 'America/Argentina/Buenos_Aires';
+
+/** Zona IANA real (no un offset tipo `-03:00` ni `UTC-3`): `Intl` la rechaza si no la conoce. */
+function isValidIanaTimeZone(value: string): boolean {
+  if (!/^[A-Za-z_]+(\/[A-Za-z0-9_+-]+)*$/.test(value)) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
@@ -91,6 +104,24 @@ const envSchema = z.object({
   // Neon Object Storage (interfaz S3) — reemplaza a Google Drive, ver
   // docs/ARCHITECTURE.md, "Object Storage". Backend local usa únicamente la
   // rama/bucket `demo`; Render (producción) usa únicamente `production`.
+  /**
+   * Zona horaria de negocio (IANA) — la única autoridad para calcular a qué
+   * día/semana/mes pertenece una finalización de tarea (ver
+   * `lib/businessTime.ts`). Nunca un offset fijo como `-03:00`: una zona
+   * IANA sigue siendo correcta si cambian las reglas horarias. Default
+   * explícito para Argentina (la propiedad opera ahí), validado al iniciar.
+   */
+  BUSINESS_TIME_ZONE: z.preprocess(
+    emptyStringToUndefined,
+    z
+      .string()
+      .refine(isValidIanaTimeZone, {
+        message:
+          'BUSINESS_TIME_ZONE debe ser una zona horaria IANA válida, ej: America/Argentina/Buenos_Aires',
+      })
+      .default(DEFAULT_BUSINESS_TIME_ZONE),
+  ),
+
   OBJECT_STORAGE_ENDPOINT: z.string().optional(),
   OBJECT_STORAGE_REGION: z.string().optional(),
   OBJECT_STORAGE_BUCKET: z.string().optional(),

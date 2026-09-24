@@ -24,6 +24,12 @@ function listSourceFiles(dir: string): string[] {
   });
 }
 
+/** Código que se empaqueta: excluye tests y `src/test/` (setup y fixtures sintéticos). */
+function runtimeSourceFiles(): string[] {
+  const testDir = path.join(srcDir, 'test') + path.sep;
+  return listSourceFiles(srcDir).filter((file) => !file.startsWith(testDir));
+}
+
 const HEX_COLOR = /#[0-9a-fA-F]{3,8}\b/;
 const RGB_COLOR = /\brgba?\(/;
 
@@ -38,7 +44,7 @@ describe('estilos — tokens y guardas', () => {
 
   it('ningún componente usa colores hex en línea (salvo la validación de colorHex)', () => {
     const allowed = new Set([path.join(srcDir, 'utils', 'color.ts')]);
-    for (const file of listSourceFiles(srcDir).filter((name) => !allowed.has(name))) {
+    for (const file of runtimeSourceFiles().filter((name) => !allowed.has(name))) {
       expect(read(file), `${path.relative(srcDir, file)} contiene un color hex`).not.toMatch(
         HEX_COLOR,
       );
@@ -106,5 +112,25 @@ describe('estilos — tokens y guardas', () => {
     const viewport = html.match(/<meta name="viewport" content="([^"]+)"/)?.[1] ?? '';
     expect(viewport).toContain('width=device-width');
     expect(viewport).not.toMatch(/user-scalable\s*=\s*(no|0)|maximum-scale/);
+  });
+
+  it('cero datos mock en runtime: ningún archivo empaquetado importa fixtures de test', () => {
+    for (const file of runtimeSourceFiles()) {
+      expect(read(file), `${path.relative(srcDir, file)} importa fixtures`).not.toMatch(
+        /from ['"][^'"]*test\/fixtures/,
+      );
+    }
+  });
+
+  it('ningún archivo empaquetado usa storage del navegador ni dangerouslySetInnerHTML', () => {
+    for (const file of runtimeSourceFiles()) {
+      // Solo código: las menciones en comentarios que explican la prohibición no cuentan.
+      const code = read(file)
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/\/\/.*$/gm, '');
+      const name = path.relative(srcDir, file);
+      expect(code, `${name} usa storage`).not.toMatch(/localStorage|sessionStorage|indexedDB/);
+      expect(code, `${name} usa innerHTML`).not.toMatch(/dangerouslySetInnerHTML|\.innerHTML\s*=/);
+    }
   });
 });

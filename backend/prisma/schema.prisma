@@ -14,8 +14,13 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  /// Etapa 4A: `partialIndexes` habilita el índice único parcial de
+  /// `TaskExecution` (una sola ejecución VIGENTE por tarea+período, ver ese
+  /// modelo). Preview de Prisma 7.10, verificado con `migrate diff`: genera
+  /// `CREATE UNIQUE INDEX ... WHERE (...)` y lo gestiona sin drift.
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
@@ -207,6 +212,12 @@ model User {
   sessions  Session[]
   auditLogs AuditLog[] @relation("AuditActor")
 
+  /// Etapa 4A — actor (User) que registró / revirtió una ejecución de
+  /// tarea. Distinto del empleado ejecutor: un ADMIN sin `Employee`
+  /// vinculado puede registrar que un empleado completó una tarea.
+  recordedTaskExecutions TaskExecution[] @relation("TaskExecutionRecordedBy")
+  revertedTaskExecutions TaskExecution[] @relation("TaskExecutionRevertedBy")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -391,11 +402,12 @@ model Task {
 ///  - WEEKLY:  periodKey = fecha del lunes de esa semana, 'YYYY-MM-DD'
 ///  - MONTHLY: periodKey = primer día del mes,       'YYYY-MM-01'
 ///  - URGENT / ONE_TIME: no recurren — periodKey es el string fijo
-///    'URGENT' / 'ONE_TIME' (una sola ejecución posible en toda la vida de
+///    'URGENT' / 'ONE_TIME' (una sola ejecución VIGENTE en toda la vida de
 ///    la tarea, igual que en el prototipo).
-/// El `@@unique([taskId, periodKey])` impide duplicar una ejecución del
-/// mismo período (y, para urgente/única, impide más de una ejecución en
-/// total, porque periodKey es constante para esas tareas).
+/// El índice único parcial `(taskId, periodKey) WHERE reverted_at IS NULL`
+/// (Etapa 4A) impide dos ejecuciones vigentes del mismo período (y, para
+/// urgente/única, más de una vigente en total); una ejecución revertida
+/// queda como historia y no bloquea volver a completar.
 ///
 /// Dos conceptos distintos, deliberadamente separados (ver "Historial de
 /// asignación de tareas" en docs/DATABASE.md):
@@ -432,10 +444,31 @@ model TaskExecution {
 
   note String?
 
+  /// Etapa 4A — usuario autenticado que registró esta finalización (el
+  /// propio empleado, o un ADMIN registrándola en nombre de un empleado).
+  /// Nullable solo por compatibilidad de la migración incremental; el
+  /// servicio siempre lo completa.
+  recordedByUserId String? @map("recorded_by_user_id") @db.Uuid
+  recordedByUser   User?   @relation("TaskExecutionRecordedBy", fields: [recordedByUserId], references: [id])
+
+  /// Etapa 4A — reversión sin borrado. Una fila = un evento de
+  /// finalización; revertirla la marca (`revertedAt`/`revertedByUserId`/
+  /// `revertReason`, `completed = false`) sin tocar `completedAt`,
+  /// `completedByEmployeeId` ni `assignedEmployeeId`, y volver a completar
+  /// crea una fila NUEVA. CHECKs de coherencia en la migración
+  /// `task_execution_reversal` (ver docs/DATABASE.md).
+  revertedAt       DateTime? @map("reverted_at")
+  revertedByUserId String?   @map("reverted_by_user_id") @db.Uuid
+  revertedByUser   User?     @relation("TaskExecutionRevertedBy", fields: [revertedByUserId], references: [id])
+  revertReason     String?   @map("revert_reason")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  @@unique([taskId, periodKey])
+  /// Una sola ejecución VIGENTE (no revertida) por tarea+período — defensa
+  /// final contra duplicados bajo concurrencia. Las revertidas quedan como
+  /// historia y no bloquean volver a completar.
+  @@unique([taskId, periodKey], where: raw("reverted_at IS NULL"))
   @@index([taskId])
   @@index([assignedEmployeeId])
   @@index([completedByEmployeeId])

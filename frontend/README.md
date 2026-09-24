@@ -10,7 +10,7 @@ Implementado: el flujo completo de autenticación por selección de identidad + 
 
 ```text
 src/
-├── api/               Cliente HTTP genérico (httpClient.ts) + wrappers de endpoints (authApi.ts, adminApi.ts) + tipos (types.ts, adminTypes.ts)
+├── api/               Cliente HTTP genérico (httpClient.ts) + wrappers de endpoints (authApi.ts, adminApi.ts, tasksApi.ts) + tipos (types.ts, adminTypes.ts, taskTypes.ts)
 ├── app/                AppProviders + AppShell (header, navegación inferior/sidebar, contenido — Etapa 3E)
 ├── auth/               Estado de autenticación: accessTokenStore (token en memoria), refreshCoordinator
 │                       (single-flight de /auth/refresh), authContext/AuthProvider/useAuth, userDisplay (nombre/rol visibles)
@@ -22,11 +22,13 @@ src/
 │   ├── admin/           Administración de usuarios (Etapa 3D): AdminUsersScreen, AdminUserRow, PinDialog,
 │   │                     ConfirmDialog, AccessDeniedScreen, userStatusTransitions (espejo de la matriz real del backend)
 │   ├── auth/            Selector de identidad, teclado de PIN, pantalla de login, LogoutButton
+│   ├── tasks/           ✅ Tareas (Etapa 4A): TasksScreen, filtros, TaskItem, diálogos de alta/edición,
+│   │                     completado (ADMIN) y reversión, TaskHistory
 │   └── home/            Inicio autenticado TEMPORAL (no el Inicio definitivo) — con acceso a Usuarios solo para ADMIN
 ├── routes/             AppRoutes, ProtectedRoute, RequireRole, navigation.ts (única fuente de rutas/roles/menú)
 ├── styles/              tokens.css + base/components/app-shell/auth/home/admin.css, entrada única global.css
 ├── utils/               color.ts (validación de colorHex con fallback neutro)
-└── test/                setup.ts (Testing Library + jest-dom)
+└── test/                setup.ts (Testing Library + jest-dom) + fixtures/ (datos SINTÉTICOS solo para tests; ningún archivo de runtime puede importarlos — lo verifica styles.test.ts)
 ```
 
 ## Cómo se conecta con el backend
@@ -74,6 +76,18 @@ Detalle completo en `docs/ARCHITECTURE.md` (sección 15) y `docs/SECURITY.md`, e
 - **Cambiar estado** (`PATCH /admin/users/:id/status`): solo ofrece las transiciones que el backend realmente permite (espejo en `features/admin/userStatusTransitions.ts`, el backend sigue siendo la autoridad — una desincronización accidental de este archivo solo puede resultar en un botón de más que el backend igual rechaza, nunca en una acción indebida aceptada), con confirmación previa (`ConfirmDialog`) indicando si revoca sesiones. Nunca ofrece una transición que dejaría al sistema sin ningún `ADMIN` activo.
 - **Cambio sobre la propia cuenta**: si la acción (cambiar el propio PIN, o cambiar el propio estado a uno que revoca sesiones) afecta a la sesión con la que el `ADMIN` está navegando, `AdminUsersScreen` llama al `logout()` ya existente de `AuthProvider` en vez de refrescar la lista — reutiliza el mismo mecanismo de siempre (limpia el token en memoria, incrementa la "época" para que un refresh tardío no vuelva a autenticar, redirige a login), sin ningún código nuevo para esto.
 - **Componente de PIN reutilizable** (`PinDialog.tsx`, dentro de `components/ui/Modal.tsx` — movido ahí en la Etapa 3E): foco inicial y contenido dentro del diálogo, Escape para cerrar (bloqueado mientras se envía), `input type="password" inputMode="numeric" pattern="\d*" autoComplete="one-time-code"` — nunca `type="number"` (convertiría el PIN a número y perdería ceros iniciales) y `autoComplete="one-time-code"` evita que el navegador lo trate como una contraseña guardable. Mensajes de estado con `aria-live`.
+
+## Tareas (Etapa 4A)
+
+`/tasks`, para todo usuario autenticado (✅ Tareas en la navegación). Detalle y contrato en `docs/ARCHITECTURE.md` §18.
+
+- **Datos**: `GET /tasks` + `GET /tasks/employees` al entrar; filtros por persona (chips con avatar y pendientes) y frecuencia sobre la lista cargada; `GET /tasks/history` aparte, con la persona elegida. Sin librería de data fetching.
+- **Sin optimismo**: cada operación espera la respuesta real y vuelve a pedir la lista; doble envío bloqueado con guardas síncronas (`useSubmitGuard` y un set de tareas en curso).
+- **Roles en la UI** (el backend decide igual): un `EMPLOYEE` completa sin diálogo y nunca envía ejecutor; un `ADMIN` elige el ejecutor entre empleados activos reales, ve crear/editar/desactivar y "Incluir desactivadas y únicas ya completadas".
+- **Deshacer**: nunca un toggle; siempre confirma, explica que queda auditado y pide motivo solo si el backend lo exige (ADMIN). Solo se ofrece si `canRevert` (calculado en backend).
+- **Emojis del prototipo** (✅, 🚨, 📅, 👤) siempre `aria-hidden` junto a texto real.
+- **Sesión vencida**: un 401 que sobrevive al refresh-y-reintento de `httpClient` llama al `logout()` existente.
+- **Fechas**: el frontend solo formatea (`completedAt` en la zona que informa la API); nunca calcula períodos.
 
 ## Sistema visual (Etapa 3E)
 

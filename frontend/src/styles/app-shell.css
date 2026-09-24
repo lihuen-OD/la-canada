@@ -220,3 +220,14 @@
       var(--page-gutter-desktop) var(--space-9);
   }
 }
+
+/* Emoji de navegación (✅ Tareas) — mismo tamaño óptico que los iconos SVG. */
+.nav-emoji {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+  font-size: var(--font-size-lg);
+  line-height: 1;
+}

@@ -579,3 +579,46 @@ Sin cambios en el manejo de credenciales: el PIN sigue siendo `string` local de 
 ### 17.4 Validación visual
 
 jsdom no aplica CSS, así que los tests (Vitest + Testing Library) cubren semántica, estados y comportamiento, más guardas estructurales sobre las hojas de estilo; no se incorporó axe ni regresión visual por píxel. La revisión visual automatizada se hizo con Chrome headless vía DevTools Protocol en 360/390/768/1366/1920 px y en horizontal (login y PIN contra el backend real sin enviar ningún PIN; Inicio, Usuarios y diálogos con respuestas sintéticas interceptadas dentro de ese navegador descartable, sin tocar backend ni base), midiendo además overflow horizontal, objetivos táctiles < 44px y fuentes cargadas. La aprobación visual final es humana.
+
+## 18. Módulo Tareas (Etapa 4A)
+
+Primer módulo operativo real, de punta a punta: `backend/src/tasks/` (schemas Zod + servicio), `backend/src/controllers/tasksController.ts`, `backend/src/routes/tasksRoutes.ts`, `backend/src/lib/businessTime.ts`; frontend en `frontend/src/features/tasks/` + `frontend/src/api/tasksApi.ts`/`taskTypes.ts`. Reglas de negocio en `docs/BUSINESS_RULES.md` §2–§5; modelo y migración en `docs/DATABASE.md`, "Etapa 4A".
+
+### 18.1 Endpoints (`/api/v1/tasks`, todos detrás de `requireAuth`)
+
+| Método y ruta | Quién | Qué hace |
+| --- | --- | --- |
+| `GET /tasks?employeeId&frequency&status` | todos (`status=inactive\|all` solo ADMIN) | Tareas + ejecución vigente del período de cada una + `canComplete`/`canRevert` calculados en backend. `status=active` (default) oculta las únicas ya completadas. |
+| `GET /tasks/employees` | todos | Empleados activos (id, nombre, color) para filtros, formularios y el diálogo de completado. |
+| `GET /tasks/history?week=YYYY-MM-DD&employeeId` | todos | Semana lunes–domingo (cualquier día se normaliza al lunes; semanas futuras → 400). |
+| `POST /tasks` | ADMIN | Crear (`description`, `employeeId`, `frequency`). |
+| `PATCH /tasks/:id` | ADMIN | Editar descripción/responsable/frecuencia (solo campos presentes; `active` no se acepta acá). |
+| `PATCH /tasks/:id/status` | ADMIN | `{ active }` — desactivar/reactivar. Nunca borrado físico. |
+| `POST /tasks/:id/complete` | todos | EMPLOYEE: ejecutor = su empleado (otro `employeeId` → 403). ADMIN: `employeeId` del ejecutor (obligatorio si no tiene empleado propio; debe existir y estar activo). |
+| `POST /tasks/:id/revert` | todos, con reglas | `{ executionId, reason? }` — ver 18.4. |
+
+Todas las mutaciones exigen `Content-Type: application/json`, validan con Zod `.strict()` (un campo desconocido como `completedByEmployeeId` o `periodKey` → 400) y devuelven la tarea serializada. Errores propios: `TASK_ALREADY_COMPLETED` (409), `TASK_INACTIVE` (409), `TASK_EXECUTION_NOT_ACTIVE` (409), `TASK_DUPLICATE` (409, `@@unique([employeeId, description])`); nunca un error de Prisma crudo. Los permisos se deciden en `tasksService.ts` con el rol y el empleado leídos de la base (`resolveActor`: sesión → `User` → `employeeId`), no con `requireRole` por ruta, porque varias rutas sirven a ambos roles con reglas distintas.
+
+### 18.2 Períodos y zona horaria
+
+`computePeriodKey` (`backend/src/lib/businessTime.ts`) es la única autoridad: DAILY = fecha local, WEEKLY = lunes local, MONTHLY = primer día del mes local, URGENT = `'URGENT'`, ONE_TIME = `'ONE_TIME'`. El navegador nunca envía ni calcula un `periodKey`. La zona es `BUSINESS_TIME_ZONE` (backend, IANA, default `America/Argentina/Buenos_Aires`, validada con `Intl` al iniciar; offsets fijos como `-03:00` se rechazan). Implementado con `Intl.DateTimeFormat` sin dependencias; tests cerca de medianoche UTC, domingo→lunes y fin de mes.
+
+### 18.3 Concurrencia
+
+Completar corre en una transacción (lectura de la tarea, inserción de la ejecución con el snapshot `assignedEmployeeId` y auditoría). La defensa final es el índice único parcial `(task_id, period_key) WHERE reverted_at IS NULL`: si dos requests compiten, la segunda viola el índice (P2002), su transacción entera se revierte (sin auditoría huérfana) y se responde 409 `TASK_ALREADY_COMPLETED`. No hay "buscar y luego crear". Verificado con 8 finalizaciones simultáneas reales contra `demo`: 1 ejecución, 1 auditoría, 7 × 409.
+
+### 18.4 Reversión
+
+Nunca borra: marca la fila (`revertedAt`, `revertedByUserId`, `revertReason`, `completed=false`) con un `updateMany` condicionado a `revertedAt: null` (dos reversiones simultáneas no se aplican ambas) y libera el período para una fila nueva. EMPLOYEE: solo lo que completó él mismo y solo en el período vigente de la tarea; motivo opcional. ADMIN: cualquier ejecución vigente (también desde el historial), motivo obligatorio. Auditoría `task.completion_reverted` con `administrativeCorrection`.
+
+### 18.5 Historial
+
+Endpoint propio y liviano. Diarias y semanales: un slot por período con `expected` (tarea activa hoy, período ya empezado, tarea ya existente) y `completed/expected` real — corrige el 0% fijo del prototipo. Mensuales, urgentes y únicas: finalizaciones cuya fecha local cae en la semana. Solo ejecuciones vigentes; incluye tareas hoy desactivadas que tuvieron ejecuciones. El filtro por persona lo resuelve el backend (slot de quien lo tenía asignado según el snapshot, o de quien lo completó). Limitación documentada: la clasificación diaria/semanal usa la frecuencia actual de la tarea.
+
+### 18.6 Frontend
+
+`/tasks` para todo usuario autenticado, en la navegación con el emoji ✅ del prototipo (decorativo; nombre accesible "Tareas"). Filtros por persona (chips con avatar y pendientes, desplazables) y frecuencia (las cinco del enum) sobre la lista ya cargada; el historial pide su endpoint con la persona elegida. Sin actualizaciones optimistas: cada operación espera la respuesta real y vuelve a pedir la lista; doble envío bloqueado con guardas síncronas. EMPLOYEE completa sin diálogo y nunca envía un ejecutor; ADMIN elige el ejecutor entre empleados activos reales. Deshacer siempre pide confirmación. Un 401 que sobrevive al refresh-y-reintento de `httpClient` dispara el `logout()` existente. Sin librería nueva de datos ni de UI (solo la primitiva `Chip`).
+
+### 18.7 Pendiente (Etapa 4B)
+
+Desempeño: ranking, rachas, porcentaje acumulado y "tareas más incumplidas". No se implementó nada de eso; el historial ya expone `expected/completed` por semana como base correcta.

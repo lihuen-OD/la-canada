@@ -66,3 +66,10 @@ describe('.env.example — Neon (Etapa 3A): DATABASE_URL/DIRECT_URL nunca con va
     expect(ENV_EXAMPLE).not.toMatch(/[a-z0-9-]+\.neon\.tech/i);
   });
 });
+
+describe('.env.example — zona horaria de negocio (Etapa 4A)', () => {
+  it('declara BUSINESS_TIME_ZONE con una zona IANA, sin prefijo VITE_', () => {
+    expect(ENV_EXAMPLE).toMatch(/^BUSINESS_TIME_ZONE=America\/Argentina\/Buenos_Aires$/m);
+    expect(ENV_EXAMPLE).not.toMatch(/VITE_BUSINESS_TIME_ZONE/);
+  });
+});
