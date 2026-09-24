@@ -624,3 +624,23 @@ Endpoint propio y liviano. Diarias y semanales: un slot por período con `expect
 `TaskPlanningInterval` versiona responsable, frecuencia y vigencia. Crear/reactivar abre; reasignar o cambiar frecuencia cierra y abre; desactivar cierra, siempre dentro de la transacción de `Task`. Un índice parcial permite un solo intervalo abierto.
 
 `GET /performance/summary?from&to` y `GET /performance/employees/:employeeId?from&to` aceptan hasta 90 días y usan `BUSINESS_TIME_ZONE`. ADMIN ve el equipo; EMPLOYEE queda forzado al Employee de su sesión. El backend genera ocurrencias y DTO; el frontend no recalcula métricas.
+
+## 20. Backend base de Stock (Etapa 5A)
+
+`/api/v1/stock` está completamente detrás de `requireAuth`. El router solo publica lecturas, altas y cambios de catálogo/estado; el historial de movimientos no tiene `PUT`, `PATCH` ni `DELETE`.
+
+| Operación | Permiso |
+| --- | --- |
+| listar/detallar productos, categorías activas, destinos activos e historial | todo usuario autenticado |
+| ver catálogo inactivo | solo `ADMIN` |
+| crear/editar/desactivar categorías y productos | solo `ADMIN` |
+| `INCOME` y `CONSUMPTION` | `ADMIN` y `EMPLOYEE` (este último requiere empleado activo vinculado) |
+| `ADJUSTMENT_INCREASE` y `ADJUSTMENT_DECREASE` | solo `ADMIN` |
+
+Los schemas Zod son estrictos: el movimiento no acepta `employeeId`, `stockItemId`, saldo, área ni estado. La identidad se resuelve desde la sesión y la base. Los decimales viajan como strings canónicos y se convierten a `Prisma.Decimal`; el saldo se devuelve y audita como string, sin `number`/`Float`.
+
+Cada movimiento ejecuta en una sola `prisma.$transaction`: actualización condicional del saldo, creación de `StockMovement` y creación de `AuditLog`. Los consumos/ajustes a la baja usan `updateMany` con `currentQuantity >= quantity`; los ingresos/ajustes al alta usan incremento atómico con límite `99999999.99`. Esto evita saldos negativos, incrementos perdidos y overflow de `Decimal(10,2)`. Una falla posterior revierte las escrituras anteriores.
+
+La fecha efectiva se interpreta como fecha de calendario en `BUSINESS_TIME_ZONE`: nunca futura, hoy para `EMPLOYEE`, pasada permitida solo a `ADMIN`. `@db.Date` persiste la fecha sin hora. El destino es opcional durante 5A porque `demo` no tiene destinos reales y el CRUD se difiere; si se informa, el backend exige que exista, esté activo y que el movimiento sea `CONSUMPTION`.
+
+No hubo cambio de `schema.prisma` ni migración: el modelo creado en Etapa 2 y migrado en 3A ya soporta este contrato. 5A no incluye frontend, reportes, compras ni administración de destinos.

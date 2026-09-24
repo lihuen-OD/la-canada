@@ -194,6 +194,14 @@ Con el código de esta etapa ya validado (ver checklist más abajo), crear el pr
 - Cada módulo migrado se valida contra las reglas ya documentadas en `docs/BUSINESS_RULES.md`, corrigiendo — no reproduciendo — los bugs verificados ahí (desempeño roto, `DIAS_ES` indefinido, permisos inconsistentes de fotos ya resueltos a favor de admin-only, etc.), salvo que el usuario pida explícitamente mantener algún comportamiento tal cual está.
 - **No incluye**: adelantar módulos fuera de orden sin acuerdo, ni mezclar el fix de un bug con la migración de un módulo no relacionado.
 
+### Etapa 5A — Backend base de Stock ✅ implementada y auditada, sin commit
+
+- **Alcance**: endpoints autenticados bajo `/api/v1/stock` para consultar categorías, productos, destinos activos e historial; `ADMIN` crea/edita/desactiva catálogo; todos los autenticados registran ingresos/consumos y solo `ADMIN` registra ajustes explícitos al alta o a la baja.
+- **Integridad**: decimales como texto → Prisma `Decimal`; saldo, `StockMovement` y `AuditLog` en una transacción; decremento condicional e incremento atómico; rollback y concurrencia cubiertos tanto por fake transaccional como por integración contra `demo` con fixtures sintéticas y limpieza comprobable.
+- **Decisiones**: producto nuevo en cero; apertura exclusiva del seed; fecha futura prohibida, retroactividad solo `ADMIN`; destino opcional mientras no haya catálogo real/CRUD, pero validado si se recibe; historial inmutable y sin borrado físico.
+- **Modelo**: no requiere migración; reutiliza el schema y el `CHECK` existentes. No se ejecutó `db push`, reset ni seed.
+- **Fuera de alcance**: frontend de Stock, reportes, lista de compras y CRUD de destinos; ninguna modificación de datos reales ni conexión a `production`.
+
 ## Etapa 6 — Integrar Neon Object Storage (fotografías y archivos)
 
 - **Objetivo**: conectar `FileAsset` (ya modelado en la Etapa 2, adaptado a Neon Object Storage en la Etapa 2.2) con el Object Storage real de Neon, gestionado desde el backend.

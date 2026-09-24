@@ -4,6 +4,7 @@ import { authRouter } from './authRoutes';
 import { adminUsersRouter } from './adminUsersRoutes';
 import { tasksRouter } from './tasksRoutes';
 import { performanceRouter } from './performanceRoutes';
+import { stockRouter } from './stockRoutes';
 
 export const apiV1Router = Router();
 apiV1Router.use(healthRouter);
@@ -11,5 +12,6 @@ apiV1Router.use('/auth', authRouter);
 apiV1Router.use('/admin', adminUsersRouter);
 apiV1Router.use('/tasks', tasksRouter);
 apiV1Router.use('/performance', performanceRouter);
-// El resto de los módulos de negocio (stock, gallinero, etc.) se montarán
+apiV1Router.use('/stock', stockRouter);
+// El resto de los módulos de negocio (gallinero, etc.) se montarán
 // acá en etapas futuras — ver docs/MIGRATION_PLAN.md.

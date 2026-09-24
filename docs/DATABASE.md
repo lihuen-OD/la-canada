@@ -348,12 +348,14 @@ Sin este snapshot, una consulta que solo mirara `Task.employeeId` reinterpretar�
 
 ### Estrategia de inventario (transaccional)
 
-1. Se crea el movimiento (`StockMovement`, con `type` explícito).
-2. Se valida la operación (cantidad positiva, ítem existente — a nivel de aplicación en la etapa de servicios).
-3. Se actualiza `StockItem.currentQuantity` (saldo desnormalizado, mantenido a propósito para no tener que sumar todo el historial en cada lectura).
-4. Ambas escrituras (movimiento + saldo) se confirman juntas o ninguna — en el seed, esto ya está implementado con `stockItem.create({ data: { ..., movements: { create: {...} } } })` (escritura anidada de Prisma, atómica); en los servicios de la Etapa 5, el mismo principio se implementa con `prisma.$transaction(...)`.
+1. Se valida la operación (cantidad positiva, ítem/destino/fecha/permisos).
+2. Se actualiza condicional y atómicamente `StockItem.currentQuantity` (saldo desnormalizado, mantenido a propósito para no sumar todo el historial en cada lectura).
+3. Se crea `StockMovement` con `type` explícito y se crea su `AuditLog`.
+4. Las tres escrituras se confirman juntas o ninguna: el seed usa una escritura anidada; el servicio de la Etapa 5A usa `prisma.$transaction(...)`. Una falla del movimiento o de la auditoría revierte también el saldo.
 
 Los 14 `StockItem` del seed cargan su cantidad inicial como un `StockMovement` de tipo `OPENING_BALANCE` — nunca como un valor "de la nada" en el propio `StockItem` — así el historial de movimientos siempre explica de dónde sale el saldo actual, incluido el saldo con el que arrancó el sistema.
+
+**Etapa 5A — sin migración nueva.** El schema existente ya expresa `Decimal(10,2)`, los cinco tipos de movimiento, las relaciones y el `CHECK (quantity > 0)` necesarios. La API usa `ADJUSTMENT_INCREASE`/`ADJUSTMENT_DECREASE` con magnitud positiva; limitar su dirección no requiere otra columna. La concurrencia del saldo se resuelve en servicio con operaciones atómicas de Postgres, no con un cambio de schema.
 
 **Idempotencia del movimiento de apertura (corrección de esta revisión).** `StockMovement.reference` (`String?`, `@unique`) es una clave natural que el seed setea únicamente en los movimientos `OPENING_BALANCE` (`"<área>::<nombre>::OPENING_BALANCE"`, derivada de la clave natural del propio `StockItem`). Postgres permite múltiples `NULL` en una columna `@unique` (no se consideran iguales entre sí), así que el resto de los movimientos —que no necesitan esta protección— dejan `reference` en `null` sin conflicto, mientras que nunca puede existir más de un `OPENING_BALANCE` para el mismo producto: lo garantiza una restricción real de base, no solo el texto de `reason` (que es descriptivo y frágil como única protección).
 
@@ -404,7 +406,7 @@ Invariantes de negocio que Prisma **no** puede expresar de forma completamente d
 | 3 | `User.status = ACTIVE` ⇒ `pinHash` no nulo (columna renombrada de `passwordHash` en la Etapa 3B.2) | — | ✅ `CHECK (status != 'ACTIVE' OR pin_hash IS NOT NULL)` | ✅ (al activar, `POST /admin/users/:id/activate`) | — | Columnas de la misma fila — `CHECK` de una sola tabla |
 | 4 | `FileAsset` no vinculado simultáneamente a `taskId` y `animalId` | — | ✅ `CHECK (NOT (task_id IS NOT NULL AND animal_id IS NOT NULL))` | ✅ | — | Columnas de la misma fila — `CHECK` de una sola tabla |
 | 5 | `StockMovement.quantity` siempre positiva | — | ✅ `CHECK (quantity > 0)` | ✅ | — | Ya casi garantizado por `@db.Decimal` + validación de formulario, pero conviene el `CHECK` como defensa final |
-| 6 | El saldo (`StockItem.currentQuantity`) nunca queda negativo tras `CONSUMPTION`/`ADJUSTMENT_DECREASE` | — | — | ✅ | — | Depende del estado de **otra fila** en el momento de escribir — no expresable como `CHECK` estático; exige leer el saldo actual dentro de la misma transacción antes de escribir |
+| 6 | El saldo (`StockItem.currentQuantity`) nunca queda negativo tras `CONSUMPTION`/`ADJUSTMENT_DECREASE` | — | — | ✅ | — | Depende del saldo concurrente — no expresable como `CHECK` estático; Etapa 5A usa una actualización condicional atómica (`currentQuantity >= quantity`) dentro de la transacción, no leer-calcular-escribir |
 | 7 | Un `StockMovement` `OPENING_BALANCE` como máximo por `StockItem` | ✅ `StockMovement.reference @unique` | (ya cubierto por 1) | — | — | Resuelto en este schema — ver "Idempotencia del movimiento de apertura" arriba |
 | 8 | Singleton de `ChickenCoop`/`PropertyLocation` identificado por clave única | ✅ `code @unique` | — | — | — | Resuelto en este schema — ver "Singletons reforzados" arriba |
 | 9 | `TaskExecution.assignedEmployeeId` = snapshot inmutable, nunca se reescribe tras reasignar `Task.employeeId` | — | — | ✅ | — | Prisma no puede "congelar" un valor tras la creación; el servicio simplemente nunca debe incluir ese campo en un `update()` |

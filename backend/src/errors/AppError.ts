@@ -153,3 +153,95 @@ export class EmployeeLinkRequiredError extends AppError {
     });
   }
 }
+
+// ── Stock (Etapa 5A) ──────────────────────────────────────────────────────
+
+/** Un producto desactivado no admite movimientos hasta que un ADMIN lo reactive. */
+export class StockItemInactiveError extends AppError {
+  constructor() {
+    super('El producto está desactivado.', 409, { code: 'STOCK_ITEM_INACTIVE' });
+  }
+}
+
+/**
+ * Un consumo/ajuste a la baja no puede dejar el saldo en negativo. El
+ * mensaje incluye el saldo actual cuando ya se leyó; sin detalle es la
+ * carrera de dos movimientos simultáneos (la condición atómica de base
+ * rechazó la actualización).
+ */
+export class StockInsufficientQuantityError extends AppError {
+  constructor(
+    message = 'Stock insuficiente: el saldo cambió durante la operación. Volvé a intentar.',
+  ) {
+    super(message, 409, { code: 'STOCK_INSUFFICIENT_QUANTITY' });
+  }
+}
+
+/** Una categoría inactiva no admite nuevos productos ni reasignaciones. */
+export class StockCategoryInactiveError extends AppError {
+  constructor() {
+    super('La categoría está inactiva.', 409, { code: 'STOCK_CATEGORY_INACTIVE' });
+  }
+}
+
+/** Un destino de consumo inactivo no admite nuevos movimientos. */
+export class StockDestinationInactiveError extends AppError {
+  constructor() {
+    super('El destino está inactivo.', 409, { code: 'STOCK_DESTINATION_INACTIVE' });
+  }
+}
+
+/** Mismo `(area, name)` en StockItem (`@@unique([area, name])`). */
+export class DuplicateStockItemError extends AppError {
+  constructor() {
+    super('Ya existe un producto con ese nombre en esa área.', 409, {
+      code: 'STOCK_ITEM_DUPLICATE',
+    });
+  }
+}
+
+/** Mismo `(name, area)` en StockCategory (`@@unique([name, area])`). */
+export class DuplicateStockCategoryError extends AppError {
+  constructor() {
+    super('Ya existe una categoría con ese nombre en esa área.', 409, {
+      code: 'STOCK_CATEGORY_DUPLICATE',
+    });
+  }
+}
+
+/** Identificadores de recursos de Stock que no existen usan 404 + código estable. */
+export class StockItemNotFoundError extends AppError {
+  constructor() {
+    super('Producto no encontrado.', 404, { code: 'STOCK_ITEM_NOT_FOUND' });
+  }
+}
+
+export class StockCategoryNotFoundError extends AppError {
+  constructor() {
+    super('Categoría no encontrada.', 404, { code: 'STOCK_CATEGORY_NOT_FOUND' });
+  }
+}
+
+export class StockDestinationNotFoundError extends AppError {
+  constructor() {
+    super('Destino no encontrado.', 404, { code: 'STOCK_DESTINATION_NOT_FOUND' });
+  }
+}
+
+/** No se desactiva una categoría mientras tenga productos activos vinculados. */
+export class StockCategoryInUseError extends AppError {
+  constructor() {
+    super('La categoría tiene productos activos y no se puede desactivar.', 409, {
+      code: 'STOCK_CATEGORY_IN_USE',
+    });
+  }
+}
+
+/** Un incremento no puede exceder Decimal(10,2). */
+export class StockBalanceLimitError extends AppError {
+  constructor() {
+    super('El movimiento excede el saldo máximo admitido.', 409, {
+      code: 'STOCK_BALANCE_LIMIT',
+    });
+  }
+}

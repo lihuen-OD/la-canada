@@ -195,7 +195,9 @@ describe('tareas — visibilidad y filtros', () => {
   it('EMPLOYEE lista las tareas activas preexistentes, sin modificarlas', async () => {
     const response = await request(app).get('/api/v1/tasks').set(as(employeeA));
     expect(response.status).toBe(200);
-    expect(response.body.tasks.length).toBeGreaterThanOrEqual((realTasksBefore as unknown[]).length);
+    expect(response.body.tasks.length).toBeGreaterThanOrEqual(
+      (realTasksBefore as unknown[]).length,
+    );
     expect(response.body.tasks.every((task: { active: boolean }) => task.active)).toBe(true);
     expect(response.body.period.timeZone).toBe(TZ);
   });

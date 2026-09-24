@@ -187,3 +187,11 @@ Detalle técnico completo en `docs/ARCHITECTURE.md`, sección 16.
 ## Actualización — Desempeño (Etapa 4B)
 
 Endpoints autenticados y rango Zod de hasta 90 días. El backend fuerza sesión → User → Employee: un EMPLOYEE no consulta otro ID ni recibe nombres/métricas ajenas. Sin SQL dinámico, objetos Prisma crudos, secretos ni storage del cliente.
+
+## Actualización — backend de Stock (Etapa 5A)
+
+- Todo el router exige autenticación y el servicio vuelve a decidir permisos por rol. Los bodies `.strict()` impiden suplantar empleado/usuario o asignar directamente saldo, área y estado.
+- Saldo, movimiento y auditoría comparten una transacción. Las reducciones tienen condición atómica de saldo suficiente y los incrementos usan `increment`; no existe el patrón vulnerable de leer-calcular-escribir un valor absoluto.
+- Cantidades operativas son strings decimales positivos de hasta dos decimales; cero, negativos, exponentes, `NaN`, `Infinity` y ceros iniciales ambiguos se rechazan antes de Prisma. El límite de saldo coincide con `Decimal(10,2)`.
+- No hay endpoints de edición/borrado de movimientos ni borrado físico de catálogo. La auditoría guarda IDs y valores de negocio normalizados, no credenciales, cookies, tokens ni objetos Prisma completos.
+- La integración real solo está habilitada con `DATABASE_TARGET=demo`, crea fixtures sintéticas identificables, las elimina y verifica que los conteos globales vuelvan a la línea de base. No usa `production`, `db push`, reset ni seed.

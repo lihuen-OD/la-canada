@@ -113,6 +113,15 @@ Implementado en `backend/src/tasks/tasksService.ts` (detalle técnico en `docs/A
 - Existe un destino especial autogenerado **"Ajuste de inventario"** (tipo `sector`), creado la primera vez que hace falta (`ensureAjusteDestino()`, línea 1749, invocado en `initUI()`) para asociar esos ajustes automáticos.
 - Reportes de consumo (`rndReportes()`, línea 3263): agregan por destino, por persona y por ítem, en un rango de fechas configurable (chips de 7/30/90/365 días o fechas manuales), con exportación a CSV (`exportarCSV()`, línea 3402).
 
+### Contrato implementado en Etapa 5A
+
+- Todos los usuarios autenticados consultan catálogo e historial; `EMPLOYEE` registra `INCOME` y `CONSUMPTION`; solo `ADMIN` registra `ADJUSTMENT_INCREASE`/`ADJUSTMENT_DECREASE` y administra categorías/productos. El responsable sale de la sesión, nunca del body.
+- `quantity` es texto decimal positivo, con hasta 8 enteros y 2 decimales. La dirección la determina `type`, nunca un número negativo. `OPENING_BALANCE` queda reservado al seed. `minimumQuantity`, en cambio, es un umbral no negativo y admite `0`, coherente con la regla de barra de §7.
+- Un producto nuevo empieza en saldo `0`; la primera carga operativa es un `INCOME`. No hay edición directa de `currentQuantity`, ni actualización/eliminación de movimientos, ni borrado físico de catálogo.
+- Saldo, movimiento y `AuditLog` se confirman en una única transacción. Las reducciones usan `UPDATE ... WHERE current_quantity >= quantity`; los incrementos son atómicos y controlan el máximo de `Decimal(10,2)`.
+- Nunca se aceptan fechas futuras. `EMPLOYEE` solo opera en la fecha actual de `BUSINESS_TIME_ZONE`; `ADMIN` puede registrar una fecha pasada.
+- El destino sigue siendo opcional porque el seed real contiene cero destinos y 5A no incorpora su CRUD. Si se envía, debe existir, estar activo y acompañar exclusivamente a un `CONSUMPTION`; ingresos y ajustes no lo admiten. Es una transición hasta la etapa administrativa de destinos.
+
 ## 9. Gallinero
 
 - Un único contador global de "gallinas activas" (`gallinasActivas`), ajustable ±1 por vez por un admin, con confirmación (`ajustarGallinas`, línea 2300). **⚠️ DUDA / RIESGO** — el ajuste solo persiste en Supabase si ya existe una fila en la tabla `gallinero` (`if (gallineroId) {...}`, línea 2306); si no existe ninguna fila todavía, el cambio se aplica solo en memoria y se pierde al recargar la página. No hay lógica de "crear la fila si no existe".
