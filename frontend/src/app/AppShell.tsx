@@ -18,9 +18,19 @@ function TasksNavEmoji() {
   );
 }
 
+/** 📦 Stock — emoji del prototipo, decorativo (mismo patrón que TasksNavEmoji). */
+function StockNavEmoji() {
+  return (
+    <span className="nav-emoji" aria-hidden="true">
+      📦
+    </span>
+  );
+}
+
 const NAV_ICONS: Record<NavIconName, ComponentType<{ size?: 'lg' }>> = {
   home: HomeIcon,
   tasks: TasksNavEmoji,
+  stock: StockNavEmoji,
   users: UsersIcon,
 };
 

@@ -8,7 +8,7 @@ vi.mock('../auth/useAuth', () => ({ useAuth: useAuthMock }));
 
 import { AppShell } from './AppShell';
 
-const IMPLEMENTED_PATHS = ['/', '/tasks', '/admin/users'];
+const IMPLEMENTED_PATHS = ['/', '/tasks', '/stock', '/admin/users'];
 
 function mockUser(role: SystemRole, employee: AuthenticatedUser['employee'] = null) {
   useAuthMock.mockReturnValue({
@@ -49,13 +49,28 @@ describe('AppShell', () => {
     );
   });
 
-  it('ADMIN: ve Inicio, Tareas y Usuarios, y nada más', () => {
+  it('ADMIN: ve Inicio, Tareas, Stock y Usuarios, y nada más', () => {
     mockUser('ADMIN');
     renderShell();
 
     const links = within(getNav()).getAllByRole('link');
-    expect(links.map((link) => link.getAttribute('href'))).toEqual(['/', '/tasks', '/admin/users']);
+    expect(links.map((link) => link.getAttribute('href'))).toEqual([
+      '/',
+      '/tasks',
+      '/stock',
+      '/admin/users',
+    ]);
     expect(within(getNav()).getByRole('link', { name: 'Tareas' })).toBeInTheDocument();
+    expect(within(getNav()).getByRole('link', { name: 'Stock' })).toBeInTheDocument();
+  });
+
+  it('📦 Stock: el emoji del prototipo es decorativo y el nombre accesible es el texto', () => {
+    mockUser('EMPLOYEE', { id: 'e1', displayName: 'Coke', colorHex: '#4a7c59' });
+    renderShell();
+
+    const link = within(getNav()).getByRole('link', { name: 'Stock' });
+    expect(link).toHaveTextContent('📦');
+    expect(within(link).getByText('📦')).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('✅ Tareas: el emoji del prototipo es decorativo y el nombre accesible es el texto', () => {
@@ -87,7 +102,7 @@ describe('AppShell', () => {
       expect(IMPLEMENTED_PATHS).toContain(href);
     }
     const text = document.body.textContent ?? '';
-    expect(text).not.toMatch(/stock|novedades|eventos|clima|fotos|mascotas|gallinero|desempeño/i);
+    expect(text).not.toMatch(/novedades|eventos|clima|fotos|mascotas|gallinero|desempeño/i);
     expect(screen.queryByRole('link', { name: /próximamente/i })).not.toBeInTheDocument();
   });
 

@@ -4,10 +4,18 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SystemRole } from '../api/types';
 
-const { useAuthMock, fetchLoginOptionsMock, fetchAdminUsersMock } = vi.hoisted(() => ({
+const {
+  useAuthMock,
+  fetchLoginOptionsMock,
+  fetchAdminUsersMock,
+  fetchStockItemsMock,
+  fetchStockCategoriesMock,
+} = vi.hoisted(() => ({
   useAuthMock: vi.fn(),
   fetchLoginOptionsMock: vi.fn(),
   fetchAdminUsersMock: vi.fn(),
+  fetchStockItemsMock: vi.fn(),
+  fetchStockCategoriesMock: vi.fn(),
 }));
 vi.mock('../auth/useAuth', () => ({ useAuth: useAuthMock }));
 vi.mock('../api/authApi', () => ({ fetchLoginOptions: fetchLoginOptionsMock }));
@@ -16,6 +24,19 @@ vi.mock('../api/adminApi', () => ({
   activateUser: vi.fn(),
   resetUserPin: vi.fn(),
   changeUserStatus: vi.fn(),
+}));
+vi.mock('../api/stockApi', () => ({
+  fetchStockItems: fetchStockItemsMock,
+  fetchStockCategories: fetchStockCategoriesMock,
+  fetchStockDestinations: vi.fn(),
+  fetchStockItem: vi.fn(),
+  fetchStockItemMovements: vi.fn(),
+  createStockMovement: vi.fn(),
+  createStockCategory: vi.fn(),
+  createStockItem: vi.fn(),
+  updateStockCategory: vi.fn(),
+  updateStockItem: vi.fn(),
+  setStockItemActive: vi.fn(),
 }));
 
 import { AppRoutes } from './AppRoutes';
@@ -44,6 +65,16 @@ describe('AppRoutes (con app shell real)', () => {
     fetchLoginOptionsMock.mockReturnValue(new Promise(() => {}));
     fetchAdminUsersMock.mockReset();
     fetchAdminUsersMock.mockReturnValue(new Promise(() => {}));
+    fetchStockItemsMock.mockReset();
+    fetchStockItemsMock.mockResolvedValue({
+      items: [],
+      page: 1,
+      pageSize: 50,
+      total: 0,
+      totalPages: 1,
+    });
+    fetchStockCategoriesMock.mockReset();
+    fetchStockCategoriesMock.mockResolvedValue({ categories: [] });
   });
 
   it('restaurando sesión: pantalla estable con estado anunciado, nunca el login ni el shell', () => {
@@ -82,15 +113,16 @@ describe('AppRoutes (con app shell real)', () => {
     );
   });
 
-  it('rutas de módulos futuros no existen: redirigen al Inicio (autenticado)', () => {
+  it('/stock (autenticado): la pantalla real de Stock se muestra dentro del shell', async () => {
     renderAt('/stock', 'authenticated', 'ADMIN');
 
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/hola/i);
-    expect(document.body.textContent).not.toMatch(/stock/i);
+    expect(screen.getByRole('navigation', { name: /navegación principal/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Stock' })).toHaveTextContent('📦');
+    expect(fetchStockItemsMock).toHaveBeenCalled();
   });
 
-  it('rutas de módulos futuros no existen: redirigen al login (anónimo)', () => {
-    renderAt('/stock', 'anonymous');
+  it('rutas de módulos que todavía no existen redirigen al login (anónimo)', () => {
+    renderAt('/gallinero', 'anonymous');
 
     expect(screen.getByRole('heading', { level: 1, name: 'La Cañada' })).toBeInTheDocument();
   });

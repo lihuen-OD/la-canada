@@ -194,13 +194,23 @@ Con el código de esta etapa ya validado (ver checklist más abajo), crear el pr
 - Cada módulo migrado se valida contra las reglas ya documentadas en `docs/BUSINESS_RULES.md`, corrigiendo — no reproduciendo — los bugs verificados ahí (desempeño roto, `DIAS_ES` indefinido, permisos inconsistentes de fotos ya resueltos a favor de admin-only, etc.), salvo que el usuario pida explícitamente mantener algún comportamiento tal cual está.
 - **No incluye**: adelantar módulos fuera de orden sin acuerdo, ni mezclar el fix de un bug con la migración de un módulo no relacionado.
 
-### Etapa 5A — Backend base de Stock ✅ implementada y auditada, sin commit
+### Etapa 5A — Backend base de Stock ✅ implementada, auditada y commiteada
 
 - **Alcance**: endpoints autenticados bajo `/api/v1/stock` para consultar categorías, productos, destinos activos e historial; `ADMIN` crea/edita/desactiva catálogo; todos los autenticados registran ingresos/consumos y solo `ADMIN` registra ajustes explícitos al alta o a la baja.
 - **Integridad**: decimales como texto → Prisma `Decimal`; saldo, `StockMovement` y `AuditLog` en una transacción; decremento condicional e incremento atómico; rollback y concurrencia cubiertos tanto por fake transaccional como por integración contra `demo` con fixtures sintéticas y limpieza comprobable.
 - **Decisiones**: producto nuevo en cero; apertura exclusiva del seed; fecha futura prohibida, retroactividad solo `ADMIN`; destino opcional mientras no haya catálogo real/CRUD, pero validado si se recibe; historial inmutable y sin borrado físico.
 - **Modelo**: no requiere migración; reutiliza el schema y el `CHECK` existentes. No se ejecutó `db push`, reset ni seed.
 - **Fuera de alcance**: frontend de Stock, reportes, lista de compras y CRUD de destinos; ninguna modificación de datos reales ni conexión a `production`.
+
+### Etapa 5B — Frontend operativo de Stock ✅ implementada y auditada, sin commit
+
+- **Ruta y navegación**: `/stock` está disponible para todo usuario autenticado y ocupa su lugar documentado entre Tareas y Usuarios. Conserva el emoji 📦 como decorativo junto con texto accesible y reutiliza el app shell, tokens, tipografías y componentes de `docs/UI_CONTEXT.md`.
+- **Inventario**: listado real por Casa/Jardín, agrupado por categoría, con búsqueda debounced, categoría, estado administrativo y paginación acumulativa; todos los filtros viajan al backend. Las respuestas viejas se invalidan al cambiar filtros o desmontar y las páginas se deduplican por id.
+- **Movimientos e historial**: ingresos y consumos para `ADMIN`/`EMPLOYEE`; ajustes solo visibles para `ADMIN`, con motivo y confirmación adicional. El rol autenticado —no el tipo de movimiento— decide la fecha: `ADMIN` puede elegir hoy o una fecha pasada y `EMPLOYEE` omite `effectiveDate`. El historial es paginado, filtrable e inmutable; las mutaciones esperan al backend y luego recargan, sin actualizaciones optimistas.
+- **Catálogo**: sección exclusiva de `ADMIN` para crear/editar/desactivar/reactivar categorías y productos mediante los endpoints de 5A. Los productos nacen con saldo cero; el saldo, el área y el estado no se incluyen en el PATCH general, y la cantidad solo cambia mediante movimientos.
+- **Integridad cliente**: cantidades decimales viajan como strings estrictos; `OPENING_BALANCE`, `employeeId`, `stockItemId` y campos no permitidos no se ofrecen ni se envían. Los errores `STOCK_*` relevantes se traducen a mensajes humanos diferenciados. Stock reutiliza el refresh central single-flight y su reintento único tras 401; no guarda tokens ni implementa refresh propio.
+- **Verificación**: tests sintéticos cubren contratos API, permisos por rol, fechas, conflictos 409, formularios/mass assignment, filtros y respuestas fuera de orden, paginación/deduplicación, doble envío, historial, navegación y ausencia de storage/mocks de runtime. No se modificaron datos reales ni se conectó a Neon/`production`.
+- **Fuera de alcance**: Compras, Reportes, CRUD de destinos, cambios de backend, migraciones y cualquier módulo posterior.
 
 ## Etapa 6 — Integrar Neon Object Storage (fotografías y archivos)
 
