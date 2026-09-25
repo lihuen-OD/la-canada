@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { activateUser, changeUserStatus, fetchAdminUsers, resetUserPin } from '../../api/adminApi';
+import { queryKeys } from '../../api/queryKeys';
+import { useSessionScope } from '../../api/useSessionScope';
 import type { AdminUserListItem } from '../../api/adminTypes';
 import type { UserStatus } from '../../api/types';
 import { useAuth } from '../../auth/useAuth';
@@ -32,27 +35,34 @@ type DialogState =
  * `RequireRole` (ver `routes/AppRoutes.tsx`); acá no se repite esa
  * comprobación, pero el backend igual la exige de forma independiente en
  * cada request (`requireAuth` + `requireRole('ADMIN')`).
+ *
+ * Datos (Etapa 5P): caché por sesión; volver a la pantalla muestra la lista
+ * al instante y cada mutación invalida solo este listado.
  */
 export function AdminUsersScreen() {
   const { user: currentUser, logout } = useAuth();
-  const [state, setState] = useState<LoadState>({ status: 'loading' });
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const { userId, enabled } = useSessionScope();
+  const queryClient = useQueryClient();
+  const usersQuery = useQuery({
+    queryKey: queryKeys.admin.users(userId),
+    queryFn: fetchAdminUsers,
+    enabled,
+  });
+  const state: LoadState = usersQuery.data
+    ? { status: 'loaded', users: usersQuery.data.users }
+    : usersQuery.isError
+      ? { status: 'error' }
+      : { status: 'loading' };
 
   const load = useCallback(() => {
-    fetchAdminUsers()
-      .then((response) => setState({ status: 'loaded', users: response.users }))
-      .catch(() => setState({ status: 'error' }));
-  }, []);
+    void queryClient.invalidateQueries({ queryKey: queryKeys.admin.users(userId) });
+  }, [queryClient, userId]);
 
   const retry = useCallback(() => {
-    setState({ status: 'loading' });
-    load();
-  }, [load]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+    void usersQuery.refetch();
+  }, [usersQuery]);
 
   const closeDialog = useCallback(() => setDialog({ type: 'none' }), []);
 
@@ -92,6 +102,7 @@ export function AdminUsersScreen() {
       <PageHeader
         title="Usuarios"
         description="Activá cuentas, asigná el PIN de cada persona y gestioná su estado de acceso."
+        refreshing={state.status === 'loaded' && usersQuery.isFetching}
       />
 
       <div aria-live="polite" className="admin-users__feedback">

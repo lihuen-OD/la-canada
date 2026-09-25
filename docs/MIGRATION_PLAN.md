@@ -237,6 +237,14 @@ Con el código de esta etapa ya validado (ver checklist más abajo), crear el pr
 - **Cierre**: la corrección posterior (lecturas secuenciales, regresión del fake, integración 5C.1 y docs) va en el commit `fix: serialize idempotent stock transaction reads`, publicado junto con `a5cff77` en `origin/main`.
 - **Sin** `production`, `db push`, `migrate dev`, reset ni seed. 5C.2 no iniciada.
 
+### Etapa 5P — Rendimiento, navegación y eficiencia 🟡 implementada, sin commit
+
+- **Causas medidas y corregidas**: navegación Tareas ↔ Desempeño con `<a href>` (recarga de documento + re-bootstrap); datos por pantalla sin caché; cascada del historial; `/auth/me` duplicado bajo StrictMode; carrera `P2028` del refresh concurrente (500); 3 consultas secuenciales por request autenticada.
+- **Frontend**: TanStack Query (`api/queryClient.ts`, `api/queryKeys.ts`, `api/useSessionScope.ts`), `TasksSubnav` con `NavLink`, pantallas de Tareas/Historial/Desempeño/Stock/Usuarios y destinos del consumo migradas; indicador "Actualizando…" en `PageHeader`; logout que espera al refresh en vuelo; bootstrap single-flight; 5xx de refresh no cierra la sesión. El catálogo administrativo y el detalle de producto conservan su carga local, pero invalidan la caché del inventario.
+- **Backend**: `refresh` resuelve `P2028`/`P2034` (401 genérico o 503 reintentable); `requireAuth` en UNA sentencia SQL parametrizada y `resolveActor` sin consulta extra. La validación dirigida contra `demo` detectó que la primera versión (un `select` anidado de Prisma) ejecutaba 3 sentencias —regresión para `/auth/me` y rutas admin, que antes hacían 2— y se corrigió; `requireAuth.integration.test.ts` (10 casos) lo fija contando sentencias reales. Sin migraciones ni índices nuevos (no hubo evidencia de que hicieran falta).
+- **Medición** (Chrome, build de producción, 150 ms por request): Tareas → Desempeño 833 → 193 ms (sin recarga ni `refresh`/`me`); Desempeño → Tareas 840 → 50 ms (0 requests); revisitas 164–848 → 11–58 ms (0 requests). Bundle JS 355,8 → 393,0 KB (+10,8 KB gzip por TanStack Query).
+- **Pendiente**: 5C.2 (frontend de destinos/`stockLevel`/`Idempotency-Key` obligatorio) sigue sin autorizar; migrar a Query el catálogo administrativo y el detalle de producto cuando se toquen.
+
 ## Etapa 6 — Integrar Neon Object Storage (fotografías y archivos)
 
 - **Objetivo**: conectar `FileAsset` (ya modelado en la Etapa 2, adaptado a Neon Object Storage en la Etapa 2.2) con el Object Storage real de Neon, gestionado desde el backend.

@@ -1,5 +1,9 @@
-import type { Prisma, PrismaClient } from '../generated/prisma/client';
-import { InvalidCredentialsError, InvalidSessionError } from '../errors/AppError';
+import { Prisma, type PrismaClient } from '../generated/prisma/client';
+import {
+  InvalidCredentialsError,
+  InvalidSessionError,
+  SessionRefreshUnavailableError,
+} from '../errors/AppError';
 import { verifyAgainstDummy, verifyPin } from './pin';
 import {
   generateRefreshToken,
@@ -358,7 +362,103 @@ export async function refresh(
 ): Promise<RefreshResult> {
   const tokenHash = hashRefreshToken(params.refreshToken);
 
-  const outcome: RotationOutcome = await prisma.$transaction(async (tx) => {
+  let outcome: RotationOutcome;
+  try {
+    outcome = await rotateSession(prisma, tokenHash, params);
+  } catch (error) {
+    if (!isTransactionUnavailable(error)) throw error;
+    outcome = await resolveInterruptedRotation(prisma, tokenHash, params);
+  }
+
+  if (outcome.kind === 'invalid') {
+    throw new InvalidSessionError();
+  }
+
+  await recordAuditLogSafe(prisma, {
+    actorUserId: outcome.userId,
+    action: 'auth.refresh.rotated',
+    entityType: 'Session',
+    entityId: outcome.newSessionId,
+    previousState: { sessionId: outcome.previousSessionId },
+    newState: { sessionId: outcome.newSessionId },
+    ipAddress: params.ipAddress,
+    userAgent: params.userAgent,
+  });
+
+  return {
+    accessToken: outcome.accessToken,
+    accessTokenExpiresInSeconds: accessTokenTtlSeconds,
+    refreshToken: outcome.refreshToken,
+    refreshTokenTtlSeconds,
+  };
+}
+
+/**
+ * `P2028` (la transacción no pudo iniciarse o expiró) y `P2034` (conflicto
+ * de escritura/deadlock): en ambos casos Postgres revirtió TODO lo de esta
+ * transacción. Son esperables bajo concurrencia real contra Neon — p. ej.
+ * varios refresh simultáneos donde uno no consigue conexión dentro del
+ * `maxWait` — y nunca deben llegar crudos al cliente como 500.
+ */
+function isTransactionUnavailable(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    (error.code === 'P2028' || error.code === 'P2034')
+  );
+}
+
+/**
+ * Etapa 5P — la transacción de rotación no confirmó nada (ver
+ * `isTransactionUnavailable`). Se decide contra el estado REAL, releído
+ * fuera de la transacción revertida:
+ * - sesión revocada: otra solicitud concurrente ya consumió este token →
+ *   esta es un perdedor de la carrera. Se aplica la misma respuesta de
+ *   seguridad que la rama `claim.count !== 1` (revocación conservadora +
+ *   auditoría) en una transacción NUEVA y corta — así el efecto de
+ *   seguridad no depende de la transacción que expiró — y error genérico;
+ * - sesión inexistente o vencida: inválida, como siempre;
+ * - sesión activa y vigente: nadie la tocó — fue una falla de
+ *   infraestructura sin carrera. `503` reintentable: no se rota ni se
+ *   revoca nada, y el refresh token del cliente sigue siendo válido.
+ */
+async function resolveInterruptedRotation(
+  prisma: PrismaClient,
+  tokenHash: string,
+  params: RequestMeta,
+): Promise<RotationOutcome> {
+  const session = await prisma.session.findUnique({
+    where: { refreshTokenHash: tokenHash },
+    select: { id: true, userId: true, revokedAt: true, expiresAt: true },
+  });
+  if (!session) return { kind: 'invalid' };
+  if (session.revokedAt === null) {
+    if (session.expiresAt.getTime() < Date.now()) return { kind: 'invalid' };
+    throw new SessionRefreshUnavailableError();
+  }
+  try {
+    await prisma.$transaction((tx) =>
+      revokeAllActiveSessionsAndAudit(tx, {
+        userId: session.userId,
+        action: 'auth.refresh.concurrent_rotation_detected',
+        relatedSessionId: session.id,
+        ipAddress: params.ipAddress,
+        userAgent: params.userAgent,
+      }),
+    );
+  } catch (error) {
+    // Sin la revocación confirmada no se afirma nada: reintentable, nunca 500.
+    if (isTransactionUnavailable(error)) throw new SessionRefreshUnavailableError();
+    throw error;
+  }
+  return { kind: 'invalid' };
+}
+
+async function rotateSession(
+  prisma: PrismaClient,
+  tokenHash: string,
+  params: RequestMeta,
+): Promise<RotationOutcome> {
+  return prisma.$transaction(async (tx) => {
     const session = await tx.session.findUnique({ where: { refreshTokenHash: tokenHash } });
     if (!session) {
       return { kind: 'invalid' };
@@ -439,28 +539,6 @@ export async function refresh(
       userId: user.id,
     };
   });
-
-  if (outcome.kind === 'invalid') {
-    throw new InvalidSessionError();
-  }
-
-  await recordAuditLogSafe(prisma, {
-    actorUserId: outcome.userId,
-    action: 'auth.refresh.rotated',
-    entityType: 'Session',
-    entityId: outcome.newSessionId,
-    previousState: { sessionId: outcome.previousSessionId },
-    newState: { sessionId: outcome.newSessionId },
-    ipAddress: params.ipAddress,
-    userAgent: params.userAgent,
-  });
-
-  return {
-    accessToken: outcome.accessToken,
-    accessTokenExpiresInSeconds: accessTokenTtlSeconds,
-    refreshToken: outcome.refreshToken,
-    refreshTokenTtlSeconds,
-  };
 }
 
 /**

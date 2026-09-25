@@ -1,5 +1,9 @@
 import { useEffect, useId, useState } from 'react';
 import type { FormEvent } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { STALE_TIME } from '../../api/queryClient';
+import { queryKeys } from '../../api/queryKeys';
+import { useSessionScope } from '../../api/useSessionScope';
 import type { CreateStockMovementRequest, StockDestination, StockItem } from '../../api/stockTypes';
 import type { SystemRole } from '../../api/types';
 import { fetchStockDestinations } from '../../api/stockApi';
@@ -81,30 +85,28 @@ export function MovementDialog({
     'ADJUSTMENT_INCREASE' | 'ADJUSTMENT_DECREASE'
   >('ADJUSTMENT_INCREASE');
   const [confirmStep, setConfirmStep] = useState(false);
-  const [destinations, setDestinations] = useState<StockDestination[] | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { isSubmitting, run } = useSubmitGuard();
+  const { userId, enabled } = useSessionScope();
 
-  // Solo el consumo necesita el catálogo de destinos (opcional en el contrato).
+  // Solo el consumo necesita el catálogo de destinos (opcional en el
+  // contrato). Catálogo casi estático: se reutiliza entre consumos (Etapa 5P).
+  const destinationsQuery = useQuery({
+    queryKey: queryKeys.stock.destinations(userId),
+    queryFn: fetchStockDestinations,
+    enabled: enabled && kind === 'consumption',
+    staleTime: STALE_TIME.catalog,
+  });
+  const destinationsExpired = isSessionExpired(destinationsQuery.error);
   useEffect(() => {
-    if (kind !== 'consumption') return;
-    let cancelled = false;
-    fetchStockDestinations()
-      .then((response) => {
-        if (!cancelled) setDestinations(response.destinations);
-      })
-      .catch((error: unknown) => {
-        if (cancelled || isSessionExpired(error)) {
-          if (!cancelled) onSessionExpired();
-          return;
-        }
-        // Un fallo al listar destinos no bloquea el consumo: son opcionales.
-        setDestinations([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [kind, onSessionExpired]);
+    if (destinationsExpired) onSessionExpired();
+  }, [destinationsExpired, onSessionExpired]);
+  // Un fallo al listar destinos no bloquea el consumo: son opcionales.
+  const destinations: StockDestination[] | null = destinationsQuery.data
+    ? destinationsQuery.data.destinations
+    : destinationsQuery.isError
+      ? []
+      : null;
 
   const isAdjustment = kind === 'adjustment';
   const showDestination = kind === 'consumption';

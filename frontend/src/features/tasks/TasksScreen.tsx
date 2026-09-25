@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   completeTask,
   createTask,
   fetchTaskEmployees,
+  fetchTaskHistory,
   fetchTasks,
   revertTaskCompletion,
   setTaskActive,
   updateTask,
 } from '../../api/tasksApi';
+import { STALE_TIME } from '../../api/queryClient';
+import { queryKeys } from '../../api/queryKeys';
+import { useSessionScope } from '../../api/useSessionScope';
 import type {
   CreateTaskRequest,
   HistoryTask,
@@ -40,6 +45,9 @@ type LoadState =
   | { status: 'error' }
   | { status: 'loaded'; data: TasksListResponse; employees: TaskEmployee[] };
 
+/** Nombre accesible de la acción de reintento cuando falla una revalidación con datos visibles. */
+const STALE_DATA_NOTICE = 'No pudimos actualizar las tareas. Mostramos los últimos datos.';
+
 type DialogState =
   | { type: 'none' }
   | { type: 'create' }
@@ -55,14 +63,20 @@ type Notice = { tone: 'positive' | 'danger'; text: string } | null;
  * `GET /tasks/employees`; los filtros por persona y frecuencia se aplican
  * sobre la lista ya cargada (decenas de tareas: filtrado inmediato y
  * pendientes por persona sin requests extra). Sin actualizaciones
- * optimistas: cada operación espera la respuesta real y luego se vuelve a
- * pedir la lista. Permisos: el backend decide; la pantalla solo oculta lo
+ * optimistas: cada operación espera la respuesta real y luego invalida la
+ * caché afectada. Permisos: el backend decide; la pantalla solo oculta lo
  * que un EMPLOYEE no puede hacer.
+ *
+ * Datos (Etapa 5P): caché por usuario (`queryKeys.tasks`). Volver a la
+ * pantalla muestra lo último conocido al instante; la revalidación nunca
+ * borra la lista (solo un indicador en el encabezado). El historial de la
+ * semana actual se pide en paralelo con la lista, no después.
  */
 export function TasksScreen() {
   const { user, logout } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
-  const [state, setState] = useState<LoadState>({ status: 'loading' });
+  const { userId, enabled } = useSessionScope();
+  const queryClient = useQueryClient();
   const [showAll, setShowAll] = useState(false);
   const [person, setPerson] = useState<PersonFilter>('all');
   const [frequency, setFrequency] = useState<FrequencyFilter>('all');
@@ -70,32 +84,69 @@ export function TasksScreen() {
   const [notice, setNotice] = useState<Notice>(null);
   const [busyTaskIds, setBusyTaskIds] = useState<ReadonlySet<string>>(new Set());
   const busyRef = useRef(new Set<string>());
-  const [historyKey, setHistoryKey] = useState(0);
 
   const handleSessionExpired = useCallback(() => {
     // Mismo cierre de sesión de siempre (AuthProvider): vuelve al login.
     void logout();
   }, [logout]);
 
-  const load = useCallback(() => {
-    Promise.all([fetchTasks(showAll ? 'all' : 'active'), fetchTaskEmployees()])
-      .then(([data, employeesResponse]) =>
-        setState({ status: 'loaded', data, employees: employeesResponse.employees }),
-      )
-      .catch((error: unknown) => {
-        if (isSessionExpired(error)) handleSessionExpired();
-        setState({ status: 'error' });
-      });
-  }, [showAll, handleSessionExpired]);
+  const status = showAll ? 'all' : 'active';
+  const tasksQuery = useQuery({
+    queryKey: queryKeys.tasks.list(userId, status),
+    queryFn: () => fetchTasks(status),
+    enabled,
+    // Al alternar "incluir desactivadas" se sigue viendo la lista anterior
+    // mientras llega la nueva — nunca un loader de pantalla completa.
+    placeholderData: keepPreviousData,
+  });
+  const employeesQuery = useQuery({
+    queryKey: queryKeys.tasks.employees(userId),
+    queryFn: fetchTaskEmployees,
+    enabled,
+    staleTime: STALE_TIME.catalog,
+  });
+  // Historial de la semana vigente en paralelo con la lista (antes esperaba
+  // a que la lista terminara). `TaskHistory` usa la misma clave: sin
+  // request duplicado.
+  useQuery({
+    queryKey: queryKeys.tasks.history(userId, null, null),
+    queryFn: () => fetchTaskHistory({}),
+    enabled,
+  });
 
+  const sessionExpired =
+    isSessionExpired(tasksQuery.error) || isSessionExpired(employeesQuery.error);
   useEffect(() => {
-    load();
-  }, [load]);
+    if (sessionExpired) handleSessionExpired();
+  }, [sessionExpired, handleSessionExpired]);
 
+  const state: LoadState = useMemo(
+    () =>
+      tasksQuery.data && employeesQuery.data
+        ? { status: 'loaded', data: tasksQuery.data, employees: employeesQuery.data.employees }
+        : tasksQuery.isError || employeesQuery.isError
+          ? { status: 'error' }
+          : { status: 'loading' },
+    [tasksQuery.data, tasksQuery.isError, employeesQuery.data, employeesQuery.isError],
+  );
+  const refreshing =
+    state.status === 'loaded' && (tasksQuery.isFetching || employeesQuery.isFetching);
+  const staleAfterError =
+    state.status === 'loaded' && (tasksQuery.isError || employeesQuery.isError);
+
+  const load = useCallback(() => {
+    void tasksQuery.refetch();
+    void employeesQuery.refetch();
+  }, [tasksQuery, employeesQuery]);
+
+  /**
+   * Invalidación selectiva tras una mutación: lista e historial de Tareas y
+   * Desempeño (completar/revertir cambia el cumplimiento). Nada más.
+   */
   const refresh = useCallback(() => {
-    load();
-    setHistoryKey((key) => key + 1);
-  }, [load]);
+    void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(userId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.performance.all(userId) });
+  }, [queryClient, userId]);
 
   const closeDialog = useCallback(() => setDialog({ type: 'none' }), []);
 
@@ -168,6 +219,7 @@ export function TasksScreen() {
           <Button onClick={() => setDialog({ type: 'create' })}>+ Nueva tarea</Button>
         ) : null
       }
+      refreshing={refreshing}
     />
   );
 
@@ -175,7 +227,7 @@ export function TasksScreen() {
     return (
       <div className="tasks">
         {header}
-        <TasksSubnav active="tasks" />
+        <TasksSubnav />
         <Card>
           <LoadingState label="Cargando tareas…" />
         </Card>
@@ -187,15 +239,9 @@ export function TasksScreen() {
     return (
       <div className="tasks">
         {header}
-        <TasksSubnav active="tasks" />
+        <TasksSubnav />
         <Card>
-          <ErrorState
-            title="No pudimos cargar las tareas."
-            onRetry={() => {
-              setState({ status: 'loading' });
-              load();
-            }}
-          />
+          <ErrorState title="No pudimos cargar las tareas." onRetry={load} />
         </Card>
       </div>
     );
@@ -215,9 +261,18 @@ export function TasksScreen() {
   return (
     <div className="tasks">
       {header}
-      <TasksSubnav active="tasks" />
+      <TasksSubnav />
 
       <div aria-live="polite" className="tasks__notice">
+        {staleAfterError ? (
+          <p role="alert" className="notice notice--danger">
+            <AlertIcon size="sm" />
+            {STALE_DATA_NOTICE}
+            <Button size="sm" variant="ghost" onClick={load}>
+              Reintentar
+            </Button>
+          </p>
+        ) : null}
         {notice ? (
           <p
             role={notice.tone === 'danger' ? 'alert' : 'status'}
@@ -242,17 +297,14 @@ export function TasksScreen() {
             <input
               type="checkbox"
               checked={showAll}
-              onChange={(event) => {
-                setShowAll(event.target.checked);
-                setState({ status: 'loading' });
-              }}
+              onChange={(event) => setShowAll(event.target.checked)}
             />
             Incluir desactivadas y únicas ya completadas
           </label>
         ) : null}
       </div>
 
-      <Card>
+      <Card className={tasksQuery.isPlaceholderData ? 'is-stale' : undefined}>
         {data.tasks.length === 0 ? (
           <EmptyState
             title="Todavía no hay tareas."
@@ -301,7 +353,6 @@ export function TasksScreen() {
         today={data.period.today}
         employeeId={person === 'all' ? null : person}
         employeeName={personName}
-        refreshKey={historyKey}
         onSessionExpired={handleSessionExpired}
         onRevert={(task: HistoryTask, execution: TaskExecution) =>
           setDialog({ type: 'revert', taskId: task.id, description: task.description, execution })

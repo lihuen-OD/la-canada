@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { queryKeys } from '../../api/queryKeys';
 import { fetchTaskHistory } from '../../api/tasksApi';
+import { useSessionScope } from '../../api/useSessionScope';
 import type { HistoryTask, TaskExecution, TaskHistoryResponse } from '../../api/taskTypes';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
@@ -35,8 +38,6 @@ interface TaskHistoryProps {
   /** Filtro por persona compartido con el listado (explícito en el título). */
   employeeId: string | null;
   employeeName: string | null;
-  /** Cambia después de cada mutación para volver a pedir el historial. */
-  refreshKey: number;
   onRevert: (task: HistoryTask, execution: TaskExecution) => void;
   onSessionExpired: () => void;
 }
@@ -46,40 +47,45 @@ interface CompletionLine {
   execution: TaskExecution;
 }
 
-/** `GET /tasks/history` — endpoint propio y liviano, nunca el listado principal. */
+/**
+ * `GET /tasks/history` — endpoint propio y liviano, nunca el listado
+ * principal. Caché por semana y persona (Etapa 5P); cambiar de semana o de
+ * persona conserva el historial anterior visible hasta que llega el nuevo, y
+ * las mutaciones de Tareas lo invalidan (sin `refreshKey` manual).
+ */
 export function TaskHistory({
   currentWeekStart,
   today,
   employeeId,
   employeeName,
-  refreshKey,
   onRevert,
   onSessionExpired,
 }: TaskHistoryProps) {
   const selectId = useId();
   const weeks = previousMondays(currentWeekStart, WEEKS_TO_OFFER);
   const [week, setWeek] = useState(currentWeekStart);
-  const [state, setState] = useState<LoadState>({ status: 'loading' });
-
-  const load = useCallback(() => {
-    fetchTaskHistory({
-      week: week === currentWeekStart ? undefined : week,
-      employeeId: employeeId ?? undefined,
-    })
-      .then((data) => setState({ status: 'loaded', data }))
-      .catch((error: unknown) => {
-        if (isSessionExpired(error)) onSessionExpired();
-        setState({ status: 'error' });
-      });
-  }, [week, currentWeekStart, employeeId, onSessionExpired]);
-
+  const { userId, enabled } = useSessionScope();
+  const weekParam = week === currentWeekStart ? null : week;
+  const query = useQuery({
+    queryKey: queryKeys.tasks.history(userId, weekParam, employeeId),
+    queryFn: () =>
+      fetchTaskHistory({ week: weekParam ?? undefined, employeeId: employeeId ?? undefined }),
+    enabled,
+    placeholderData: keepPreviousData,
+  });
+  const sessionExpired = isSessionExpired(query.error);
   useEffect(() => {
-    load();
-  }, [load, refreshKey]);
+    if (sessionExpired) onSessionExpired();
+  }, [sessionExpired, onSessionExpired]);
+
+  const state: LoadState = query.data
+    ? { status: 'loaded', data: query.data }
+    : query.isError
+      ? { status: 'error' }
+      : { status: 'loading' };
 
   function retry(): void {
-    setState({ status: 'loading' });
-    load();
+    void query.refetch();
   }
 
   let content;
@@ -231,10 +237,7 @@ export function TaskHistory({
             id={selectId}
             className="field__input"
             value={week}
-            onChange={(event) => {
-              setWeek(event.target.value);
-              setState({ status: 'loading' });
-            }}
+            onChange={(event) => setWeek(event.target.value)}
           >
             {weeks.map((monday, index) => (
               <option key={monday} value={monday}>
@@ -247,7 +250,12 @@ export function TaskHistory({
         </div>
       }
     >
-      {content}
+      <div
+        className={query.isPlaceholderData ? 'is-stale' : undefined}
+        aria-busy={query.isFetching || undefined}
+      >
+        {content}
+      </div>
     </Card>
   );
 }

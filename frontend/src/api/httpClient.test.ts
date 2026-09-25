@@ -129,7 +129,9 @@ describe('apiRequest', () => {
 
     it('si el refresh también falla, se propaga el 401 original y nunca reintenta una segunda vez', async () => {
       setAccessToken('token-vencido');
-      requestRefreshMock.mockRejectedValue(new Error('sesión inválida'));
+      requestRefreshMock.mockRejectedValue(
+        new ApiError(401, 'Sesión inválida o expirada.', 'AUTH_SESSION_INVALID'),
+      );
 
       const fetchMock = vi.fn().mockResolvedValue(
         jsonResponse(401, {
@@ -145,6 +147,42 @@ describe('apiRequest', () => {
       // Un solo intento real a /me — el refresh se llamó, pero no reintentó de nuevo tras fallar.
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(requestRefreshMock).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['un 503 reintentable', new ApiError(503, 'No pudimos renovar.', 'AUTH_REFRESH_UNAVAILABLE')],
+      ['una falla de red', new TypeError('Failed to fetch')],
+    ])(
+      'si el refresh falla por %s, se propaga ESE error (no un 401 que cerraría la sesión)',
+      async (_label, refreshError) => {
+        setAccessToken('token-vencido');
+        requestRefreshMock.mockRejectedValue(refreshError);
+        const fetchMock = vi
+          .fn()
+          .mockResolvedValue(
+            jsonResponse(401, { error: { message: 'Token vencido.', code: 'AUTH_TOKEN_EXPIRED' } }),
+          );
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(apiRequest('/tasks', { authenticated: true })).rejects.toBe(refreshError);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it('un POST que falla por algo distinto de 401 nunca se reenvía', async () => {
+      setAccessToken('token-valido');
+      const fetchMock = vi.fn().mockResolvedValue(
+        jsonResponse(409, {
+          error: { message: 'Conflicto.', code: 'STOCK_INSUFFICIENT_QUANTITY' },
+        }),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(
+        apiRequest('/stock/items/x/movements', { method: 'POST', body: {}, authenticated: true }),
+      ).rejects.toBeInstanceOf(ApiError);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(requestRefreshMock).not.toHaveBeenCalled();
     });
 
     it('nunca reintenta un 401 de una request que no es authenticated (ej. login)', async () => {

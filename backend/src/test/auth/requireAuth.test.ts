@@ -172,8 +172,45 @@ describe('requireAuth', () => {
     const { next, calls } = makeNext();
     await requireAuth(req, {} as Response, next);
     expect(calls).toEqual([undefined]);
-    expect(req.auth).toEqual({ userId, sessionId: session.id, role: 'ADMIN' });
+    expect(req.auth).toEqual({ userId, sessionId: session.id, role: 'ADMIN', employeeId: null });
   });
+
+  it.each([
+    [true, 'employee-activo'],
+    [false, null],
+  ] as const)(
+    'Etapa 5P: resuelve el empleado vinculado en la misma consulta (activo=%s → %s)',
+    async (active, expected) => {
+      const userId = crypto.randomUUID();
+      fake().users.set(userId, {
+        id: userId,
+        username: `u-${String(active)}`,
+        role: 'EMPLOYEE',
+        status: 'ACTIVE',
+        pinHash: 'x',
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        employee: { id: 'employee-activo', displayName: 'Sintético', colorHex: '#4a7c59', active },
+      });
+      const session = await fake().prisma.session.create({
+        data: {
+          userId,
+          refreshTokenHash: `hash-emp-${String(active)}`,
+          expiresAt: new Date(Date.now() + 60_000),
+        },
+      });
+      const token = await signAccessToken(
+        { userId, sessionId: session.id, role: 'EMPLOYEE' },
+        accessTokenSecret,
+        60,
+      );
+      const req = makeReq(`Bearer ${token}`);
+      const { next, calls } = makeNext();
+      await requireAuth(req, {} as Response, next);
+      expect(calls).toEqual([undefined]);
+      expect(req.auth?.employeeId).toBe(expected);
+    },
+  );
 
   it('JWT firmado correctamente pero cuyo sub no es el dueño real de la sesión (sid): AuthenticationRequiredError', async () => {
     const ownerUserId = crypto.randomUUID();

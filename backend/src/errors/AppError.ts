@@ -65,6 +65,19 @@ export class InvalidSessionError extends AppError {
   }
 }
 
+/**
+ * La base no pudo iniciar/completar la transacción de rotación (p. ej.
+ * `P2028` al no conseguir conexión a tiempo) y la sesión quedó intacta —
+ * no hubo carrera ni cambio de estado. Reintentable; nunca expone Prisma.
+ */
+export class SessionRefreshUnavailableError extends AppError {
+  constructor() {
+    super('No pudimos renovar la sesión en este momento. Volvé a intentar.', 503, {
+      code: 'AUTH_REFRESH_UNAVAILABLE',
+    });
+  }
+}
+
 export class AuthenticationRequiredError extends AppError {
   constructor() {
     super('Autenticación requerida.', 401, { code: 'AUTH_REQUIRED' });

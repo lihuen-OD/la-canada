@@ -29,6 +29,21 @@ export function requestRefresh(): Promise<string> {
   return inFlight;
 }
 
+/**
+ * Espera a que termine el refresh en vuelo, si lo hay, sin propagar su
+ * resultado (Etapa 5P). El logout lo usa ANTES de llamar a `/auth/logout`:
+ * si un refresh rotó la sesión en el servidor mientras la persona cerraba
+ * sesión, la cookie `HttpOnly` nueva ya quedó en el navegador y el logout la
+ * envía y la revoca — nunca queda viva una sesión rotada a destiempo.
+ */
+export async function settleInFlightRefresh(): Promise<void> {
+  if (!inFlight) return;
+  await inFlight.then(
+    () => undefined,
+    () => undefined,
+  );
+}
+
 async function runRefresh(): Promise<string> {
   try {
     // Capturada ANTES del round-trip de red: si un logout corre mientras

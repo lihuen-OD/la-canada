@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
+import { Prisma } from '../generated/prisma/client';
 import { prisma } from '../lib/prisma';
 import { accessTokenSecret } from '../auth/config';
 import { AccessTokenExpiredError, verifyAccessToken } from '../auth/tokens';
@@ -8,6 +9,18 @@ import {
   ExpiredAccessTokenError,
   InvalidAccessTokenError,
 } from '../errors/AppError';
+
+/** Fila de la única consulta de autenticación (ver `requireAuth`). */
+interface AuthRow {
+  sessionId: string;
+  sessionUserId: string;
+  revokedAt: Date | null;
+  expiresAt: Date;
+  role: string;
+  status: string;
+  employeeId: string | null;
+  employeeActive: boolean | null;
+}
 
 function extractBearerToken(req: Request): string | null {
   const header = req.header('authorization');
@@ -54,27 +67,45 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
     return;
   }
 
-  const session = await prisma.session.findUnique({ where: { id: sessionId } });
+  // Etapa 5P: sesión + usuario + empleado en UNA sentencia SQL. Un `select`
+  // anidado de Prisma parece una sola consulta pero el cliente la ejecuta
+  // como tres (una por relación, verificado contra Postgres real en
+  // `requireAuth.integration.test.ts`); `relationJoins` requeriría cambiar el
+  // schema. SQL estático y parametrizado: `sid` viaja como parámetro (ya
+  // validado como UUID por el esquema del JWT), nunca interpolado. Las
+  // verificaciones son exactamente las mismas de siempre.
+  const rows = await prisma.$queryRaw<AuthRow[]>(Prisma.sql`
+    SELECT s."id" AS "sessionId", s."user_id" AS "sessionUserId",
+           s."revoked_at" AS "revokedAt", s."expires_at" AS "expiresAt",
+           u."role"::text AS "role", u."status"::text AS "status",
+           e."id" AS "employeeId", e."active" AS "employeeActive"
+    FROM "sessions" s
+    JOIN "users" u ON u."id" = s."user_id"
+    LEFT JOIN "employees" e ON e."id" = u."employee_id"
+    WHERE s."id" = ${sessionId}::uuid
+    LIMIT 1`);
+  const row = rows[0];
   if (
-    !session ||
-    session.revokedAt ||
-    session.expiresAt.getTime() < Date.now() ||
-    session.userId !== userId
+    !row ||
+    row.revokedAt !== null ||
+    new Date(row.expiresAt).getTime() < Date.now() ||
+    row.sessionUserId !== userId
   ) {
     next(new AuthenticationRequiredError());
     return;
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, role: true, status: true },
-  });
-  if (!user || user.status !== 'ACTIVE') {
+  if (row.status !== 'ACTIVE' || (row.role !== 'ADMIN' && row.role !== 'EMPLOYEE')) {
     next(new AuthenticationRequiredError());
     return;
   }
 
-  const authContext: AuthContext = { userId: user.id, sessionId: session.id, role: user.role };
+  const authContext: AuthContext = {
+    userId: row.sessionUserId,
+    sessionId: row.sessionId,
+    role: row.role,
+    employeeId: row.employeeId !== null && row.employeeActive === true ? row.employeeId : null,
+  };
   req.auth = authContext;
   next();
 }

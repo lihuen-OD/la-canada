@@ -295,9 +295,42 @@
   min-width: 0;
 }
 
+.page-header__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
 .page-header__title {
   font-size: var(--font-size-xl);
   overflow-wrap: anywhere;
+}
+
+/*
+ * Datos previos visibles mientras llega un filtro nuevo (Etapa 5P): se
+ * atenúan apenas para que nunca parezcan del filtro recién elegido.
+ */
+.is-stale {
+  opacity: 0.6;
+  transition: opacity var(--duration-base) var(--ease-standard);
+}
+
+/* Revalidación en segundo plano (Etapa 5P): discreta, sin saltos de layout. */
+.page-header__refreshing {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--icon-sm);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  opacity: 0;
+  transition: opacity var(--duration-base) var(--ease-standard);
+}
+
+.page-header__refreshing.is-active {
+  opacity: 1;
 }
 
 .page-header__description {

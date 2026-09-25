@@ -4,6 +4,13 @@ export interface AuthContext {
   sessionId: string;
   /** Siempre el rol vigente en la base al momento del request, nunca el claim `role` del JWT tal cual — ver `requireAuth`. */
   role: 'ADMIN' | 'EMPLOYEE';
+  /**
+   * Etapa 5P — empleado ACTIVO vinculado (o `null`), leído en la MISMA
+   * consulta que valida la sesión: `resolveActor` lo reutiliza sin volver a
+   * la base. Opcional para contextos armados a mano (tests): si falta,
+   * `resolveActor` consulta como antes.
+   */
+  employeeId?: string | null;
 }
 
 declare global {

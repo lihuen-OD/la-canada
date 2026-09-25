@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '../../test/render';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../api/httpClient';
@@ -96,7 +96,7 @@ describe('StockScreen — carga y estados', () => {
     api.fetchStockItems.mockReturnValue(new Promise(() => {}));
     api.fetchStockCategories.mockReturnValue(new Promise(() => {}));
     const { unmount } = render(<StockScreen />);
-    expect(screen.getByRole('status')).toHaveTextContent(/cargando inventario/i);
+    expect(screen.getByText(/cargando inventario/i).closest('[role="status"]')).not.toBeNull();
     unmount();
 
     api.fetchStockItems.mockRejectedValueOnce(new TypeError('Failed to fetch'));

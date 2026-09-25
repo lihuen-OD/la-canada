@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../../api/queryKeys';
+import { useSessionScope } from '../../api/useSessionScope';
 import {
   createStockCategory,
   createStockItem,
@@ -62,6 +65,8 @@ export function StockCatalog({ onSessionExpired, refreshKey }: StockCatalogProps
   const [loadingMore, setLoadingMore] = useState(false);
   const loadIdRef = useRef(0);
   const loadMoreGuardRef = useRef(false);
+  const queryClient = useQueryClient();
+  const { userId } = useSessionScope();
 
   const closeDialog = useCallback(() => setDialog({ type: 'none' }), []);
 
@@ -150,6 +155,10 @@ export function StockCatalog({ onSessionExpired, refreshKey }: StockCatalogProps
     closeDialog();
     setNotice({ tone: 'positive', text });
     refresh();
+    // Etapa 5P: el inventario operativo y los filtros de categoría se
+    // alimentan de la caché — un cambio de catálogo la invalida (solo Stock).
+    void queryClient.invalidateQueries({ queryKey: queryKeys.stock.itemsAll(userId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.stock.categoriesAll(userId) });
   };
 
   if (state.status === 'loading') {

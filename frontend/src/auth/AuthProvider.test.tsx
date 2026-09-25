@@ -1,5 +1,7 @@
 import { StrictMode } from 'react';
-import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
+import { act, createTestQueryClient, render, renderHook, screen, waitFor } from '../test/render';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { fetchMeMock, loginMock, logoutSessionMock, refreshSessionMock } = vi.hoisted(() => ({
@@ -23,8 +25,13 @@ import { useAuth } from './useAuth';
 
 const USER = { id: 'user-1', role: 'EMPLOYEE' as const, status: 'ACTIVE', employee: null };
 
-function renderAuth() {
-  return renderHook(() => useAuth(), { wrapper: AuthProvider });
+function renderAuth(queryClient: QueryClient = createTestQueryClient()) {
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>{children}</AuthProvider>
+    </QueryClientProvider>
+  );
+  return { queryClient, ...renderHook(() => useAuth(), { wrapper }) };
 }
 
 /**
@@ -128,6 +135,8 @@ describe('AuthProvider — restauración de sesión (bootstrap)', () => {
 
     await waitFor(() => expect(screen.getByTestId('status').textContent).toBe('authenticated'));
     expect(refreshSessionMock).toHaveBeenCalledTimes(1);
+    // Etapa 5P: la restauración completa es single-flight — tampoco duplica `/auth/me`.
+    expect(fetchMeMock).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -214,7 +223,7 @@ describe('AuthProvider — logout', () => {
     clearAccessToken();
   });
 
-  async function renderAlreadyLoggedIn() {
+  async function renderAlreadyLoggedIn(queryClient?: QueryClient) {
     // Configurado ANTES de montar: el efecto de bootstrap dispara su propio
     // `requestRefresh()` apenas se monta el provider — si el mock se
     // configura después del render, el bootstrap ya corrió contra un mock
@@ -224,7 +233,7 @@ describe('AuthProvider — logout', () => {
     );
     loginMock.mockResolvedValue({ accessToken: 'token-login', expiresIn: 720, user: USER });
 
-    const rendered = renderAuth();
+    const rendered = renderAuth(queryClient);
     await waitFor(() => expect(rendered.result.current.status).toBe('anonymous'));
     await act(async () => {
       await rendered.result.current.login(USER.id, '4821');
@@ -259,16 +268,62 @@ describe('AuthProvider — logout', () => {
     );
     const { requestRefresh } = await import('./refreshCoordinator');
     const lateRefresh = requestRefresh();
+    const lateRejection = expect(lateRefresh).rejects.toThrow();
 
     logoutSessionMock.mockResolvedValue(undefined);
+    let logoutDone!: Promise<void>;
+    act(() => {
+      logoutDone = result.current.logout();
+    });
+    // La sesión local ya se cerró, sin esperar a la red.
+    expect(result.current.status).toBe('anonymous');
+    expect(getAccessToken()).toBeNull();
+    // El logout del servidor espera al refresh en vuelo: así envía la cookie
+    // más reciente (la que ese refresh pudo haber rotado) y la revoca.
+    expect(logoutSessionMock).not.toHaveBeenCalled();
+
+    resolveLateRefresh({ accessToken: 'token-tardio', expiresIn: 720 });
+    await lateRejection;
+    await act(async () => {
+      await logoutDone;
+    });
+
+    expect(logoutSessionMock).toHaveBeenCalledTimes(1);
+    expect(result.current.status).toBe('anonymous');
+    expect(getAccessToken()).toBeNull();
+  });
+
+  it('logout vacía toda la caché de datos, aunque la red falle', async () => {
+    const queryClient = createTestQueryClient();
+    const { result } = await renderAlreadyLoggedIn(queryClient);
+    queryClient.setQueryData(['session', USER.id, 'tasks', 'list', 'active'], { tasks: [] });
+    queryClient.setQueryData(['session', USER.id, 'stock', 'categories', 'all'], {
+      categories: [],
+    });
+    logoutSessionMock.mockRejectedValue(new TypeError('Failed to fetch'));
+
     await act(async () => {
       await result.current.logout();
     });
 
-    resolveLateRefresh({ accessToken: 'token-tardio', expiresIn: 720 });
-    await expect(lateRefresh).rejects.toThrow();
-
+    expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
     expect(result.current.status).toBe('anonymous');
-    expect(getAccessToken()).toBeNull();
+  });
+
+  it('un login nuevo nunca hereda la caché de la sesión anterior', async () => {
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(['session', 'otra-persona', 'tasks', 'list', 'active'], {
+      tasks: [],
+    });
+    await renderAlreadyLoggedIn(queryClient);
+    expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
+  });
+
+  it('un 5xx al restaurar la sesión no la descarta: queda reintentable (sessionError)', async () => {
+    refreshSessionMock.mockRejectedValue(
+      new ApiError(503, 'No pudimos renovar la sesión.', 'AUTH_REFRESH_UNAVAILABLE'),
+    );
+    const { result } = renderAuth();
+    await waitFor(() => expect(result.current.status).toBe('sessionError'));
   });
 });

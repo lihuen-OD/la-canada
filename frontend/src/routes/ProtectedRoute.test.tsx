@@ -1,5 +1,5 @@
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { render, screen } from '@testing-library/react';
+import { render, screen } from '../test/render';
 import { describe, expect, it, vi } from 'vitest';
 
 const { useAuthMock } = vi.hoisted(() => ({ useAuthMock: vi.fn() }));

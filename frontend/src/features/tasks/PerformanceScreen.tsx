@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { fetchEmployeePerformance, fetchPerformance } from '../../api/performanceApi';
-import type { PerformanceResponse } from '../../api/performanceTypes';
+import { STALE_TIME } from '../../api/queryClient';
+import { queryKeys } from '../../api/queryKeys';
+import { useSessionScope } from '../../api/useSessionScope';
 import { useAuth } from '../../auth/useAuth';
 import { Avatar } from '../../components/ui/Avatar';
 import { Card } from '../../components/ui/Card';
@@ -25,42 +28,45 @@ const presetRange = (days: Preset) => {
 const percentageLabel = (value: number | null) =>
   value === null ? 'Sin datos' : `${value.toLocaleString('es-AR')}%`;
 
+const isUnauthorized = (reason: unknown) =>
+  Boolean(reason && typeof reason === 'object' && 'status' in reason && reason.status === 401);
+
+/**
+ * 📊 Desempeño (Etapa 4B). Datos (Etapa 5P): resumen cacheado por rango y
+ * detalle por persona+rango (`queryKeys.performance`), con frescura de
+ * métricas. Cambiar de período conserva el resumen anterior visible hasta
+ * que llega el nuevo; completar o revertir tareas lo invalida.
+ */
 export function PerformanceScreen() {
   const { user, logout } = useAuth();
+  const { userId, enabled } = useSessionScope();
   const [preset, setPreset] = useState<Preset>(7);
-  const [data, setData] = useState<PerformanceResponse | null>(null);
-  const [error, setError] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
-  const [detail, setDetail] = useState<PerformanceResponse | null>(null);
   const range = presetRange(preset);
 
-  const load = useCallback(() => {
-    setError(false);
-    setData(null);
-    fetchPerformance(range.from, range.to)
-      .then(setData)
-      .catch((reason: unknown) => {
-        if (reason && typeof reason === 'object' && 'status' in reason && reason.status === 401)
-          void logout();
-        setError(true);
-      });
-  }, [range.from, range.to, logout]);
+  const summary = useQuery({
+    queryKey: queryKeys.performance.summary(userId, range.from, range.to),
+    queryFn: () => fetchPerformance(range.from, range.to),
+    enabled,
+    staleTime: STALE_TIME.metrics,
+    placeholderData: keepPreviousData,
+  });
+  const detailQuery = useQuery({
+    queryKey: queryKeys.performance.employee(userId, selected ?? '', range.from, range.to),
+    queryFn: () => fetchEmployeePerformance(selected ?? '', range.from, range.to),
+    enabled: enabled && selected !== null,
+    staleTime: STALE_TIME.metrics,
+  });
 
+  const unauthorized = isUnauthorized(summary.error);
   useEffect(() => {
-    fetchPerformance(range.from, range.to)
-      .then(setData)
-      .catch((reason: unknown) => {
-        if (reason && typeof reason === 'object' && 'status' in reason && reason.status === 401)
-          void logout();
-        setError(true);
-      });
-  }, [range.from, range.to, logout]);
-  useEffect(() => {
-    if (!selected) return;
-    fetchEmployeePerformance(selected, range.from, range.to)
-      .then(setDetail)
-      .catch(() => setDetail(null));
-  }, [selected, range.from, range.to]);
+    if (unauthorized) void logout();
+  }, [unauthorized, logout]);
+
+  const data = summary.data ?? null;
+  const error = !data && summary.isError;
+  const detail = detailQuery.data ?? null;
+  const load = () => void summary.refetch();
 
   return (
     <div className="performance">
@@ -71,18 +77,16 @@ export function PerformanceScreen() {
           </>
         }
         description="Cumplimiento de las tareas recurrentes y trabajo realizado, con cada número verificable."
+        refreshing={Boolean(data) && summary.isFetching}
       />
-      <TasksSubnav active="performance" />
+      <TasksSubnav />
       <div className="filter-scroller" aria-label="Período">
         {([7, 30, 90] as const).map((days) => (
           <Chip
             key={days}
             selected={preset === days}
             onSelect={() => {
-              setData(null);
-              setError(false);
               setSelected(null);
-              setDetail(null);
               setPreset(days);
             }}
           >
@@ -105,7 +109,11 @@ export function PerformanceScreen() {
               El día de hoy está en curso: solo cuenta lo esperado hasta este momento.
             </p>
           ) : null}
-          <section className="performance__summary" aria-label="Resumen">
+          <section
+            className={`performance__summary${summary.isPlaceholderData ? ' is-stale' : ''}`}
+            aria-label="Resumen"
+            aria-busy={summary.isFetching || undefined}
+          >
             <Card>
               <span>Cumplimiento</span>
               <strong>{percentageLabel(data.team.percentage)}</strong>
@@ -176,10 +184,7 @@ export function PerformanceScreen() {
                 <button
                   type="button"
                   className="button button--ghost"
-                  onClick={() => {
-                    setSelected(null);
-                    setDetail(null);
-                  }}
+                  onClick={() => setSelected(null)}
                 >
                   Cerrar
                 </button>

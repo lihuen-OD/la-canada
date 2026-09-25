@@ -1,5 +1,5 @@
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within } from '../test/render';
 import { describe, expect, it, vi } from 'vitest';
 import type { AuthenticatedUser, SystemRole } from '../api/types';
 

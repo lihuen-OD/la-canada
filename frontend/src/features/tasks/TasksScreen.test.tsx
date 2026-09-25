@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '../../test/render';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../api/httpClient';
@@ -61,7 +61,7 @@ function asAdmin() {
 
 async function renderLoaded(tasks = [DAILY_A, WEEKLY_B, URGENT_A]) {
   api.fetchTasks.mockResolvedValue(listResponse(tasks));
-  render(<TasksScreen />);
+  render(<TasksScreen />, { route: '/tasks' });
   await screen.findByRole('list', { name: 'Tareas del período' });
 }
 
@@ -86,18 +86,18 @@ describe('TasksScreen — carga y estados', () => {
 
   it('muestra carga, y un estado vacío real sin tareas', async () => {
     api.fetchTasks.mockReturnValue(new Promise(() => {}));
-    const { unmount } = render(<TasksScreen />);
-    expect(screen.getByRole('status')).toHaveTextContent(/cargando tareas/i);
+    const { unmount } = render(<TasksScreen />, { route: '/tasks' });
+    expect(screen.getByText(/cargando tareas/i).closest('[role="status"]')).not.toBeNull();
     unmount();
 
     api.fetchTasks.mockResolvedValue(listResponse([]));
-    render(<TasksScreen />);
+    render(<TasksScreen />, { route: '/tasks' });
     expect(await screen.findByText('Todavía no hay tareas.')).toBeInTheDocument();
   });
 
   it('error con reintento real', async () => {
     api.fetchTasks.mockRejectedValueOnce(new TypeError('Failed to fetch'));
-    render(<TasksScreen />);
+    render(<TasksScreen />, { route: '/tasks' });
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(/no pudimos cargar las tareas/i);
 
@@ -110,7 +110,7 @@ describe('TasksScreen — carga y estados', () => {
     api.fetchTasks.mockRejectedValue(
       new ApiError(401, 'Autenticación requerida.', 'AUTH_REQUIRED'),
     );
-    render(<TasksScreen />);
+    render(<TasksScreen />, { route: '/tasks' });
     await waitFor(() => expect(logoutMock).toHaveBeenCalledTimes(1));
   });
 });
@@ -420,5 +420,63 @@ describe('TasksScreen — historial semanal', () => {
         'Única sintética completada',
       ),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe('TasksScreen — caché y revalidación (Etapa 5P)', () => {
+  it('la revalidación conserva la lista visible y solo muestra un indicador discreto', async () => {
+    const { queryClient } = (() => {
+      api.fetchTasks.mockResolvedValue(listResponse([DAILY_A]));
+      return render(<TasksScreen />, { route: '/tasks' });
+    })();
+    await screen.findByText(DAILY_A.description);
+
+    let finish!: (value: unknown) => void;
+    api.fetchTasks.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    // Sin `await`: el refetch queda en vuelo a propósito.
+    void queryClient.invalidateQueries({ queryKey: ['session', 'u-a', 'tasks', 'list'] });
+
+    expect(await screen.findByText('Actualizando…')).toBeInTheDocument();
+    expect(screen.getByText(DAILY_A.description)).toBeInTheDocument();
+    expect(screen.queryByText(/cargando tareas/i)).not.toBeInTheDocument();
+
+    finish(listResponse([DAILY_A, WEEKLY_B]));
+    expect(await screen.findByText(WEEKLY_B.description)).toBeInTheDocument();
+  });
+
+  it('completar invalida solo Tareas y Desempeño — nunca Stock ni Usuarios', async () => {
+    api.completeTask.mockResolvedValue({ task: DAILY_A });
+    api.fetchTasks.mockResolvedValue(listResponse([DAILY_A]));
+    const { queryClient } = render(<TasksScreen />, { route: '/tasks' });
+    await screen.findByText(DAILY_A.description);
+    const stockKey = ['session', 'u-a', 'stock', 'categories', 'active'];
+    const usersKey = ['session', 'u-a', 'admin', 'users'];
+    const performanceKey = ['session', 'u-a', 'performance', 'summary', '2026-09-19', '2026-09-25'];
+    queryClient.setQueryData(stockKey, { categories: [] });
+    queryClient.setQueryData(usersKey, { users: [] });
+    queryClient.setQueryData(performanceKey, { team: {} });
+
+    await userEvent
+      .setup()
+      .click(
+        screen.getByRole('button', { name: 'Marcar como completada: Tarea sintética diaria' }),
+      );
+    await waitFor(() => expect(api.fetchTasks).toHaveBeenCalledTimes(2));
+
+    expect(queryClient.getQueryState(performanceKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(stockKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(usersKey)?.isInvalidated).toBe(false);
+  });
+
+  it('volver a montar la pantalla con caché fresca no vuelve a pedir la lista', async () => {
+    api.fetchTasks.mockResolvedValue(listResponse([DAILY_A]));
+    const first = render(<TasksScreen />, { route: '/tasks' });
+    await screen.findByText(DAILY_A.description);
+    first.unmount();
+
+    render(<TasksScreen />, { route: '/tasks', queryClient: first.queryClient });
+    // Sincrónico: datos al instante desde la caché, sin loader.
+    expect(screen.getByText(DAILY_A.description)).toBeInTheDocument();
+    expect(api.fetchTasks).toHaveBeenCalledTimes(1);
   });
 });

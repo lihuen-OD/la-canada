@@ -98,10 +98,14 @@ async function attemptWithRefresh<T>(path: string, options: RequestOptions): Pro
     }
     try {
       await requestRefresh();
-    } catch {
-      // El refresh también falló (sesión realmente vencida, o de red) — no
-      // hay nada más que intentar; se propaga el 401 original tal cual.
-      throw error;
+    } catch (refreshError) {
+      // Sesión realmente vencida/revocada (4xx del refresh): se propaga el
+      // 401 original tal cual — la pantalla vuelve al login. Una falla de
+      // red o un 5xx del refresh (p. ej. el 503 reintentable, Etapa 5P) NO
+      // prueba que la sesión terminó: se propaga ese error para que la
+      // pantalla ofrezca reintentar en lugar de cerrar la sesión.
+      if (refreshError instanceof ApiError && refreshError.status < 500) throw error;
+      throw refreshError;
     }
     // Reintento único, con el token ya renovado en accessTokenStore.
     return rawRequest<T>(path, options);

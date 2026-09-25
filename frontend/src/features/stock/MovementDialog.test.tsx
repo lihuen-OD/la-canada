@@ -1,8 +1,13 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '../../test/render';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeItem } from '../../test/fixtures/stock';
 import { MovementDialog } from './MovementDialog';
+
+// El diálogo lee el alcance de caché de la sesión (Etapa 5P): usuario sintético.
+vi.mock('../../auth/useAuth', () => ({
+  useAuth: () => ({ user: { id: 'u-test', role: 'EMPLOYEE', status: 'ACTIVE', employee: null } }),
+}));
 
 const { fetchStockDestinationsMock } = vi.hoisted(() => ({
   fetchStockDestinationsMock: vi.fn(),

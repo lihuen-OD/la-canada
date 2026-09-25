@@ -1,8 +1,12 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import type { PrismaClient } from '../../generated/prisma/client';
+import { Prisma, type PrismaClient } from '../../generated/prisma/client';
 import { hashPin } from '../../auth/pin';
 import { getLoginOptions, getPublicUserById, login, logout, refresh } from '../../auth/authService';
-import { InvalidCredentialsError, InvalidSessionError } from '../../errors/AppError';
+import {
+  InvalidCredentialsError,
+  InvalidSessionError,
+  SessionRefreshUnavailableError,
+} from '../../errors/AppError';
 import { createFakePrisma, type FakeUserRecord } from './fakePrisma';
 
 const KNOWN_PIN = '4821';
@@ -296,6 +300,101 @@ describe('refresh', () => {
     await expect(
       refresh(prisma as unknown as PrismaClient, { refreshToken: firstRefreshToken, ...META }),
     ).rejects.toBeInstanceOf(InvalidSessionError);
+  });
+});
+
+describe('refresh — transacción interrumpida bajo concurrencia real (Etapa 5P)', () => {
+  const txError = (code: 'P2028' | 'P2034') =>
+    new Prisma.PrismaClientKnownRequestError('Transaction API error', {
+      code,
+      clientVersion: 'fake',
+    });
+
+  async function loginFresh() {
+    const user = activeUser();
+    const fake = createFakePrisma([user]);
+    const result = await login(fake.prisma as unknown as PrismaClient, {
+      userId: user.id,
+      pin: KNOWN_PIN,
+      ...META,
+    });
+    return { ...fake, user, token: result.refreshToken };
+  }
+
+  it.each(['P2028', 'P2034'] as const)(
+    '%s y otra solicitud ya rotó el token → perdedor: 401 genérico + revocación conservadora confirmada',
+    async (code) => {
+      const fake = await loginFresh();
+      const client = fake.prisma as unknown as PrismaClient;
+      // El "ganador" concurrente consume el token mientras esta transacción falla.
+      fake.transactionFailures.push({
+        error: txError(code),
+        beforeFail: () => {
+          for (const [id, session] of fake.sessions) {
+            fake.sessions.set(id, { ...session, revokedAt: new Date() });
+          }
+          fake.sessions.set('winner', {
+            ...[...fake.sessions.values()][0]!,
+            id: 'winner',
+            refreshTokenHash: 'winner-hash',
+            revokedAt: null,
+          });
+        },
+      });
+      await expect(refresh(client, { refreshToken: fake.token, ...META })).rejects.toBeInstanceOf(
+        InvalidSessionError,
+      );
+      expect([...fake.sessions.values()].every((session) => session.revokedAt !== null)).toBe(true);
+      expect(
+        fake.auditLogs.filter((log) => log.action === 'auth.refresh.concurrent_rotation_detected'),
+      ).toHaveLength(1);
+    },
+  );
+
+  it('P2028 sin carrera (sesión intacta) → 503 reintentable, sin rotar ni revocar nada', async () => {
+    const fake = await loginFresh();
+    const client = fake.prisma as unknown as PrismaClient;
+    const auditsBefore = fake.auditLogs.length;
+    fake.transactionFailures.push({ error: txError('P2028') });
+    const failure = await refresh(client, { refreshToken: fake.token, ...META }).catch(
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(SessionRefreshUnavailableError);
+    expect(failure).toMatchObject({ statusCode: 503, code: 'AUTH_REFRESH_UNAVAILABLE' });
+    expect([...fake.sessions.values()].filter((s) => s.revokedAt === null)).toHaveLength(1);
+    expect(fake.auditLogs).toHaveLength(auditsBefore);
+    // El mismo token sigue sirviendo en el reintento.
+    await expect(refresh(client, { refreshToken: fake.token, ...META })).resolves.toMatchObject({
+      accessToken: expect.any(String),
+    });
+  });
+
+  it('si también falla la revocación conservadora → 503, nunca un error crudo de Prisma', async () => {
+    const fake = await loginFresh();
+    const client = fake.prisma as unknown as PrismaClient;
+    fake.transactionFailures.push(
+      {
+        error: txError('P2028'),
+        beforeFail: () => {
+          for (const [id, session] of fake.sessions) {
+            fake.sessions.set(id, { ...session, revokedAt: new Date() });
+          }
+        },
+      },
+      { error: txError('P2028') },
+    );
+    await expect(refresh(client, { refreshToken: fake.token, ...META })).rejects.toBeInstanceOf(
+      SessionRefreshUnavailableError,
+    );
+  });
+
+  it('un error ajeno a la transacción se propaga sin reinterpretarse', async () => {
+    const fake = await loginFresh();
+    const client = fake.prisma as unknown as PrismaClient;
+    fake.transactionFailures.push({ error: new Error('fallo sintético') });
+    await expect(refresh(client, { refreshToken: fake.token, ...META })).rejects.toThrow(
+      'fallo sintético',
+    );
   });
 });
 

@@ -16,7 +16,7 @@ export interface FakeUserRecord {
   pinHash: string | null;
   failedLoginAttempts: number;
   lockedUntil: Date | null;
-  employee: { id: string; displayName: string; colorHex: string } | null;
+  employee: { id: string; displayName: string; colorHex: string; active?: boolean } | null;
   createdAt?: Date;
 }
 
@@ -50,6 +50,8 @@ export function createFakePrisma(initialUsers: FakeUserRecord[] = []) {
   const users = new Map<string, FakeUserRecord>(initialUsers.map((u) => [u.id, { ...u }]));
   const sessions = new Map<string, FakeSessionRecord>();
   const auditLogs: FakeAuditLogRecord[] = [];
+  /** Cola FIFO: cada `$transaction` consume un fallo pendiente, si hay. */
+  const transactionFailures: { error: unknown; beforeFail?: () => void }[] = [];
   // UUIDs reales (no "fake-1", "fake-2") — estos ids terminan en claims `sub`/`sid`
   // de JWTs reales (`signAccessToken`), y `verifyAccessToken` valida su forma
   // con `z.string().uuid()` (RFC 4122 estricto: nibble de versión y de
@@ -168,14 +170,15 @@ export function createFakePrisma(initialUsers: FakeUserRecord[] = []) {
         return record;
       },
       findUnique: async ({ where }: any) => {
-        if (where.id !== undefined) return sessions.get(where.id) ?? null;
-        if (where.refreshTokenHash !== undefined) {
-          return (
+        let found: FakeSessionRecord | null = null;
+        if (where.id !== undefined) found = sessions.get(where.id) ?? null;
+        else if (where.refreshTokenHash !== undefined) {
+          found =
             [...sessions.values()].find((s) => s.refreshTokenHash === where.refreshTokenHash) ??
-            null
-          );
+            null;
         }
-        return null;
+        if (!found) return null;
+        return found;
       },
       update: async ({ where, data }: any) => {
         const existing = sessions.get(where.id);
@@ -220,8 +223,44 @@ export function createFakePrisma(initialUsers: FakeUserRecord[] = []) {
         return record;
       },
     },
-    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(api),
+    /**
+     * Única sentencia cruda que usa el módulo de auth: la consulta de
+     * `requireAuth` (Etapa 5P) — sesión JOIN usuario LEFT JOIN empleado por
+     * `sid`. Cualquier otra consulta cruda falla en voz alta.
+     */
+    $queryRaw: async (query: any) => {
+      const text = (query?.strings ?? []).join('?');
+      if (!/FROM "sessions" s[\s\S]*JOIN "users" u[\s\S]*LEFT JOIN "employees" e/.test(text)) {
+        throw new Error('fakePrisma: consulta $queryRaw no soportada');
+      }
+      const session = sessions.get(String(query.values[0]));
+      const owner = session ? users.get(session.userId) : undefined;
+      if (!session || !owner) return [];
+      return [
+        {
+          sessionId: session.id,
+          sessionUserId: session.userId,
+          revokedAt: session.revokedAt,
+          expiresAt: session.expiresAt,
+          role: owner.role,
+          status: owner.status,
+          employeeId: owner.employee?.id ?? null,
+          employeeActive: owner.employee ? (owner.employee.active ?? true) : null,
+        },
+      ];
+    },
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+      // Etapa 5P: permite simular una transacción que Postgres/Prisma no
+      // llega a iniciar o que expira (P2028/P2034). Nada del callback se
+      // ejecuta — igual que un rollback real: no queda ninguna escritura.
+      const failure = transactionFailures.shift();
+      if (failure) {
+        failure.beforeFail?.();
+        throw failure.error;
+      }
+      return fn(api);
+    },
   };
 
-  return { prisma: api, users, sessions, auditLogs };
+  return { prisma: api, users, sessions, auditLogs, transactionFailures };
 }

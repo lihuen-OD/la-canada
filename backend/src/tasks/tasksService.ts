@@ -82,6 +82,10 @@ function isUniqueViolation(error: unknown): boolean {
 
 /** Actor de la request: rol ya validado por `requireAuth`, empleado leído de la base (nunca del body). */
 export async function resolveActor(auth: AuthContext): Promise<TaskActor> {
+  // `requireAuth` ya lo resolvió en su consulta única (Etapa 5P).
+  if (auth.employeeId !== undefined) {
+    return { userId: auth.userId, role: auth.role, employeeId: auth.employeeId };
+  }
   const user = await prisma.user.findUnique({
     where: { id: auth.userId },
     select: { employee: { select: { id: true, active: true } } },

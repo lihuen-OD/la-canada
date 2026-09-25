@@ -1,5 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
+import { STALE_TIME } from '../../api/queryClient';
+import { queryKeys } from '../../api/queryKeys';
 import { createStockMovement, fetchStockCategories, fetchStockItems } from '../../api/stockApi';
+import { useSessionScope } from '../../api/useSessionScope';
 import type {
   CreateStockMovementRequest,
   StockCategoriesResponse,
@@ -60,6 +69,8 @@ interface Filters {
 export function StockScreen() {
   const { user, logout } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
+  const { userId, enabled } = useSessionScope();
+  const queryClient = useQueryClient();
 
   const [section, setSection] = useState<CatalogSection>('inventory');
   const [filters, setFilters] = useState<Filters>({
@@ -69,26 +80,17 @@ export function StockScreen() {
     q: '',
   });
   const [searchInput, setSearchInput] = useState('');
-  const [state, setState] = useState<InventoryLoadState>({ status: 'loading' });
-  const [loadingMore, setLoadingMore] = useState(false);
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
   const [notice, setNotice] = useState<Notice>(null);
+  /** Solo para el catálogo administrativo y el detalle, que cargan por su cuenta. */
   const [refreshKey, setRefreshKey] = useState(0);
-  const loadIdRef = useRef(0);
-  const loadMoreGuardRef = useRef(false);
 
   const handleSessionExpired = useCallback(() => {
     void logout();
   }, [logout]);
 
-  /** Cambio de filtro desde la UI: resetea a página 1 y muestra carga. */
+  /** Cambio de filtro desde la UI: vuelve a página 1 (otra clave de caché). */
   const applyFilters = useCallback((updater: (previous: Filters) => Filters) => {
-    // Invalida inmediatamente cualquier página adicional en vuelo, antes
-    // de que el effect del filtro nuevo llegue a ejecutarse.
-    loadIdRef.current += 1;
-    loadMoreGuardRef.current = false;
-    setLoadingMore(false);
-    setState({ status: 'loading' });
     setFilters(updater);
   }, []);
 
@@ -97,107 +99,107 @@ export function StockScreen() {
     const next = searchInput.trim();
     if (next === filters.q) return;
     const timer = window.setTimeout(() => {
-      loadIdRef.current += 1;
-      loadMoreGuardRef.current = false;
-      setLoadingMore(false);
-      setState({ status: 'loading' });
       setFilters((previous) => ({ ...previous, q: next }));
     }, SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [searchInput, filters.q]);
 
-  // Carga según filtros/refresh — sin setState síncrono: el estado de
-  // carga lo ponen los handlers de filtro/reintento; acá solo se dispara.
+  const statusParam: StockStatusFilter = isAdmin ? filters.status : 'active';
+  const itemFilters = {
+    q: filters.q || undefined,
+    area: filters.area,
+    categoryId: filters.categoryId || undefined,
+    status: statusParam,
+  };
+  const inventoryEnabled = enabled && section === 'inventory';
+
+  /**
+   * Inventario paginado en el servidor (Etapa 5P): una entrada de caché por
+   * combinación de filtros. Cambiar de filtro conserva la lista anterior
+   * visible hasta que llega la nueva; una respuesta vieja nunca puede pisar
+   * un filtro nuevo porque cada una se guarda bajo su propia clave.
+   */
+  const itemsQuery = useInfiniteQuery({
+    queryKey: queryKeys.stock.items(userId, itemFilters),
+    queryFn: ({ pageParam }) =>
+      fetchStockItems({ ...itemFilters, page: pageParam, pageSize: PAGE_SIZE }),
+    initialPageParam: 1,
+    getNextPageParam: (last: StockItemsListResponse) =>
+      last.page < last.totalPages ? last.page + 1 : undefined,
+    enabled: inventoryEnabled,
+    placeholderData: keepPreviousData,
+  });
+  const categoriesQuery = useQuery({
+    queryKey: queryKeys.stock.categories(userId, isAdmin ? 'all' : 'active'),
+    queryFn: () => fetchStockCategories(isAdmin ? 'all' : 'active'),
+    enabled: inventoryEnabled,
+    staleTime: STALE_TIME.catalog,
+  });
+
+  const sessionExpired =
+    isSessionExpired(itemsQuery.error) || isSessionExpired(categoriesQuery.error);
   useEffect(() => {
-    if (section !== 'inventory') return;
-    const loadId = ++loadIdRef.current;
+    if (sessionExpired) handleSessionExpired();
+  }, [sessionExpired, handleSessionExpired]);
 
-    const statusParam: StockStatusFilter = isAdmin ? filters.status : 'active';
-    Promise.all([
-      fetchStockItems({
-        q: filters.q || undefined,
-        area: filters.area,
-        categoryId: filters.categoryId || undefined,
-        status: statusParam,
-        page: 1,
-        pageSize: PAGE_SIZE,
-      }),
-      fetchStockCategories(isAdmin ? 'all' : 'active'),
-    ])
-      .then(([itemsResponse, categoriesResponse]) => {
-        if (loadId !== loadIdRef.current) return;
-        setState({
-          status: 'loaded',
-          data: itemsResponse,
-          categories: categoriesResponse,
-        });
-      })
-      .catch((error: unknown) => {
-        if (loadId !== loadIdRef.current) return;
-        if (isSessionExpired(error)) {
-          handleSessionExpired();
-          return;
-        }
-        setState({ status: 'error' });
-      });
+  const state: InventoryLoadState = useMemo(() => {
+    const pages = itemsQuery.data?.pages;
+    if (pages && pages.length > 0 && categoriesQuery.data) {
+      const last = pages[pages.length - 1]!;
+      return {
+        status: 'loaded',
+        data: {
+          ...last,
+          items: pages.reduce<StockItem[]>((all, page) => mergeById(all, page.items), []),
+        },
+        categories: categoriesQuery.data,
+      };
+    }
+    if (itemsQuery.isError || categoriesQuery.isError) return { status: 'error' };
+    return { status: 'loading' };
+  }, [itemsQuery.data, itemsQuery.isError, categoriesQuery.data, categoriesQuery.isError]);
 
-    return () => {
-      if (loadId === loadIdRef.current) loadIdRef.current += 1;
-    };
-  }, [section, filters, isAdmin, refreshKey, handleSessionExpired]);
+  const loadingMore = itemsQuery.isFetchingNextPage;
+  const refreshing =
+    state.status === 'loaded' &&
+    ((itemsQuery.isFetching && !loadingMore) || categoriesQuery.isFetching);
+  const staleAfterError =
+    state.status === 'loaded' && !loadingMore && itemsQuery.isError && !itemsQuery.isFetching;
 
   const loadMore = useCallback(() => {
-    if (state.status !== 'loaded' || loadMoreGuardRef.current) return;
-    loadMoreGuardRef.current = true;
-    const loadId = loadIdRef.current;
-    const next = state.data.page + 1;
-    setLoadingMore(true);
-    const statusParam: StockStatusFilter = isAdmin ? filters.status : 'active';
-    fetchStockItems({
-      q: filters.q || undefined,
-      area: filters.area,
-      categoryId: filters.categoryId || undefined,
-      status: statusParam,
-      page: next,
-      pageSize: PAGE_SIZE,
-    })
-      .then((response) => {
-        if (loadId !== loadIdRef.current) return;
-        setState((previous) => {
-          if (previous.status !== 'loaded') return previous;
-          return {
-            ...previous,
-            data: {
-              ...response,
-              items: mergeById(previous.data.items, response.items),
-            },
-          };
-        });
-      })
-      .catch((error: unknown) => {
-        if (loadId !== loadIdRef.current) return;
-        if (isSessionExpired(error)) {
-          handleSessionExpired();
-          return;
+    if (itemsQuery.isFetchingNextPage || !itemsQuery.hasNextPage) return;
+    // `cancelRefetch: false`: un segundo click (incluso síncrono, antes del
+    // re-render) reutiliza la página ya en vuelo — nunca dispara otra.
+    itemsQuery.fetchNextPage({ cancelRefetch: false }).then(
+      (result) => {
+        if (result.isError && !isSessionExpired(result.error)) {
+          setNotice({ tone: 'danger', text: errorMessageOf(result.error) });
         }
-        setNotice({ tone: 'danger', text: errorMessageOf(error) });
-      })
-      .finally(() => {
-        if (loadId !== loadIdRef.current) return;
-        loadMoreGuardRef.current = false;
-        setLoadingMore(false);
-      });
-  }, [state, filters, isAdmin, handleSessionExpired]);
+      },
+      () => undefined,
+    );
+  }, [itemsQuery]);
 
   const closeDialog = useCallback(() => setDialog({ type: 'none' }), []);
+
+  /**
+   * Invalidación selectiva tras un movimiento: listados de productos (todas
+   * las combinaciones de filtro, porque el saldo cambia en todas) y el
+   * historial de productos. Categorías y destinos no cambian.
+   */
+  const invalidateAfterMovement = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.stock.itemsAll(userId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.stock.movementsAll(userId) });
+    setRefreshKey((key) => key + 1);
+  }, [queryClient, userId]);
 
   const afterSuccess = useCallback(
     (text: string) => {
       closeDialog();
       setNotice({ tone: 'positive', text });
-      setRefreshKey((key) => key + 1);
+      invalidateAfterMovement();
     },
-    [closeDialog],
+    [closeDialog, invalidateAfterMovement],
   );
 
   /**
@@ -205,15 +207,18 @@ export function StockScreen() {
    * relanzan para que el propio diálogo muestre el mensaje. El 401 también
    * se relanza intacto: el diálogo llama una sola vez a `onSessionExpired`.
    */
-  const rethrowForDialog = useCallback((error: unknown): never => {
-    if (isStockConflict(error)) setRefreshKey((key) => key + 1);
-    throw error;
-  }, []);
+  const rethrowForDialog = useCallback(
+    (error: unknown): never => {
+      if (isStockConflict(error)) invalidateAfterMovement();
+      throw error;
+    },
+    [invalidateAfterMovement],
+  );
 
   const retry = useCallback(() => {
-    setState({ status: 'loading' });
-    setRefreshKey((key) => key + 1);
-  }, []);
+    void itemsQuery.refetch();
+    void categoriesQuery.refetch();
+  }, [itemsQuery, categoriesQuery]);
 
   const groups = useMemo(() => {
     if (state.status !== 'loaded') return [];
@@ -228,6 +233,7 @@ export function StockScreen() {
         </>
       }
       description="Inventario de Casa y Jardín: cantidades, mínimos y movimientos del backend."
+      refreshing={section === 'inventory' ? refreshing : undefined}
     />
   );
 
@@ -256,6 +262,15 @@ export function StockScreen() {
 
   const noticeBlock = (
     <div aria-live="polite" className="stock__notice">
+      {staleAfterError ? (
+        <p role="alert" className="notice notice--danger">
+          <AlertIcon size="sm" />
+          No pudimos actualizar el inventario. Mostramos los últimos datos.
+          <Button size="sm" variant="ghost" onClick={retry}>
+            Reintentar
+          </Button>
+        </p>
+      ) : null}
       {notice ? (
         <p
           role={notice.tone === 'danger' ? 'alert' : 'status'}
@@ -337,7 +352,7 @@ export function StockScreen() {
         </p>
       </div>
 
-      <Card>
+      <Card className={itemsQuery.isPlaceholderData ? 'is-stale' : undefined}>
         {data.items.length === 0 ? (
           <EmptyState
             title="No hay productos con estos filtros."
