@@ -236,6 +236,10 @@ model User {
   recordedMedicalRecords AnimalMedicalRecord[] @relation("AnimalMedicalRecordRecordedBy")
   voidedMedicalRecords   AnimalMedicalRecord[] @relation("AnimalMedicalRecordVoidedBy")
 
+  /// Etapa 5X (Más) — actor real que registró una novedad / anuló un evento.
+  recordedNewsReports NewsReport[] @relation("NewsReportRecordedBy")
+  deletedEvents       Event[]      @relation("EventDeletedBy")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -702,12 +706,20 @@ model NewsReport {
 
   text String
 
+  /// Etapa 5X — actor real (User de la sesión) que registró la novedad; puede
+  /// diferir de `employeeId` (un ADMIN elige quién reporta). Nullable solo por
+  /// las 2 filas del seed, anteriores a la columna.
+  recordedByUserId String? @map("recorded_by_user_id") @db.Uuid
+  recordedBy       User?   @relation("NewsReportRecordedBy", fields: [recordedByUserId], references: [id])
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  /// Clave natural para el seed idempotente.
-  @@unique([employeeId, text])
+  /// Etapa 5X — sin unicidad (empleado, texto): el prototipo permitía repetir un
+  /// aviso ("Falta papel higiénico" otra semana). El seed busca por esos campos.
   @@index([employeeId])
+  /// Historial paginado del más reciente al más antiguo.
+  @@index([createdAt])
   @@map("news_reports")
 }
 
@@ -721,11 +733,19 @@ model Event {
   type  EventType
   note  String?
 
+  /// Etapa 5X — el "✕" del prototipo borraba la fila; ahora es una anulación
+  /// lógica auditada (deja de mostrarse, la historia se conserva).
+  deletedAt       DateTime? @map("deleted_at")
+  deletedByUserId String?   @map("deleted_by_user_id") @db.Uuid
+  deletedBy       User?     @relation("EventDeletedBy", fields: [deletedByUserId], references: [id])
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  /// Clave natural para el seed idempotente (título + fecha + tipo).
-  @@unique([title, date, type])
+  /// Sin duplicados vigentes (título + fecha + tipo); uno anulado no impide
+  /// volver a cargarlo. También es la clave natural del seed.
+  @@unique([title, date, type], where: raw("deleted_at IS NULL"))
+  @@index([date])
   @@map("events")
 }
 
@@ -829,6 +849,9 @@ model FileAsset {
   objectKey String @map("object_key")
 
   originalFilename String  @map("original_filename")
+  /// Etapa 5X — título visible de una foto de la galería (`fotos.titulo` del
+  /// prototipo, "Sin título" por defecto). Null en fotos de ficha de mascota.
+  title            String?
   mimeType         String  @map("mime_type")
   sizeBytes        Int     @map("size_bytes")
   checksum         String?
@@ -863,6 +886,8 @@ model FileAsset {
   /// Identificación técnica principal del archivo — impide registrar dos
   /// veces el mismo objeto dentro del mismo bucket.
   @@unique([bucket, objectKey])
+  /// Etapa 5X — galería de 📸 Fotos: por categoría y estado, más recientes primero.
+  @@index([category, status, createdAt])
   @@index([taskId])
   @@index([animalId])
   @@index([uploadedByEmployeeId])

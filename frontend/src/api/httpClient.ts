@@ -33,7 +33,7 @@ async function parseErrorBody(response: Response): Promise<ApiError> {
 }
 
 export interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   /**
    * Marca la request como autenticada: agrega `Authorization: Bearer

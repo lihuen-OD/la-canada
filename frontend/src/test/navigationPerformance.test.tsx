@@ -21,6 +21,7 @@ import {
   recordsResponse,
   typesResponse,
 } from './fixtures/pets';
+import { eventsResponse, newsResponse, summaryResponse } from './fixtures/more';
 
 /**
  * Etapa 5P — presupuesto de navegación sobre la APP COMPLETA (`App`: mismos
@@ -78,6 +79,9 @@ function body(path: string): unknown {
   if (/^\/pets\/[^/?]+\/records/.test(path)) return recordsResponse();
   if (/^\/pets\/[^/?]+$/.test(path)) return detailResponse();
   if (path.startsWith('/pets')) return petsListResponse();
+  if (path.startsWith('/more/summary')) return summaryResponse();
+  if (path.startsWith('/news')) return newsResponse();
+  if (path.startsWith('/events')) return eventsResponse();
   if (path.startsWith('/admin/users'))
     return { users: [], pagination: { page: 1, pageSize: 50, total: 0 } };
   return {};
@@ -429,6 +433,46 @@ describe('🐾 Mascotas (Etapa 5M)', () => {
     expect(screen.getByRole('link', { name: new RegExp(makePet().name) })).toBeInTheDocument();
     await user.click(screen.getByRole('link', { name: new RegExp(makePet().name) }));
     expect(screen.getByRole('list', { name: 'Registros clínicos' })).toBeInTheDocument();
+    expect(screen.queryByText(/Cargando/)).not.toBeInTheDocument();
+    window.removeEventListener('click', listener);
+
+    expect(calls.length).toBe(before);
+    expect(prevented.every(Boolean)).toBe(true);
+    expect(count('/auth/refresh')).toBe(1);
+    expect(count('/auth/me')).toBe(1);
+    expect(document.querySelector('.app-header')).toBe(shellHeader);
+  });
+});
+
+describe('☰ Más (Etapa 5X)', () => {
+  it('grilla → Novedades → volver → Eventos → volver → revisita: SPA, sin refresh/me, datos desde caché', async () => {
+    const user = userEvent.setup();
+    await bootToHome();
+    const shellHeader = document.querySelector('.app-header');
+    const prevented: boolean[] = [];
+    const listener = (event: MouseEvent) => prevented.push(event.defaultPrevented);
+    window.addEventListener('click', listener);
+
+    await user.click(within(mainNav()).getByRole('link', { name: 'Más' }));
+    await screen.findByText('2 hoy');
+    expect(count('/more/summary')).toBe(1);
+
+    await user.click(screen.getByRole('link', { name: /Novedades/ }));
+    await screen.findByText('Aviso sintético 0');
+    expect(count('/news')).toBe(1);
+    await user.click(screen.getByRole('link', { name: /Volver/ }));
+    await user.click(screen.getByRole('link', { name: /Eventos/ }));
+    await screen.findByText('Visita sintética');
+    expect(count('/events')).toBe(1);
+    expect(within(mainNav()).getByRole('link', { name: 'Más' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+
+    const before = calls.length;
+    await user.click(screen.getByRole('link', { name: /Volver/ }));
+    await user.click(screen.getByRole('link', { name: /Novedades/ }));
+    expect(screen.getByText('Aviso sintético 0')).toBeInTheDocument();
     expect(screen.queryByText(/Cargando/)).not.toBeInTheDocument();
     window.removeEventListener('click', listener);
 

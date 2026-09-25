@@ -1,4 +1,5 @@
 import type { ChickenCoopPeriodDays } from './chickenCoopTypes';
+import type { EventType, GalleryCategory, TeamFilter } from './moreTypes';
 import type { MedicalRecordType } from './petTypes';
 import type {
   ListStockItemsParams,
@@ -93,6 +94,32 @@ export const queryKeys = {
         : ([...scope(userId), 'pets', 'records', petId, type] as const),
     /** Imagen por id de archivo: inmutable (una foto nueva es otro id). */
     photo: (userId: string, fileId: string) => [...scope(userId), 'pets', 'photo', fileId] as const,
+  },
+  more: {
+    /** Subtítulos de la grilla de Más (conteos de novedades, eventos y fotos). */
+    summary: (userId: string) => [...scope(userId), 'more', 'summary'] as const,
+    /** Historial de novedades (`useInfiniteQuery`). */
+    news: (userId: string) => [...scope(userId), 'more', 'news'] as const,
+    /** Eventos + cumpleaños derivados por filtro de tipo; el prefijo invalida todos los filtros. */
+    events: (userId: string, type?: EventType | 'all') =>
+      type === undefined
+        ? ([...scope(userId), 'more', 'events'] as const)
+        : ([...scope(userId), 'more', 'events', type] as const),
+    weather: (userId: string) => [...scope(userId), 'more', 'weather'] as const,
+    /** Galería por tipo (`useInfiniteQuery`); el prefijo invalida todos los filtros. */
+    photos: (userId: string, category?: GalleryCategory | 'all') =>
+      category === undefined
+        ? ([...scope(userId), 'more', 'photos'] as const)
+        : ([...scope(userId), 'more', 'photos', category] as const),
+    /** Imagen por id de foto: inmutable (una foto nueva es otro id). */
+    photoContent: (userId: string, photoId: string) =>
+      [...scope(userId), 'more', 'photo-content', photoId] as const,
+    employees: (userId: string) => [...scope(userId), 'more', 'employees'] as const,
+    team: (userId: string, filter?: TeamFilter) =>
+      filter === undefined
+        ? ([...scope(userId), 'more', 'team'] as const)
+        : ([...scope(userId), 'more', 'team', filter] as const),
+    profile: (userId: string) => [...scope(userId), 'more', 'profile'] as const,
   },
   admin: {
     users: (userId: string) => [...scope(userId), 'admin', 'users'] as const,

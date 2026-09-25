@@ -45,12 +45,28 @@ function toPublicUser(user: {
   status: string;
   employee: { id: string; displayName: string; colorHex: string } | null;
 }): PublicUser {
+  const { employee } = user;
   return {
     id: user.id,
     role: user.role,
     status: user.status,
-    employee: user.employee,
+    // Campos explícitos: `active` (y cualquier otro) nunca se filtra al cliente.
+    employee: employee
+      ? { id: employee.id, displayName: employee.displayName, colorHex: employee.colorHex }
+      : null,
   };
+}
+
+/**
+ * Etapa 5X — paridad con el prototipo: una persona dada de baja en
+ * Configuración no aparece en el selector ni puede ingresar
+ * (`selRol('user')` solo listaba personas activas).
+ */
+function isEmployeeDeactivated(user: {
+  role: string;
+  employee: { active?: boolean } | null;
+}): boolean {
+  return user.role === 'EMPLOYEE' && user.employee?.active === false;
 }
 
 const USER_SELECT_FOR_AUTH = {
@@ -60,7 +76,7 @@ const USER_SELECT_FOR_AUTH = {
   pinHash: true,
   failedLoginAttempts: true,
   lockedUntil: true,
-  employee: { select: { id: true, displayName: true, colorHex: true } },
+  employee: { select: { id: true, displayName: true, colorHex: true, active: true } },
 } as const;
 
 /**
@@ -122,7 +138,13 @@ export async function login(
     select: USER_SELECT_FOR_AUTH,
   });
 
-  if (!user || user.status !== 'ACTIVE' || !user.pinHash || isLocked(user)) {
+  if (
+    !user ||
+    user.status !== 'ACTIVE' ||
+    !user.pinHash ||
+    isLocked(user) ||
+    isEmployeeDeactivated(user)
+  ) {
     await verifyAgainstDummy(params.pin);
     await recordAuditLogSafe(prisma, {
       actorUserId: user?.id ?? null,
@@ -254,13 +276,14 @@ export async function getLoginOptions(prisma: PrismaClient): Promise<LoginOption
     select: {
       id: true,
       role: true,
-      employee: { select: { displayName: true, colorHex: true } },
+      employee: { select: { displayName: true, colorHex: true, active: true } },
     },
     orderBy: { createdAt: 'asc' },
   });
 
   const options: LoginOption[] = [];
   for (const user of users) {
+    if (isEmployeeDeactivated(user)) continue;
     if (user.role === 'EMPLOYEE' && !user.employee) {
       // Invariante de negocio: todo User EMPLOYEE debería estar vinculado a
       // un Employee real (así los siembra el seed). Si no lo estuviera, no

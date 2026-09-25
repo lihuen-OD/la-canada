@@ -259,12 +259,19 @@ Con el código de esta etapa ya validado (ver checklist más abajo), crear el pr
 - **Validación**: tests unitarios backend/frontend, integración real `chickenCoop.integration.test.ts` (fixtures `test-5g-<RUN>`, concurrencia de configuración/altas/anulación, idempotencia, CHECK con rollback, conteo de sentencias, 0 residuos; si el gallinero real `main` ya existe, no se modifica), test de navegación de la app completa y revisión visual en 5 anchos.
 - **Fuera de alcance**: Mascotas, dashboard (el KPI "🥚 Huevos hoy" de Inicio llegará con el dashboard) y cualquier otro módulo.
 
-### Etapa 5M — Mascotas 🟡 implementada y validada, sin commit — pendiente de revisión humana
+### Etapa 5M — Mascotas ✅ commiteada y publicada (`814b216`)
 
 - **Alcance**: 🐾 Mascotas full stack con paridad (listado con chips por tipo, ficha con KPIs, registros clínicos de 5 tipos, gestión de tipos con símbolo, edición de ficha, foto) — detalle en `docs/BUSINESS_RULES.md` §11–§12 y `docs/ARCHITECTURE.md` §25. Primer uso real del contrato de Object Storage (§9): implementado y probado con un almacenamiento en memoria; **la subida real requiere configurar las 5 `OBJECT_STORAGE_*` del bucket de `demo`** (hoy vacías en local).
 - **Migración**: `20260925180000_pets_medical_voiding`, aplicada **solo a `demo`**. Sin `db push`, reset ni seed.
 - **Validación**: unitarios backend/frontend (incluidos vectores oficiales de AWS SigV4), integración real `pets.integration.test.ts` (fixtures `test-5m-<RUN>`, 0 residuos, tipos reales intactos), navegación de la app completa y revisión visual en 5 anchos × 2 roles.
 - **Pendiente**: credenciales de Object Storage para probar una subida real; el cumpleaños automático de mascotas llegará con Eventos; Más no iniciado.
+
+### Etapa 5X — ☰ Más 🟡 implementada y validada, sin commit — pendiente de aprobación visual
+
+- **Alcance** (auditado contra el HTML original): grilla de Más con los subtítulos del prototipo y los submódulos 📝 Novedades, 📅 Eventos + 🎂 cumpleaños, 🌤️ Clima, 📸 Fotos, ⚙️ Configuración (👥 Personas, 👤 Datos del equipo, 📅 Calendario de tareas, 🔐 Seguridad, 📱 Instalar como app) y 👤 Mi perfil (datos personales, 🆘 contacto de emergencia, 👨‍👧‍👦 hijos). Detalle en `docs/BUSINESS_RULES.md`, "Contrato implementado en Etapa 5X", y `docs/ARCHITECTURE.md` §26.
+- **Migración**: `20260925200000_more_module`, aplicada **solo a `demo`** (precondición en `READ ONLY`: 2 novedades y 2 eventos reales sin duplicados, 0 archivos). Sin `db push`, reset ni seed. `production` intacta.
+- **Validación**: unitarios backend/frontend, integración real dirigida `more.integration.test.ts` (fixtures `test-5x-<RUN>`, almacenamiento en memoria, Open-Meteo reemplazado, 0 residuos, conteos globales intactos), navegación de la app completa y revisión visual en 5 anchos × 2 roles.
+- **Pendiente**: aprobación visual humana y commit; Inicio (dashboard) sigue fuera de alcance; la fecha de Benjamín sigue sin resolver.
 
 ## Etapa 6 — Integrar Neon Object Storage (fotografías y archivos)
 

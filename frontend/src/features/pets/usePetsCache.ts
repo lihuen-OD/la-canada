@@ -28,6 +28,9 @@ export function usePetsCache() {
         void queryClient.invalidateQueries({ queryKey: queryKeys.pets.detail(userId, petId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.pets.listAll(userId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.pets.typesAll(userId) });
+      // Los cumpleaños de mascotas se derivan en ☰ Más → Eventos (Etapa 5X).
+      void queryClient.invalidateQueries({ queryKey: queryKeys.more.events(userId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.more.summary(userId) });
     },
     [queryClient, userId],
   );

@@ -445,3 +445,52 @@ export class ObjectStorageUnavailableError extends AppError {
     });
   }
 }
+
+// ── Más (Etapa 5X) ────────────────────────────────────────────────────────
+
+/** La persona elegida para una novedad o una foto no existe o está dada de baja. */
+export class EmployeeInvalidError extends AppError {
+  constructor() {
+    super('La persona elegida no existe o no está activa.', 400, { code: 'EMPLOYEE_INVALID' });
+  }
+}
+
+export class EmployeeNotFoundError extends AppError {
+  constructor() {
+    super('La persona no existe.', 404, { code: 'EMPLOYEE_NOT_FOUND' });
+  }
+}
+
+export class EventNotFoundError extends AppError {
+  constructor() {
+    super('El evento no existe o ya fue eliminado.', 404, { code: 'EVENT_NOT_FOUND' });
+  }
+}
+
+/** Mismo título, fecha y tipo que otro evento vigente. */
+export class EventDuplicateError extends AppError {
+  constructor() {
+    super('Ya existe un evento con ese título, fecha y tipo.', 409, { code: 'EVENT_DUPLICATE' });
+  }
+}
+
+export class ChildNotFoundError extends AppError {
+  constructor() {
+    super('El hijo no existe en tu perfil.', 404, { code: 'CHILD_NOT_FOUND' });
+  }
+}
+
+export class PhotoNotFoundError extends AppError {
+  constructor() {
+    super('La foto no existe o ya fue eliminada.', 404, { code: 'PHOTO_NOT_FOUND' });
+  }
+}
+
+/** Open-Meteo no respondió a tiempo o devolvió algo inesperado. Reintentable. */
+export class WeatherUnavailableError extends AppError {
+  constructor() {
+    super('No se pudo cargar el clima. Verificá tu conexión.', 502, {
+      code: 'WEATHER_UNAVAILABLE',
+    });
+  }
+}

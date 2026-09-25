@@ -6,7 +6,7 @@ import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
 import { config } from './config';
 import { corsOptions } from './config/cors';
-import { createApiRateLimiter } from './config/rateLimit';
+import { createApiRateLimiter, createImageRateLimiter } from './config/rateLimit';
 import { apiV1Router } from './routes';
 import { getRoot } from './controllers/rootController';
 import { notFoundHandler } from './middleware/notFoundHandler';
@@ -41,7 +41,7 @@ export function createApp(): Express {
   }
 
   app.get('/', getRoot);
-  app.use('/api/v1', createApiRateLimiter(), apiV1Router);
+  app.use('/api/v1', createImageRateLimiter(), createApiRateLimiter(), apiV1Router);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

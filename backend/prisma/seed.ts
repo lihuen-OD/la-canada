@@ -221,8 +221,8 @@ async function seedNewsReports(db: Tx, employeesByCode: Map<string, { id: string
     }
     await createIfMissing(
       () =>
-        db.newsReport.findUnique({
-          where: { employeeId_text: { employeeId: employee.id, text: seed.text } },
+        db.newsReport.findFirst({
+          where: { employeeId: employee.id, text: seed.text },
           select: { id: true },
         }),
       () =>
@@ -239,8 +239,8 @@ async function seedEvents(db: Tx) {
     const date = new Date(`${seed.date}T00:00:00.000Z`);
     await createIfMissing(
       () =>
-        db.event.findUnique({
-          where: { title_date_type: { title: seed.title, date, type: seed.type } },
+        db.event.findFirst({
+          where: { title: seed.title, date, type: seed.type, deletedAt: null },
           select: { id: true },
         }),
       () =>

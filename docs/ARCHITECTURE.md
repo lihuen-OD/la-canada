@@ -128,7 +128,7 @@ Puntos que la migración debe resolver — **no se decide en este documento**, s
 - Mapeo directo de los roles actuales (`admin` → `ADMIN`, `user`/"equipo de trabajo" → `EMPLOYEE`).
 - A diferencia del prototipo, el backend debe rechazar en el servidor cualquier operación admin-only intentada por un `EMPLOYEE`, independientemente de lo que el cliente envíe u oculte visualmente.
 - Ver `docs/BUSINESS_RULES.md` sección 1 para el detalle completo de qué operaciones son hoy admin-only en la UI (deben serlo también en el backend) y la inconsistencia detectada en fotos (a resolver como decisión de producto: ¿se mantiene abierto a todos, o se restringe a admin en la reconstrucción?).
-- **Actualización Etapa 2**: confirmado — la eliminación de fotografías (`FileAsset`) será exclusiva de `ADMIN` en las etapas de implementación de endpoints (Etapa 5 en adelante), no abierta a todo `EMPLOYEE` como en el prototipo.
+- **Actualización Etapa 2**: confirmado — la eliminación de fotografías (`FileAsset`) será exclusiva de `ADMIN` en las etapas de implementación de endpoints (Etapa 5 en adelante), no abierta a todo `EMPLOYEE` como en el prototipo. **Aplicado en la Etapa 5X** (galería de Más → Fotos).
 
 ## 8. Auditoría
 
@@ -760,3 +760,32 @@ Sin `DELETE`/`PUT`. Auditorías: `pet.created`, `pet.updated`, `pet.type.created
 **Frontend**: `/pets` (listado) y `/pets/:petId` (ficha) como rutas descendientes; 🐾 en la navegación entre Gallinero y Usuarios (activo también dentro de la ficha). Caché (`queryKeys.pets`): tipos 5 min; listado (infinito, `keepPreviousData`), ficha e historial por mascota y tipo 30 s; imagen por id de archivo sin vencimiento (object URL revocada al salir de la caché, nunca storage). Invalidación: registro → ficha, historial y listado de esa mascota; ficha/foto → ficha, listado y tipos; tipos → tipos y listado. `httpClient` suma `rawBody`/`contentType` y `responseType: 'blob'`.
 
 **Presupuesto medido** (Chrome headless, build de producción, `/api` interceptado con datos sintéticos, 360/390/768/1366/1920 px, ADMIN y EMPLOYEE): 1 documento, 1 `refresh` + 1 `/me`, 0 GET duplicados, 0 scroll horizontal, 0 controles < 44 px; primera visita al listado 2 requests (+1 por foto visible), ficha 2; revisitas 0. Bundle JS 450,0 → 475,4 KB (gzip 129,7 → 135,4), CSS 53,9 → 59,9 KB; sin dependencias nuevas.
+
+## 26. ☰ Más (Etapa 5X)
+
+`backend/src/more/` (schemas `.strict()`, `birthdays.ts` puro, servicios de novedades, eventos, clima, fotos, personas, perfil y resumen), `controllers/moreController.ts`, `routes/moreRoutes.ts`, `scripts/reconcileStorage.ts`; frontend `features/more/` + `api/moreApi.ts`/`moreTypes.ts`. Reglas en `docs/BUSINESS_RULES.md`, "Contrato implementado en Etapa 5X"; migración en `docs/DATABASE.md`, "Etapa 5X".
+
+| Endpoint (`/api/v1`, todo detrás de `requireAuth`) | Quién | Sentencias |
+| --- | --- | --- |
+| `GET /more/summary` | todos | auth + 8 conteos en paralelo |
+| `GET /news?page&pageSize≤50`, `POST /news` (+ `Idempotency-Key`) | todos (persona según rol) | auth + conteo + página + empleados |
+| `GET /events?type&pastPage&pastPageSize≤50` | todos | auth + 3 de eventos + 4 fuentes de cumpleaños (+1 por relación) — fijas |
+| `POST /events`, `PATCH /events/:id`, `POST /events/:id/delete` | ADMIN | transacción + auditoría |
+| `GET /weather` | todos | auth + ubicación (solo si la caché de 10 min venció) |
+| `GET /photos?category&page&pageSize≤48`, `POST /photos?category&title&employeeId` (cuerpo binario ≤ 10 MB, + `Idempotency-Key`) | todos | auth + conteo + página + persona |
+| `GET /photos/:id/content` (proxy, `ETag`/304) | todos | auth + 1 (+ lectura del bucket si no es 304) |
+| `POST /photos/:id/delete` | ADMIN | transacción + borrado físico |
+| `GET/POST /employees`, `PATCH /employees/:id`, `PATCH /employees/:id/status`, `GET /employees/profiles?filter` | ADMIN (`requireRole` + servicio) | fijas |
+| `GET/PUT /me/profile`, `POST /me/children` (+ `Idempotency-Key`), `POST /me/children/:id/remove` | persona de la sesión | fijas |
+
+Sin `DELETE`; el único `PUT` es el formulario completo de Mi perfil. Auditorías: `news.created`, `event.created|updated|deleted`, `photo.uploaded|deleted`, `employee.created|updated|deactivated|reactivated`, `profile.updated|child_added|child_removed`.
+
+**Cumpleaños**: `birthdays.ts` calcula la próxima ocurrencia en `BUSINESS_TIME_ZONE` al leer; ninguna lectura escribe (verificado en integración: el conteo de `events` no cambia al pedir el listado).
+
+**Fotos**: flujo de §25 reutilizado (`detectImageMime`, `sanitizeFilename`, cliente SigV4). Claves `memories/<año>/<uuid>.<ext>` y `task-evidence/<año>/<uuid>.<ext>`. Con `Idempotency-Key`: un reintento ya resuelto responde el original **sin volver a subir**; si una carrera se resuelve después de subir, el objeto sobrante se da de baja y se borra. `reconcileFileAssets` reintenta `PENDING_DELETION` y descarta subidas `PENDING_UPLOAD`/`UPLOAD_FAILED` de más de una hora. Rate limit: las lecturas de imágenes (galería y fichas de mascotas) tienen su propio cupo de 600/15 min y no consumen el general de 100.
+
+**Personas y login**: la baja de un `Employee` revoca las sesiones de su `User` en la misma transacción; `getLoginOptions` y `login` excluyen a un `EMPLOYEE` cuyo empleado está inactivo (`toPublicUser` selecciona campos explícitos para no exponer `active`).
+
+**Frontend**: `/more/*` como rutas descendientes (`MoreModule`); Fotos, Configuración y Datos del equipo se cargan en diferido (`React.lazy`). "Más" (☰) ocupa el último lugar de la barra, como en el prototipo; `/admin/users` sigue existiendo como ruta ADMIN, se abre desde Configuración y marca "Más" como activo (`activeFor`). Caché (`queryKeys.more`): resumen, novedades, eventos por tipo, galería por tipo, personas, equipo por filtro y perfil 30 s; clima 10 min; imágenes por id sin vencimiento (object URL revocada al salir de la caché) y pedidas recién cerca del viewport (IntersectionObserver). Invalidaciones: novedad → novedades + resumen; evento → eventos + resumen; foto → galería + resumen; persona → personas, equipo, tareas, usuarios, eventos y resumen; PIN → personas + usuarios; perfil/hijos → perfil, equipo, eventos y resumen; ficha de mascota → también eventos + resumen. El calendario de Configuración reutiliza la caché de la lista de Tareas.
+
+**Presupuesto medido** (Chrome headless, build de producción, `/api` interceptado con datos sintéticos, 360/390/768/1366/1920 px, ADMIN y EMPLOYEE, 90 pantallas/diálogos): 1 documento y 1 `refresh` + 1 `/me` por recorrido, 0 GET duplicados, 0 scroll horizontal, 0 controles < 44 px, sin "Restaurando tu sesión" al navegar. Primera visita: grilla 1 request, Novedades 1 (+ personas para ADMIN), Eventos 1, Clima 1, Fotos 1 + 1 por imagen visible, Mi perfil 1, Configuración 2 (personas + tareas del calendario), Datos del equipo 1; revisitas dentro de la frescura: 0 (el visor reutiliza la imagen ya cacheada). Bundle JS inicial 475,4 → 505,7 KB (gzip 135,4 → 144,6) repartido en `index` + un chunk compartido precargado; diferidos: Fotos 8,3 KB, Configuración 10,3 KB, Datos del equipo 3,4 KB. CSS 59,9 → 73,7 KB. Sin dependencias nuevas.

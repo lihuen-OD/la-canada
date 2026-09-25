@@ -8,7 +8,7 @@ vi.mock('../auth/useAuth', () => ({ useAuth: useAuthMock }));
 
 import { AppShell } from './AppShell';
 
-const IMPLEMENTED_PATHS = ['/', '/tasks', '/stock', '/chicken-coop', '/pets', '/admin/users'];
+const IMPLEMENTED_PATHS = ['/', '/tasks', '/stock', '/chicken-coop', '/pets', '/more'];
 
 function mockUser(role: SystemRole, employee: AuthenticatedUser['employee'] = null) {
   useAuthMock.mockReturnValue({
@@ -49,7 +49,7 @@ describe('AppShell', () => {
     );
   });
 
-  it('ADMIN: ve Inicio, Tareas, Stock, Gallinero, Mascotas y Usuarios, y nada más', () => {
+  it('ADMIN: la barra del prototipo — Inicio, Tareas, Stock, Gallinero, Mascotas y Más', () => {
     mockUser('ADMIN');
     renderShell();
 
@@ -60,7 +60,7 @@ describe('AppShell', () => {
       '/stock',
       '/chicken-coop',
       '/pets',
-      '/admin/users',
+      '/more',
     ]);
     expect(within(getNav()).getByRole('link', { name: 'Tareas' })).toBeInTheDocument();
     expect(within(getNav()).getByRole('link', { name: 'Stock' })).toBeInTheDocument();
@@ -82,6 +82,15 @@ describe('AppShell', () => {
     const link = within(getNav()).getByRole('link', { name: 'Gallinero' });
     expect(link).toHaveAttribute('href', '/chicken-coop');
     expect(within(link).getByText('🐔')).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('☰ Más: el símbolo del prototipo es decorativo y el nombre accesible es el texto', () => {
+    mockUser('EMPLOYEE', { id: 'e1', displayName: 'Coke', colorHex: '#4a7c59' });
+    renderShell();
+
+    const link = within(getNav()).getByRole('link', { name: 'Más' });
+    expect(link).toHaveAttribute('href', '/more');
+    expect(within(link).getByText('☰')).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('🐾 Mascotas: el emoji del prototipo es decorativo y el nombre accesible es el texto', () => {
@@ -122,6 +131,7 @@ describe('AppShell', () => {
       expect(IMPLEMENTED_PATHS).toContain(href);
     }
     const text = document.body.textContent ?? '';
+    // Los submódulos de Más viven dentro de /more, no como destinos sueltos de la barra.
     expect(text).not.toMatch(/novedades|eventos|clima|fotos|desempeño/i);
     expect(screen.queryByRole('link', { name: /próximamente/i })).not.toBeInTheDocument();
   });
@@ -131,10 +141,8 @@ describe('AppShell', () => {
     renderShell('/admin/users');
 
     const nav = getNav();
-    expect(within(nav).getByRole('link', { name: 'Usuarios' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
+    // Usuarios se abre desde Más → Configuración: "Más" queda marcado como destino activo.
+    expect(within(nav).getByRole('link', { name: 'Más' })).toHaveAttribute('aria-current', 'page');
     // "Inicio" es un match exacto (`end`): no queda activo en una subruta.
     expect(within(nav).getByRole('link', { name: 'Inicio' })).not.toHaveAttribute('aria-current');
   });

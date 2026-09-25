@@ -447,3 +447,40 @@ describe('getPublicUserById', () => {
     expect(user).toBeNull();
   });
 });
+
+describe('persona dada de baja en Configuración (Etapa 5X, paridad con el prototipo)', () => {
+  const inactiveEmployee = {
+    id: 'e-baja',
+    displayName: 'De baja',
+    colorHex: '#333333',
+    active: false,
+  };
+
+  it('no aparece en el selector de identidad', async () => {
+    const user = activeUser({ employee: inactiveEmployee } as Partial<FakeUserRecord>);
+    const { prisma } = createFakePrisma([user]);
+    expect(await getLoginOptions(prisma as unknown as PrismaClient)).toHaveLength(0);
+  });
+
+  it('no puede ingresar aunque el PIN sea correcto (error genérico, sin sesión)', async () => {
+    const user = activeUser({ employee: inactiveEmployee } as Partial<FakeUserRecord>);
+    const { prisma, sessions } = createFakePrisma([user]);
+    await expect(
+      login(prisma as unknown as PrismaClient, { userId: user.id, pin: KNOWN_PIN, ...META }),
+    ).rejects.toBeInstanceOf(InvalidCredentialsError);
+    expect(sessions.size).toBe(0);
+  });
+
+  it('los datos públicos nunca exponen el estado interno del empleado', async () => {
+    const user = activeUser({
+      employee: { id: 'e1', displayName: 'Activa', colorHex: '#4a7c59', active: true },
+    } as Partial<FakeUserRecord>);
+    const { prisma } = createFakePrisma([user]);
+    const result = await login(prisma as unknown as PrismaClient, {
+      userId: user.id,
+      pin: KNOWN_PIN,
+      ...META,
+    });
+    expect(result.user.employee).toEqual({ id: 'e1', displayName: 'Activa', colorHex: '#4a7c59' });
+  });
+});

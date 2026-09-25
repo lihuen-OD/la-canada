@@ -4,6 +4,14 @@ import { config } from './index';
 
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_REQUESTS = 100;
+/** Etapa 5X — lecturas de imágenes (galería de Fotos y fichas de Mascotas). */
+const MAX_IMAGE_REQUESTS = 600;
+const IMAGE_READ_PATH = /^\/(?:photos\/[^/]+\/content|pets\/photos\/[^/]+)\/?$/;
+
+/** GET de una imagen servida por el proxy autenticado (ruta relativa a `/api/v1`). */
+export function isImageRead(req: { method: string; path: string }): boolean {
+  return req.method === 'GET' && IMAGE_READ_PATH.test(req.path);
+}
 
 /**
  * Límite general y conservador para todo /api.
@@ -19,6 +27,26 @@ export function createApiRateLimiter(): RequestHandler {
     limit: MAX_REQUESTS,
     standardHeaders: true,
     legacyHeaders: false,
+    // Las imágenes tienen su propio cupo: una grilla de fotos no agota el de la API.
+    skip: isImageRead,
+    message: { error: { message: 'Demasiadas solicitudes. Intentá de nuevo más tarde.' } },
+  });
+}
+
+/**
+ * Cupo aparte y más amplio para las imágenes (cada miniatura visible es un
+ * GET autenticado; el navegador las cachea después). Solo cuenta esas rutas.
+ */
+export function createImageRateLimiter(): RequestHandler {
+  if (config.isTest) {
+    return (_req, _res, next) => next();
+  }
+  return rateLimit({
+    windowMs: WINDOW_MS,
+    limit: MAX_IMAGE_REQUESTS,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => !isImageRead(req),
     message: { error: { message: 'Demasiadas solicitudes. Intentá de nuevo más tarde.' } },
   });
 }

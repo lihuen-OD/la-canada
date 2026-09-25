@@ -11,6 +11,8 @@ interface ModalProps extends PropsWithChildren {
   onRequestClose: () => void;
   /** Mientras se envía una operación no debe poder cerrarse con Escape a mitad de camino. */
   closeDisabled?: boolean;
+  /** `viewer`: visor de fotos sobre fondo oscuro (docs/UI_CONTEXT.md, "Fotografías"). */
+  variant?: 'default' | 'viewer';
 }
 
 /**
@@ -30,6 +32,7 @@ export function Modal({
   descriptionId,
   onRequestClose,
   closeDisabled,
+  variant = 'default',
   children,
 }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -78,9 +81,9 @@ export function Modal({
   }
 
   return createPortal(
-    <div className="modal-overlay">
+    <div className={variant === 'viewer' ? 'modal-overlay modal-overlay--viewer' : 'modal-overlay'}>
       <div
-        className="modal"
+        className={variant === 'viewer' ? 'modal modal--viewer' : 'modal'}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

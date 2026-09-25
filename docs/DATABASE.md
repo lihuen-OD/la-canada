@@ -498,6 +498,15 @@ Migración incremental `20260925150000_chicken_coop_voiding_checks`, generada of
 
 Migración `20260925180000_pets_medical_voiding` (offline con `prisma migrate diff`, revisada, 7 sentencias, solo agrega): valor `ANIMAL_PROFILE` en `PhotoCategory` (foto de ficha en `FileAsset`); `animal_medical_records.recorded_by_user_id`, `voided_at`, `voided_by_user_id` (FK `users`, nullable) — actor real y anulación lógica (el "✕" del prototipo borraba la fila); índice `(animal_id, record_date)`; `CHECK` `(type = 'WEIGHT') = (value IS NOT NULL)` y `value > 0`. Precondición en `READ ONLY` (0 animales, 0 registros, 0 archivos; 9 tipos reales intactos; PostgreSQL 18); aplicada a `demo` el 2026-09-25 con `db:migrate:deploy`, objetos verificados en el catálogo. `production` intacta. `Animal`/`AnimalType` sin cambios (el tipo inactivo ya existía como `active`; los 9 precargados se identifican por nombre, igual que el `builtin` del prototipo). El actor de una ficha o foto queda en `AuditLog` (`FileAsset.uploadedByEmployeeId` es el empleado de la sesión, `null` para un ADMIN sin empleado).
 
+### Etapa 5X — Más: novedades, eventos y galería (aplicada a `demo`)
+
+Migración `20260925200000_more_module` (offline con `prisma migrate diff`, revisada, solo agrega o cambia índices; no borra columnas ni filas):
+
+- `news_reports.recorded_by_user_id` (FK `users`, nullable solo por las 2 filas del seed): actor real, separado de la persona que reporta. Se **quitó** el índice único `(employee_id, text)`: el prototipo permitía repetir un aviso; el seed ahora busca por esos campos con `findFirst`. Índice `(created_at)` para el historial.
+- `events.deleted_at` / `deleted_by_user_id` (FK `users`) + `CHECK (deleted_at IS NULL) = (deleted_by_user_id IS NULL)`: el "✕" pasa a ser anulación lógica. La unicidad `(title, date, type)` pasa a ser **parcial** (`WHERE deleted_at IS NULL`). Índice `(date)`.
+- `file_assets.title` (nullable; `null` en fotos de ficha de mascota) e índice `(category, status, created_at)` para la galería.
+- Precondición en `READ ONLY` (2 novedades y 2 eventos reales, sin duplicados; 0 archivos; 0 perfiles/hijos); aplicada a `demo` el 2026-09-25 con `db:migrate:deploy` y verificada en `pg_indexes`/`pg_constraint`/`information_schema`. `production` intacta. Los cumpleaños no tienen tabla nueva: se derivan de `RecurringBirthday`, `EmployeeProfile.birthDate`, `EmployeeChild.birthDate` y `Animal.birthDate`.
+
 ### Qué queda pendiente para la Etapa 3 (autenticación) en adelante
 
 - Enforcement a nivel de servicio de las filas 2, 6, 9, 11, 14, 15 de la matriz de invariantes.

@@ -1,6 +1,6 @@
 import type { SystemRole } from '../api/types';
 
-export type NavIconName = 'home' | 'tasks' | 'stock' | 'chickenCoop' | 'pets' | 'users';
+export type NavIconName = 'home' | 'tasks' | 'stock' | 'chickenCoop' | 'pets' | 'more' | 'users';
 
 export interface AppRouteDefinition {
   path: string;
@@ -8,6 +8,8 @@ export interface AppRouteDefinition {
   icon: NavIconName;
   /** Rol exigido para la ruta. El mismo valor protege la ruta (`RequireRole`) y filtra el menú. */
   requiredRole?: SystemRole;
+  /** Otras rutas bajo las que este destino se marca como activo (Usuarios vive dentro de Más). */
+  activeFor?: readonly string[];
 }
 
 /**
@@ -16,8 +18,10 @@ export interface AppRouteDefinition {
  * `AppShell` para armar la navegación — así nunca pueden divergir (un
  * destino del menú sin ruta, o una ruta admin-only visible para
  * cualquiera). Nunca se agregan acá destinos de módulos que todavía no
- * existen (Novedades, Eventos, etc.), ni siquiera deshabilitados: cada
- * módulo suma su entrada en la etapa en que se construye.
+ * existen, ni siquiera deshabilitados: cada módulo suma su entrada en la
+ * etapa en que se construye. La barra replica la del prototipo (Inicio,
+ * Tareas, Stock, Gallinero, Mascotas, Más); Usuarios existe como ruta ADMIN
+ * y se abre desde ☰ Más → ⚙️ Configuración (como "Personas" en el prototipo).
  *
  * El backend sigue siendo la autoridad final: filtrar el menú solo evita
  * ofrecer un destino que igual se rechazaría.
@@ -28,6 +32,7 @@ export const APP_ROUTES = {
   stock: { path: '/stock', label: 'Stock', icon: 'stock' },
   chickenCoop: { path: '/chicken-coop', label: 'Gallinero', icon: 'chickenCoop' },
   pets: { path: '/pets', label: 'Mascotas', icon: 'pets' },
+  more: { path: '/more', label: 'Más', icon: 'more', activeFor: ['/admin'] },
   adminUsers: { path: '/admin/users', label: 'Usuarios', icon: 'users', requiredRole: 'ADMIN' },
 } as const satisfies Record<string, AppRouteDefinition>;
 
@@ -37,7 +42,7 @@ const NAVIGATION_ORDER: readonly AppRouteDefinition[] = [
   APP_ROUTES.stock,
   APP_ROUTES.chickenCoop,
   APP_ROUTES.pets,
-  APP_ROUTES.adminUsers,
+  APP_ROUTES.more,
 ];
 
 export function getVisibleNavigation(

@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { Link, NavLink, Outlet } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/useAuth';
 import { getRoleLabel, getUserDisplayName } from '../auth/userDisplay';
 import { Avatar } from '../components/ui/Avatar';
@@ -45,12 +45,22 @@ function PetsNavEmoji() {
   );
 }
 
+/** ☰ Más — símbolo del prototipo, decorativo. */
+function MoreNavEmoji() {
+  return (
+    <span className="nav-emoji" aria-hidden="true">
+      ☰
+    </span>
+  );
+}
+
 const NAV_ICONS: Record<NavIconName, ComponentType<{ size?: 'lg' }>> = {
   home: HomeIcon,
   tasks: TasksNavEmoji,
   stock: StockNavEmoji,
   chickenCoop: ChickenCoopNavEmoji,
   pets: PetsNavEmoji,
+  more: MoreNavEmoji,
   users: UsersIcon,
 };
 
@@ -64,6 +74,7 @@ const NAV_ICONS: Record<NavIconName, ComponentType<{ size?: 'lg' }>> = {
  */
 export function AppShell() {
   const { user, hasRole } = useAuth();
+  const { pathname } = useLocation();
   const items = getVisibleNavigation(hasRole);
 
   if (!user) {
@@ -117,14 +128,21 @@ export function AppShell() {
             const Icon = NAV_ICONS[item.icon];
             return (
               <li key={item.path} className="app-nav__item">
-                <NavLink
-                  to={item.path}
-                  end={item.path === APP_ROUTES.home.path}
-                  className="app-nav__link"
-                >
-                  <Icon size="lg" />
-                  <span>{item.label}</span>
-                </NavLink>
+                {item.activeFor?.some((prefix) => pathname.startsWith(prefix)) ? (
+                  <Link to={item.path} className="app-nav__link active" aria-current="page">
+                    <Icon size="lg" />
+                    <span>{item.label}</span>
+                  </Link>
+                ) : (
+                  <NavLink
+                    to={item.path}
+                    end={item.path === APP_ROUTES.home.path}
+                    className="app-nav__link"
+                  >
+                    <Icon size="lg" />
+                    <span>{item.label}</span>
+                  </NavLink>
+                )}
               </li>
             );
           })}

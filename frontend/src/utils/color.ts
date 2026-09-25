@@ -17,3 +17,11 @@ export function resolveSafeColor(colorHex: string | null | undefined): string {
     ? colorHex
     : NEUTRAL_AVATAR_COLOR;
 }
+
+/** Color por defecto de una persona nueva (`<input type="color" value="#4a7c59">` del prototipo). */
+export const DEFAULT_PERSON_COLOR = '#4a7c59';
+
+/** Solo `#rrggbb` (lo que acepta `<input type="color">` y el backend). */
+export function isPersonColor(value: string): boolean {
+  return /^#[0-9a-fA-F]{6}$/.test(value);
+}

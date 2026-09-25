@@ -12,6 +12,7 @@ import { PerformanceScreen } from '../features/tasks/PerformanceScreen';
 import { StockModule } from '../features/stock/StockModule';
 import { ChickenCoopScreen } from '../features/chickenCoop/ChickenCoopScreen';
 import { PetsModule } from '../features/pets/PetsModule';
+import { MoreModule } from '../features/more/MoreModule';
 import { APP_ROUTES } from './navigation';
 import { ProtectedRoute } from './ProtectedRoute';
 import { RequireRole } from './RequireRole';
@@ -23,7 +24,7 @@ import { RequireRole } from './RequireRole';
  *
  * `AppShell` es una ruta de layout DENTRO de `ProtectedRoute`: solo existe
  * para usuarios autenticados. Cualquier ruta no declarada (incluidos
- * módulos futuros como /news) cae en el catch-all y redirige.
+ * módulos futuros) cae en el catch-all y redirige.
  */
 export function AppRoutes() {
   const { status, retryBootstrap } = useAuth();
@@ -51,6 +52,8 @@ export function AppRoutes() {
           <Route path={APP_ROUTES.chickenCoop.path} element={<ChickenCoopScreen />} />
           {/* Listado y ficha de Mascotas como rutas descendientes. */}
           <Route path={`${APP_ROUTES.pets.path}/*`} element={<PetsModule />} />
+          {/* ☰ Más y sus submódulos como rutas descendientes. */}
+          <Route path={`${APP_ROUTES.more.path}/*`} element={<MoreModule />} />
           <Route
             path={APP_ROUTES.adminUsers.path}
             element={

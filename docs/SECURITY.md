@@ -225,3 +225,12 @@ Endpoints autenticados y rango Zod de hasta 90 días. El backend fuerza sesión 
 - La imagen se valida por su firma de bytes (JPG/PNG/WebP; SVG y otros formatos rechazados) y por tamaño antes de tocar la base; la clave del objeto la genera el backend (UUID), el nombre original es solo metadato saneado.
 - Lectura solo por el proxy autenticado, con `nosniff` y `Content-Security-Policy: default-src 'none'`; no hay URLs públicas ni firmadas persistidas. Cambiar o quitar una foto es solo de `ADMIN`, con baja lógica antes del borrado físico y auditoría.
 - Registros clínicos: persona y actor salen de la sesión; anular es solo `ADMIN` y nunca borra la fila.
+
+## Actualización — ☰ Más (Etapa 5X)
+
+- Todo detrás de `requireAuth`; Configuración además exige `ADMIN` en la ruta y en el servicio. Schemas `.strict()`: el cliente nunca envía el actor, el autor de sesión, estados de anulación ni datos calculados.
+- **Fotos**: mismas garantías que Mascotas (tipo real por bytes, tamaño acotado, clave UUID generada por el backend, proxy autenticado con `nosniff` y CSP `default-src 'none'`, sin bucket ni `objectKey` en las respuestas) más `ETag`/304 y un cupo de rate limit propio para imágenes (600/15 min) que no consume el general. Eliminar es solo `ADMIN`, con baja lógica antes del borrado físico; `npm run storage:reconcile` detecta y (con `--apply`) compensa huérfanos.
+- **Datos personales**: Mi perfil solo escribe el perfil de la persona de la sesión; el ADMIN los lee en Datos del equipo. Las auditorías de perfil e hijos guardan identificadores y nombres de campos, nunca valores (CUIL, teléfonos, fechas, nombres de menores).
+- **Personas**: la baja de una persona revoca sus sesiones y la saca del selector de ingreso; el login la rechaza con el error genérico de siempre. `/auth/me` y el login no exponen el estado interno del empleado.
+- **Clima**: el navegador no llama a servicios externos; el backend consulta Open-Meteo con timeout, valida la respuesta con Zod y nunca propaga errores del proveedor.
+- Idempotencia (`Idempotency-Key`) en el alta de novedades, hijos y fotos. Sin storage del navegador ni datos mock en runtime. `production` no se tocó.
