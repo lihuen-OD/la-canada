@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   createStockCategoryBodySchema,
+  createStockDestinationBodySchema,
   createStockItemBodySchema,
   createStockMovementBodySchema,
+  idempotencyKeySchema,
+  listStockDestinationsQuerySchema,
   listStockItemsQuerySchema,
   listStockMovementsQuerySchema,
   stockMinimumQuantityTextSchema,
   stockQuantityTextSchema,
   updateStockCategoryBodySchema,
+  updateStockDestinationBodySchema,
   updateStockItemBodySchema,
 } from '../../stock/stockSchemas';
 
@@ -230,5 +234,145 @@ describe('listStockMovementsQuerySchema', () => {
 
   it('rechaza un tipo fuera del enum', () => {
     expect(listStockMovementsQuerySchema.safeParse({ type: 'OTRO' }).success).toBe(false);
+  });
+});
+
+describe('listStockItemsQuerySchema — filtro stockLevel', () => {
+  it.each(['ok', 'low', 'critical'])('acepta stockLevel=%s', (level) => {
+    expect(listStockItemsQuerySchema.safeParse({ stockLevel: level }).success).toBe(true);
+  });
+
+  it.each(['crit', 'OK', 'low ', ''])('rechaza stockLevel=%s', (level) => {
+    expect(listStockItemsQuerySchema.safeParse({ stockLevel: level }).success).toBe(false);
+  });
+});
+
+describe('listStockDestinationsQuerySchema', () => {
+  it('por defecto lista solo activos', () => {
+    const parsed = listStockDestinationsQuerySchema.safeParse({});
+    expect(parsed.success && parsed.data).toEqual({ status: 'active' });
+  });
+
+  it('acepta status=all (lectura de inactivos, restringida a ADMIN en el service)', () => {
+    expect(listStockDestinationsQuerySchema.safeParse({ status: 'all' }).success).toBe(true);
+  });
+
+  it('rechaza otros estados y filtros desconocidos', () => {
+    expect(listStockDestinationsQuerySchema.safeParse({ status: 'inactive' }).success).toBe(false);
+    expect(listStockDestinationsQuerySchema.safeParse({ orden: 'nombre' }).success).toBe(false);
+  });
+});
+
+describe('createStockDestinationBodySchema / updateStockDestinationBodySchema', () => {
+  it('acepta un destino válido VEHICLE/SECTOR', () => {
+    expect(
+      createStockDestinationBodySchema.safeParse({ name: 'Atajo', type: 'SECTOR' }).success,
+    ).toBe(true);
+    expect(
+      createStockDestinationBodySchema.safeParse({ name: 'Camioneta', type: 'VEHICLE' }).success,
+    ).toBe(true);
+  });
+
+  it('colapsa espacios del nombre como el resto del módulo', () => {
+    const parsed = createStockDestinationBodySchema.safeParse({
+      name: '  Atajo   del   fondo  ',
+      type: 'SECTOR',
+    });
+    expect(parsed.success && parsed.data.name).toBe('Atajo del fondo');
+  });
+
+  it('rechaza tipo fuera del enum, campos desconocidos y nombre muy corto', () => {
+    expect(
+      createStockDestinationBodySchema.safeParse({ name: 'Atajo', type: 'TRUCK' }).success,
+    ).toBe(false);
+    expect(
+      createStockDestinationBodySchema.safeParse({ name: 'Atajo', type: 'SECTOR', active: true })
+        .success,
+    ).toBe(false);
+    expect(createStockDestinationBodySchema.safeParse({ name: 'A', type: 'SECTOR' }).success).toBe(
+      false,
+    );
+  });
+
+  it('el update admite nombre, estado o ambos; vacío se rechaza', () => {
+    expect(updateStockDestinationBodySchema.safeParse({ name: 'Nuevo nombre' }).success).toBe(true);
+    expect(updateStockDestinationBodySchema.safeParse({ active: false }).success).toBe(true);
+    expect(
+      updateStockDestinationBodySchema.safeParse({ name: 'Nuevo', active: false }).success,
+    ).toBe(true);
+    expect(updateStockDestinationBodySchema.safeParse({}).success).toBe(false);
+  });
+
+  it('el update no permite cambiar type (inmutable) ni campos desconocidos', () => {
+    expect(updateStockDestinationBodySchema.safeParse({ type: 'SECTOR' }).success).toBe(false);
+    expect(updateStockDestinationBodySchema.safeParse({ name: 'X', otro: 1 }).success).toBe(false);
+    expect(
+      updateStockDestinationBodySchema.safeParse({
+        name: 'Destino válido',
+        active: false,
+        type: 'VEHICLE',
+        id: '11111111-1111-4111-8111-111111111111',
+        movements: [],
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('idempotencyKeySchema — formato del header (Etapa 5C.1)', () => {
+  it.each([
+    ['abcdefgh', 'mínimo 8 caracteres'],
+    ['A1_b2-C3_d4', 'letras, números, guion bajo y guion'],
+    ['f47ac10b-58cc-4372-a567-0e02b2c3d479', 'uuid de 36 caracteres'],
+    ['x'.repeat(64), 'máximo 64 caracteres'],
+  ])('acepta %s (%s)', (value) => {
+    expect(idempotencyKeySchema.safeParse(value).success).toBe(true);
+  });
+
+  it.each([
+    ['abcdefg', '7 caracteres'],
+    ['x'.repeat(65), '65 caracteres'],
+    ['con espacio', 'espacio'],
+    ['con:dos_puntos', 'dos puntos'],
+    ['con/slash', 'slash'],
+    ['', 'vacía'],
+  ])('rechaza %s (%s)', (value) => {
+    expect(idempotencyKeySchema.safeParse(value).success).toBe(false);
+  });
+});
+
+describe('createStockMovementBodySchema — opcionales canónicos para idempotencia', () => {
+  it('omitido y undefined se eliminan del body validado', () => {
+    expect(
+      createStockMovementBodySchema.parse({
+        type: 'INCOME',
+        quantity: '1',
+        effectiveDate: undefined,
+        destinationId: undefined,
+        reason: undefined,
+      }),
+    ).toEqual({
+      type: 'INCOME',
+      quantity: '1',
+      effectiveDate: undefined,
+      destinationId: undefined,
+      reason: undefined,
+    });
+  });
+
+  it.each([
+    { effectiveDate: null },
+    { effectiveDate: '' },
+    { destinationId: null },
+    { destinationId: '' },
+    { reason: null },
+    { reason: '' },
+  ])('rechaza null o string vacío en opcionales: %o', (optional) => {
+    expect(
+      createStockMovementBodySchema.safeParse({
+        type: 'CONSUMPTION',
+        quantity: '1',
+        ...optional,
+      }).success,
+    ).toBe(false);
   });
 });

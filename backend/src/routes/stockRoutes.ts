@@ -8,9 +8,11 @@ import {
   getStockItemMovements,
   getStockItems,
   patchStockCategory,
+  patchStockDestination,
   patchStockItem,
   patchStockItemStatus,
   postStockCategory,
+  postStockDestination,
   postStockItem,
   postStockMovement,
 } from '../controllers/stockController';
@@ -22,7 +24,8 @@ import {
  * varias rutas sirven a ambos roles con reglas distintas (ingresos y
  * consumos son de cualquier usuario logueado; ajustes y catálogo, solo
  * ADMIN). El historial de movimientos es inmutable: solo existe POST de
- * creación, nunca PUT/PATCH/DELETE sobre movimientos.
+ * creación, nunca PUT/PATCH/DELETE sobre movimientos. Los destinos tampoco
+ * se borran (Etapa 5C.1): solo POST/PATCH — la baja es inactivación.
  */
 export const stockRouter = Router();
 
@@ -34,6 +37,8 @@ stockRouter.get('/items/:id', getStockItem);
 stockRouter.get('/items/:id/movements', getStockItemMovements);
 stockRouter.post('/categories', requireJsonContentType, postStockCategory);
 stockRouter.patch('/categories/:id', requireJsonContentType, patchStockCategory);
+stockRouter.post('/destinations', requireJsonContentType, postStockDestination);
+stockRouter.patch('/destinations/:id', requireJsonContentType, patchStockDestination);
 stockRouter.post('/items', requireJsonContentType, postStockItem);
 stockRouter.patch('/items/:id', requireJsonContentType, patchStockItem);
 stockRouter.patch('/items/:id/status', requireJsonContentType, patchStockItemStatus);

@@ -212,6 +212,12 @@ model User {
   sessions  Session[]
   auditLogs AuditLog[] @relation("AuditActor")
 
+  /// Etapa 5C.1 — registros idempotentes creados por este usuario (la
+  /// relación es obligatoria del lado del registro: no existe un registro
+  /// de idempotencia sin actor, y un User no puede eliminarse mientras
+  /// tenga registros suyos — Prisma infiere ON DELETE RESTRICT).
+  idempotencyRecords IdempotencyRecord[]
+
   /// Etapa 4A — actor (User) que registró / revirtió una ejecución de
   /// tarea. Distinto del empleado ejecutor: un ADMIN sin `Employee`
   /// vinculado puede registrar que un empleado completó una tarea.
@@ -609,6 +615,66 @@ model ConsumptionDestination {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("consumption_destinations")
+}
+
+/// Registro de idempotencia para escrituras que aceptan el header
+/// `Idempotency-Key` (Etapa 5C.1). Introducido para
+/// `POST /api/v1/stock/items/:id/movements`; el diseño es genérico
+/// (actor + endpoint + clave) para poder reutilizarse en futuros POST
+/// idempotentes. **No** reutiliza `StockMovement.reference`: esa clave
+/// natural única sigue reservada a los `OPENING_BALANCE` del seed y es un
+/// concepto distinto (ver el modelo `StockMovement`).
+///
+/// Invariante transaccional (documentada también en docs/DATABASE.md):
+/// un registro incompleto (`response_status`/`response_body`/`completed_at`
+/// en NULL) **nunca sobrevive a un commit**. La reserva (INSERT) y la
+/// completitud (UPDATE con la respuesta armada) ocurren en la MISMA
+/// transacción que la actualización de saldo, el `StockMovement` y su
+/// `AuditLog`: o todo confirma (registro completo + movimiento), o todo
+/// revierte (sin fila idempotente). Un registro sin respuesta solo puede
+/// existir dentro de la transacción que finalmente confirma o revierte —
+/// por eso el INSERT va primero: si cualquier paso posterior falla, la
+/// reserva se revierte junto con el resto.
+///
+/// Sin purga en esta etapa (deuda documentada): el índice por `createdAt`
+/// deja la tabla lista para un futuro proceso de retención. Igual que
+/// `Session`/`AuditLog`, no declara `updatedAt`: la fila se escribe una vez
+/// (reserva) y se completa una única vez, nunca se reescribe después.
+model IdempotencyRecord {
+  id          String @id @default(uuid()) @db.Uuid
+  actorUserId String @map("actor_user_id") @db.Uuid
+  actor       User   @relation(fields: [actorUserId], references: [id])
+
+  /// Endpoint lógico, p. ej. `POST /stock/items/<uuid>/movements` — separa
+  /// dominios para que la misma clave de un cliente no choque entre
+  /// endpoints distintos.
+  endpoint    String
+  /// Clave enviada por el cliente en el header `Idempotency-Key`
+  /// (`^[A-Za-z0-9_-]{8,64}$`, validada en el backend).
+  key         String
+  /// SHA-256 hex sobre la serialización canónica documentada en
+  /// `stockService.ts` (endpoint lógico + itemId + body validado y
+  /// normalizado, con orden de propiedades fijo).
+  requestHash String @map("request_hash")
+
+  /// HTTP status y body a devolver en un replay. NULL hasta que la
+  /// transacción construye la respuesta; los tres campos se confirman
+  /// juntos en esa misma transacción (`completedAt` marca el registro como
+  /// completo y reutilizable).
+  responseStatus Int?      @map("response_status")
+  responseBody   Json?     @map("response_body")
+  completedAt    DateTime? @map("completed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// Una única fila lógica por (actor, endpoint, clave): la colisión
+  /// concurrente se resuelve con el índice único de Postgres, nunca con
+  /// caché en memoria del proceso.
+  @@unique([actorUserId, endpoint, key])
+  /// Soporte del futuro proceso de purga por antigüedad (no existe todavía
+  /// — deuda documentada de esta etapa).
+  @@index([createdAt])
+  @@map("idempotency_records")
 }
 
 // ═══════════════════════════════════════════════════════════════════════

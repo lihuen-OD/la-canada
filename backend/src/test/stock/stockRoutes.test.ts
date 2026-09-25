@@ -14,9 +14,11 @@ describe('/api/v1/stock — autenticación', () => {
     ['GET', `/api/v1/stock/items/${ID}`],
     ['GET', `/api/v1/stock/items/${ID}/movements`],
     ['POST', `/api/v1/stock/categories`],
+    ['POST', `/api/v1/stock/destinations`],
     ['POST', `/api/v1/stock/items`],
     ['POST', `/api/v1/stock/items/${ID}/movements`],
     ['PATCH', `/api/v1/stock/categories/${ID}`],
+    ['PATCH', `/api/v1/stock/destinations/${ID}`],
     ['PATCH', `/api/v1/stock/items/${ID}`],
     ['PATCH', `/api/v1/stock/items/${ID}/status`],
   ] as const)('%s %s requiere sesión y no expone detalles', async (method, path) => {
@@ -38,6 +40,20 @@ describe('/api/v1/stock — historial inmutable', () => {
   it('no declara PUT, PATCH ni DELETE para movimientos', () => {
     const source = readFileSync(resolve(__dirname, '../../routes/stockRoutes.ts'), 'utf8');
     expect(source).not.toMatch(/stockRouter\.(?:put|delete)\(/);
+    expect(source).not.toMatch(/stockRouter\.patch\([^\n]*movements/);
+  });
+});
+
+describe('/api/v1/stock/destinations — alta y edición sin borrado físico', () => {
+  const source = readFileSync(resolve(__dirname, '../../routes/stockRoutes.ts'), 'utf8');
+
+  it('declara POST y PATCH de destinos', () => {
+    expect(source).toMatch(/stockRouter\.post\('\/destinations'/);
+    expect(source).toMatch(/stockRouter\.patch\('\/destinations\/:id'/);
+  });
+
+  it('no declara DELETE para destinos (la baja es inactivación)', () => {
+    expect(source).not.toMatch(/stockRouter\.delete\(/);
     expect(source).not.toMatch(/stockRouter\.patch\([^\n]*movements/);
   });
 });

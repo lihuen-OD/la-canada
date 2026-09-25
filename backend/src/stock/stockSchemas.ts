@@ -20,8 +20,21 @@ export const ALL_MOVEMENT_TYPES = [
 
 export const STOCK_NAME_MAX_LENGTH = 100;
 export const STOCK_CATEGORY_NAME_MAX_LENGTH = 80;
+export const STOCK_DESTINATION_NAME_MAX_LENGTH = 80;
 export const STOCK_UNIT_MAX_LENGTH = 30;
 export const STOCK_REASON_MAX_LENGTH = 300;
+
+/** Tipos del enum `DestinationType` (prototipo: vehículos y sectores). */
+export const STOCK_DESTINATION_TYPES = ['VEHICLE', 'SECTOR'] as const;
+
+/** Formato admitido por el header `Idempotency-Key` (Etapa 5C.1). */
+export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
+export const idempotencyKeySchema = z
+  .string({ message: 'Idempotency-Key inválido.' })
+  .regex(
+    IDEMPOTENCY_KEY_PATTERN,
+    'Idempotency-Key inválido: se admiten de 8 a 64 caracteres (letras, números, "-" o "_").',
+  );
 
 /** Colapsa espacios (incluidos saltos de línea y tabs) y recorta extremos. */
 export function normalizeStockText(value: string): string {
@@ -116,12 +129,40 @@ export const updateStockCategoryBodySchema = z
 
 export const stockStatusBodySchema = z.object({ active: z.boolean() }).strict();
 
+export const listStockDestinationsQuerySchema = z
+  .object({
+    status: z.enum(['active', 'all']).default('active'),
+  })
+  .strict();
+
+export const createStockDestinationBodySchema = z
+  .object({
+    name: plainText('El nombre', 2, STOCK_DESTINATION_NAME_MAX_LENGTH),
+    type: z.enum(STOCK_DESTINATION_TYPES, { message: 'Tipo de destino inválido.' }),
+  })
+  .strict();
+
+/** `type` no se edita: cambiar el tipo de un destino altera su significado histórico. */
+export const updateStockDestinationBodySchema = z
+  .object({
+    name: plainText('El nombre', 2, STOCK_DESTINATION_NAME_MAX_LENGTH).optional(),
+    active: z.boolean().optional(),
+  })
+  .strict()
+  .refine((body) => Object.values(body).some((value) => value !== undefined), {
+    message: 'No hay cambios para aplicar.',
+  });
+
 export const listStockItemsQuerySchema = z
   .object({
     area: z.enum(STOCK_ITEM_AREAS, { message: 'Área inválida.' }).optional(),
     categoryId: uuidSchema.optional(),
     status: z.enum(['active', 'inactive', 'all']).default('active'),
     q: z.string().min(1).max(100).optional(),
+    /** Filtro server-side por nivel (ver `stock/stockLevel.ts`); la paginación se aplica después. */
+    stockLevel: z
+      .enum(['ok', 'low', 'critical'], { message: 'Nivel de stock inválido.' })
+      .optional(),
     page: pageSchema,
     pageSize: pageSizeSchema,
   })

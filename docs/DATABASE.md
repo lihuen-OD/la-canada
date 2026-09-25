@@ -406,7 +406,7 @@ Invariantes de negocio que Prisma **no** puede expresar de forma completamente d
 | 3 | `User.status = ACTIVE` ⇒ `pinHash` no nulo (columna renombrada de `passwordHash` en la Etapa 3B.2) | — | ✅ `CHECK (status != 'ACTIVE' OR pin_hash IS NOT NULL)` | ✅ (al activar, `POST /admin/users/:id/activate`) | — | Columnas de la misma fila — `CHECK` de una sola tabla |
 | 4 | `FileAsset` no vinculado simultáneamente a `taskId` y `animalId` | — | ✅ `CHECK (NOT (task_id IS NOT NULL AND animal_id IS NOT NULL))` | ✅ | — | Columnas de la misma fila — `CHECK` de una sola tabla |
 | 5 | `StockMovement.quantity` siempre positiva | — | ✅ `CHECK (quantity > 0)` | ✅ | — | Ya casi garantizado por `@db.Decimal` + validación de formulario, pero conviene el `CHECK` como defensa final |
-| 6 | El saldo (`StockItem.currentQuantity`) nunca queda negativo tras `CONSUMPTION`/`ADJUSTMENT_DECREASE` | — | — | ✅ | — | Depende del saldo concurrente — no expresable como `CHECK` estático; Etapa 5A usa una actualización condicional atómica (`currentQuantity >= quantity`) dentro de la transacción, no leer-calcular-escribir |
+| 6 | El saldo (`StockItem.currentQuantity`) nunca queda negativo tras `CONSUMPTION`/`ADJUSTMENT_DECREASE` | — | ✅ `CHECK (current_quantity >= 0)` — **Etapa 5C.1A, en la migración `20260924210000_stock_idempotency_balance_check` (sin aplicar)** | ✅ | — | Depende del saldo concurrente — no expresable como un `CHECK` que reemplace la lógica; la Etapa 5A usa una actualización condicional atómica (`currentQuantity >= quantity`) dentro de la transacción (garantía principal frente a concurrencia) y el `CHECK` de la Etapa 5C.1A es el piso de defensa en profundidad contra cualquier otra vía de escritura |
 | 7 | Un `StockMovement` `OPENING_BALANCE` como máximo por `StockItem` | ✅ `StockMovement.reference @unique` | (ya cubierto por 1) | — | — | Resuelto en este schema — ver "Idempotencia del movimiento de apertura" arriba |
 | 8 | Singleton de `ChickenCoop`/`PropertyLocation` identificado por clave única | ✅ `code @unique` | — | — | — | Resuelto en este schema — ver "Singletons reforzados" arriba |
 | 9 | `TaskExecution.assignedEmployeeId` = snapshot inmutable, nunca se reescribe tras reasignar `Task.employeeId` | — | — | ✅ | — | Prisma no puede "congelar" un valor tras la creación; el servicio simplemente nunca debe incluir ese campo en un `update()` |
@@ -419,7 +419,7 @@ Invariantes de negocio que Prisma **no** puede expresar de forma completamente d
 | 16 | Solo el backend tiene credenciales de Object Storage | — | — | — | ✅ | El frontend (Netlify) nunca recibe `OBJECT_STORAGE_*`; verificado por convención de `.env`/despliegue, no por el schema — ver `docs/ARCHITECTURE.md`, sección 9.3 |
 | 17 | El bucket de `production` y el de `demo` nunca se mezclan (aunque compartan nombre) | — | — | — | ✅ | Cada rama de Neon usa credenciales propias configuradas por entorno (Render vs. backend local) — decisión operativa, no expresable en el schema ni en una migración |
 
-Ninguna de estas se implementa todavía (no hay migración ni servicios en esta etapa) — la tabla es la referencia para cuando corresponda.
+**Actualización (Etapas 3A–5C.1)**: varias filas ya están implementadas — los `CHECK` de las filas 1, 3, 4, 5 y 13 viven en la migración inicial aplicada a `demo`; la fila 6 agregó su `CHECK` en la migración 5C.1A (generada, **sin aplicar**); la fila 10 se resolvió con el índice parcial de la Etapa 4A. La tabla sigue siendo la referencia para el resto.
 
 ## Revisión estática final del modelo (esta revisión correctiva)
 
@@ -468,6 +468,16 @@ Migración `20260924120000_task_execution_reversal` (generada offline con `prism
 ### Etapa 4B — historial de planificación
 
 La migración `20260924170000_task_planning_history` crea `task_planning_intervals`. El backfill inicia cada intervalo en `Task.createdAt`; las activas quedan abiertas y las inactivas cierran en `updatedAt` (mínimo 1 ms). Las métricas son confiables desde la creación registrada de cada tarea, nunca antes. Un CHECK valida el rango y un índice único parcial impide dos intervalos abiertos por tarea.
+
+### Etapa 5C.1A — `IdempotencyRecord` y CHECK de saldo no negativo (generada, sin aplicar)
+
+Migración `20260924210000_stock_idempotency_balance_check`, generada **offline** con `prisma migrate diff --from-schema <schema antes> --to-schema <schema ahora>` (comparación pura entre dos archivos, sin base de datos ni shadow DB) y revisada a mano. **No fue aplicada a ninguna base** — la corrección contra `demo` corresponde a la Etapa 5C.1C con autorización humana.
+
+- **Tabla nueva `idempotency_records`**: registro de idempotencia para escrituras que aceptan el header `Idempotency-Key` (hoy: `POST /api/v1/stock/items/:id/movements`). Columnas: `id`, `actor_user_id` (UUID obligatorio, FK a `users` con `ON DELETE RESTRICT`), `endpoint` (endpoint lógico, p. ej. `POST /stock/items/<uuid>/movements`), `key` (clave del cliente), `request_hash` (SHA-256 de la serialización canónica del request), `response_status`/`response_body`/`completed_at` (la respuesta a devolver en un replay; los tres se confirman juntos), `created_at`. Índices: único `@@unique([actor_user_id, endpoint, key])` (una fila lógica por actor+endpoint+clave — la colisión concurrente la resuelve Postgres, nunca una caché en memoria) y `@@index([created_at])` (soporte del futuro proceso de purga por antigüedad).
+- **Invariante transaccional**: un registro incompleto (`response_*`/`completed_at` en NULL) **nunca sobrevive a un commit** — la reserva (INSERT, primero), la actualización de saldo, el `StockMovement`, su `AuditLog` y la completitud (UPDATE con la respuesta armada) ocurren en la MISMA transacción. No existe purga de registros en esta etapa: es deuda documentada (el índice por `created_at` ya soporta el proceso cuando se implemente).
+- **No reutiliza `StockMovement.reference`**: esa clave natural única sigue reservada a los `OPENING_BALANCE` del seed (ver "Idempotencia del movimiento de apertura" arriba) — es un concepto distinto.
+- **CHECK nuevo `stock_items_current_quantity_non_negative_check`**: `CHECK ("current_quantity" >= 0)` sobre `stock_items`, agregado a mano en la misma migración (Prisma no declara CHECK en `schema.prisma`). Piso de defensa en profundidad de la fila 6 de la matriz; no reemplaza la actualización condicional atómica del servicio. **Precondición a verificar antes de aplicarla (5C.1C)**: ningún `stock_items` existente tiene `current_quantity < 0`.
+- El SQL no contiene ningún `DROP`, `TRUNCATE`, `DELETE` ni `ON DELETE CASCADE`, no recrea ninguna tabla existente y no toca `stock_movements.reference` ni ninguna fila de datos.
 
 ### Qué queda pendiente para la Etapa 3 (autenticación) en adelante
 

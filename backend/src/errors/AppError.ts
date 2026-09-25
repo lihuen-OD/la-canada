@@ -245,3 +245,51 @@ export class StockBalanceLimitError extends AppError {
     });
   }
 }
+
+/** Mismo `name` en ConsumptionDestination (`name String @unique`). */
+export class StockDestinationDuplicateError extends AppError {
+  constructor() {
+    super('Ya existe un destino con ese nombre.', 409, {
+      code: 'STOCK_DESTINATION_DUPLICATE',
+    });
+  }
+}
+
+// ── Idempotencia (Etapa 5C.1) ─────────────────────────────────────────────
+
+/** El header `Idempotency-Key` no cumple `^[A-Za-z0-9_-]{8,64}$`. */
+export class IdempotencyKeyInvalidError extends AppError {
+  constructor() {
+    super(
+      'Idempotency-Key inválido: se admiten de 8 a 64 caracteres (letras, números, "-" o "_").',
+      400,
+      { code: 'IDEMPOTENCY_KEY_INVALID' },
+    );
+  }
+}
+
+/** Misma (actor, endpoint, clave) ya completada con un cuerpo de request distinto. */
+export class IdempotencyKeyConflictError extends AppError {
+  constructor() {
+    super('La clave Idempotency-Key ya fue usada con un cuerpo distinto.', 409, {
+      code: 'IDEMPOTENCY_KEY_CONFLICT',
+    });
+  }
+}
+
+/**
+ * La operación idempotente no está disponible para replay seguro: el registro
+ * está incompleto o, defensivamente, no quedó visible tras la colisión. En
+ * Postgres el INSERT perdedor normalmente espera el commit del ganador, así
+ * que esto representa un estado transitorio/inesperado. Nunca se reejecuta la
+ * escritura a ciegas.
+ */
+export class IdempotencyRecordPendingError extends AppError {
+  constructor() {
+    super(
+      'La operación anterior con esta clave todavía se está completando. Volvé a intentar.',
+      409,
+      { code: 'IDEMPOTENCY_RECORD_PENDING' },
+    );
+  }
+}

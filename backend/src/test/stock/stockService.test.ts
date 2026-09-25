@@ -4,10 +4,14 @@ import {
   DuplicateStockItemError,
   EmployeeLinkRequiredError,
   ForbiddenError,
+  IdempotencyKeyConflictError,
+  IdempotencyKeyInvalidError,
+  IdempotencyRecordPendingError,
   StockBalanceLimitError,
   StockCategoryInUseError,
   StockCategoryInactiveError,
   StockCategoryNotFoundError,
+  StockDestinationDuplicateError,
   StockDestinationInactiveError,
   StockDestinationNotFoundError,
   StockInsufficientQuantityError,
@@ -16,7 +20,9 @@ import {
   ValidationError,
 } from '../../errors/AppError';
 import {
+  computeMovementRequestHash,
   createStockCategory,
+  createStockDestination,
   createStockItem,
   createStockMovement,
   getStockItem,
@@ -26,11 +32,20 @@ import {
   listStockMovements,
   setStockItemActive,
   updateStockCategory,
+  updateStockDestination,
   updateStockItem,
+  type CreateStockMovementResult,
   type RequestMeta,
   type StockActor,
 } from '../../stock/stockService';
-import { getFakeStockPrisma, resetFakeStockPrisma } from './fakeStockPrisma';
+import {
+  fakeAnonymousP2002,
+  fakeLegacyP2002,
+  fakeP2002,
+  fakeP2028,
+  getFakeStockPrisma,
+  resetFakeStockPrisma,
+} from './fakeStockPrisma';
 
 vi.mock('../../lib/prisma', async () => {
   const { getFakeStockPrismaApi } = await import('./fakeStockPrisma.js');
@@ -155,6 +170,10 @@ describe('semántica HTTP y códigos estables de Stock', () => {
     [new DuplicateStockCategoryError(), 409, 'STOCK_CATEGORY_DUPLICATE'],
     [new StockCategoryInUseError(), 409, 'STOCK_CATEGORY_IN_USE'],
     [new StockBalanceLimitError(), 409, 'STOCK_BALANCE_LIMIT'],
+    [new StockDestinationDuplicateError(), 409, 'STOCK_DESTINATION_DUPLICATE'],
+    [new IdempotencyKeyInvalidError(), 400, 'IDEMPOTENCY_KEY_INVALID'],
+    [new IdempotencyKeyConflictError(), 409, 'IDEMPOTENCY_KEY_CONFLICT'],
+    [new IdempotencyRecordPendingError(), 409, 'IDEMPOTENCY_RECORD_PENDING'],
   ])('%s → %i %s', (error, statusCode, code) => {
     expect(error).toMatchObject({ statusCode, code, isOperational: true });
   });
@@ -221,6 +240,92 @@ describe('listStockItems', () => {
   });
 });
 
+describe('listStockItems — filtro server-side por stockLevel', () => {
+  it('filtra low sobre activos y devuelve el nivel calculado en el DTO', async () => {
+    const { items, total } = await listStockItems(admin, {
+      status: 'active',
+      stockLevel: 'low',
+      page: 1,
+      pageSize: 50,
+    });
+    expect(total).toBe(2);
+    expect(items.map((item) => item.name)).toEqual(['Detergente', 'Fertilizante NPK']);
+    expect(items.every((item) => item.stockLevel === 'low')).toBe(true);
+    expect(items[0]?.stockLevel).toBe('low');
+    expect(items[0]).not.toHaveProperty('barPercent');
+  });
+
+  it('ok con status=all incluye al producto inactivo (conserva su nivel matemático)', async () => {
+    const { items, total } = await listStockItems(admin, {
+      status: 'all',
+      stockLevel: 'ok',
+      page: 1,
+      pageSize: 50,
+    });
+    expect(total).toBe(1);
+    expect(items[0]?.name).toBe('Papel higiénico');
+    expect(items[0]?.stockLevel).toBe('ok');
+    expect(items[0]?.active).toBe(false);
+  });
+
+  it('critical detecta saldo en cero aunque el mínimo también sea 0', async () => {
+    const fake = getFakeStockPrisma();
+    const fertilizante = fake.items.get(ITEM_FERTILIZANTE)!;
+    fertilizante.currentQuantity = '0';
+    fertilizante.minimumQuantity = '0';
+    const { items, total } = await listStockItems(admin, {
+      status: 'active',
+      stockLevel: 'critical',
+      page: 1,
+      pageSize: 50,
+    });
+    expect(total).toBe(1);
+    expect(items[0]?.name).toBe('Fertilizante NPK');
+    expect(items[0]?.stockLevel).toBe('critical');
+  });
+
+  it('se combina con los filtros existentes y pagina DESPUÉS del filtro', async () => {
+    const garden = await listStockItems(admin, {
+      status: 'active',
+      stockLevel: 'low',
+      area: 'GARDEN',
+      page: 1,
+      pageSize: 50,
+    });
+    expect(garden.items.map((item) => item.name)).toEqual(['Fertilizante NPK']);
+
+    const page1 = await listStockItems(admin, {
+      status: 'active',
+      stockLevel: 'low',
+      page: 1,
+      pageSize: 1,
+    });
+    expect(page1.items).toHaveLength(1);
+    expect(page1.total).toBe(2);
+    expect(page1.totalPages).toBe(2);
+
+    const none = await listStockItems(admin, {
+      status: 'active',
+      stockLevel: 'ok',
+      page: 1,
+      pageSize: 50,
+    });
+    expect(none.items).toEqual([]);
+    expect(none.total).toBe(0);
+    expect(none.totalPages).toBe(1);
+  });
+
+  it('un EMPLOYEE puede filtrar por nivel (no es permiso de administración)', async () => {
+    const { total } = await listStockItems(employee, {
+      status: 'active',
+      stockLevel: 'low',
+      page: 1,
+      pageSize: 50,
+    });
+    expect(total).toBe(2);
+  });
+});
+
 describe('listStockCategories / listStockDestinations / getStockItem', () => {
   it('lista solo categorías activas por defecto, Casa antes que Jardín', async () => {
     const { categories } = await listStockCategories(admin, { status: 'active' });
@@ -240,9 +345,11 @@ describe('listStockCategories / listStockDestinations / getStockItem', () => {
     );
   });
 
-  it('lista solo destinos activos', async () => {
-    const { destinations } = await listStockDestinations();
-    expect(destinations).toEqual([{ id: DEST_OPERATIVO, name: 'Camioneta', type: 'VEHICLE' }]);
+  it('lista solo destinos activos por defecto (con su estado)', async () => {
+    const { destinations } = await listStockDestinations(admin, { status: 'active' });
+    expect(destinations).toEqual([
+      { id: DEST_OPERATIVO, name: 'Camioneta', type: 'VEHICLE', active: true },
+    ]);
   });
 
   it('detalle de producto inexistente → 404', async () => {
@@ -250,6 +357,158 @@ describe('listStockCategories / listStockDestinations / getStockItem', () => {
       statusCode: 404,
       code: 'STOCK_ITEM_NOT_FOUND',
     });
+  });
+});
+
+describe('listStockDestinations — status=all es de ADMIN', () => {
+  it('muestra los inactivos con su estado', async () => {
+    const { destinations } = await listStockDestinations(admin, { status: 'all' });
+    expect(destinations.map((destination) => destination.name)).toEqual(['Camioneta', 'Cochera']);
+    expect(destinations.find((destination) => destination.name === 'Cochera')?.active).toBe(false);
+  });
+
+  it('un EMPLOYEE no ve destinos inactivos', async () => {
+    await expect(listStockDestinations(employee, { status: 'all' })).rejects.toThrow(
+      'Solo un administrador puede ver destinos inactivos.',
+    );
+  });
+});
+
+describe('createStockDestination / updateStockDestination (Etapa 5C.1)', () => {
+  it('un EMPLOYEE no administra destinos', async () => {
+    await expect(
+      createStockDestination(employee, { name: 'Atajo', type: 'SECTOR' }, meta),
+    ).rejects.toThrow(ForbiddenError);
+    await expect(
+      updateStockDestination(employee, DEST_OPERATIVO, { active: false }, meta),
+    ).rejects.toThrow(ForbiddenError);
+  });
+
+  it('crea un destino y audita stock.destination.created', async () => {
+    const { destination } = await createStockDestination(
+      admin,
+      { name: 'Atajo del fondo', type: 'SECTOR' },
+      meta,
+    );
+    expect(destination).toMatchObject({
+      name: 'Atajo del fondo',
+      type: 'SECTOR',
+      active: true,
+    });
+    const log = getFakeStockPrisma().auditLogs.find(
+      (entry) => entry.action === 'stock.destination.created',
+    );
+    expect(log?.entityType).toBe('ConsumptionDestination');
+    expect(log?.newState).toMatchObject({ name: 'Atajo del fondo', type: 'SECTOR', active: true });
+  });
+
+  it('nombre duplicado (global) → 409 controlado', async () => {
+    await expect(
+      createStockDestination(admin, { name: 'Camioneta', type: 'VEHICLE' }, meta),
+    ).rejects.toThrow(StockDestinationDuplicateError);
+  });
+
+  it('si falla la auditoría se revierte el destino (sin altas parciales)', async () => {
+    const fake = getFakeStockPrisma();
+    fake.hooks.beforeAuditLogCreate = () => {
+      throw new Error('fallo sintético de auditoría');
+    };
+    await expect(
+      createStockDestination(admin, { name: 'Temporal', type: 'SECTOR' }, meta),
+    ).rejects.toThrow('fallo sintético de auditoría');
+    fake.hooks.beforeAuditLogCreate = undefined;
+    expect([...fake.destinations.values()].some((row) => row.name === 'Temporal')).toBe(false);
+    expect(fake.auditLogs).toHaveLength(0);
+  });
+
+  it('si falla la segunda auditoría se revierten juntos nombre, estado y ambos logs', async () => {
+    const fake = getFakeStockPrisma();
+    let auditCalls = 0;
+    fake.hooks.beforeAuditLogCreate = () => {
+      auditCalls += 1;
+      if (auditCalls === 2) throw new Error('fallo sintético en segunda auditoría');
+    };
+    await expect(
+      updateStockDestination(
+        admin,
+        DEST_OPERATIVO,
+        { name: 'Nombre transitorio', active: false },
+        meta,
+      ),
+    ).rejects.toThrow('fallo sintético en segunda auditoría');
+    expect(fake.destinations.get(DEST_OPERATIVO)).toMatchObject({
+      name: 'Camioneta',
+      active: true,
+    });
+    expect(fake.auditLogs).toHaveLength(0);
+  });
+
+  it('renombrar audita stock.destination.updated con valor anterior y nuevo', async () => {
+    const { destination } = await updateStockDestination(
+      admin,
+      DEST_OPERATIVO,
+      { name: 'Camioneta 2' },
+      meta,
+    );
+    expect(destination.name).toBe('Camioneta 2');
+    const log = getFakeStockPrisma().auditLogs.find(
+      (entry) => entry.action === 'stock.destination.updated',
+    );
+    expect(log?.previousState).toEqual({ name: 'Camioneta' });
+    expect(log?.newState).toEqual({ name: 'Camioneta 2' });
+  });
+
+  it('cambiar estado audita stock.destination.status_changed de forma separada', async () => {
+    const { destination } = await updateStockDestination(
+      admin,
+      DEST_OPERATIVO,
+      { active: false },
+      meta,
+    );
+    expect(destination.active).toBe(false);
+    const log = getFakeStockPrisma().auditLogs.find(
+      (entry) => entry.action === 'stock.destination.status_changed',
+    );
+    expect(log?.previousState).toEqual({ active: true });
+    expect(log?.newState).toEqual({ active: false });
+  });
+
+  it('renombrar y cambiar estado deja DOS auditorías (una por acción)', async () => {
+    await updateStockDestination(
+      admin,
+      DEST_OPERATIVO,
+      { name: 'Camioneta nueva', active: false },
+      meta,
+    );
+    const actions = getFakeStockPrisma().auditLogs.map((entry) => entry.action);
+    expect(actions.filter((action) => action === 'stock.destination.updated')).toHaveLength(1);
+    expect(actions.filter((action) => action === 'stock.destination.status_changed')).toHaveLength(
+      1,
+    );
+  });
+
+  it('un destino con movimientos históricos se puede inactivar y NUNCA se borra', async () => {
+    // DEST_OPERATIVO tiene un consumo en el seed.
+    await updateStockDestination(admin, DEST_OPERATIVO, { active: false }, meta);
+    const fake = getFakeStockPrisma();
+    expect(fake.destinations.has(DEST_OPERATIVO)).toBe(true);
+    expect(fake.movements.some((movement) => movement.destinationId === DEST_OPERATIVO)).toBe(true);
+    expect((fake.api.consumptionDestination as Record<string, unknown>).delete).toBeUndefined();
+    expect((fake.api.consumptionDestination as Record<string, unknown>).deleteMany).toBeUndefined();
+  });
+
+  it('un body sin cambios no genera auditoría', async () => {
+    await updateStockDestination(admin, DEST_OPERATIVO, { name: 'Camioneta' }, meta);
+    expect(getFakeStockPrisma().auditLogs).toHaveLength(0);
+  });
+
+  it('destino inexistente → 404; rename hacia un nombre usado → 409', async () => {
+    await expect(
+      updateStockDestination(admin, DEST_INEXISTENTE, { name: 'Otro' }, meta),
+    ).rejects.toThrow(StockDestinationNotFoundError);
+    await expect(
+      updateStockDestination(admin, DEST_INACTIVO, { name: 'Camioneta' }, meta),
+    ).rejects.toThrow(StockDestinationDuplicateError);
   });
 });
 
@@ -766,6 +1025,711 @@ describe('createStockMovement — destinos y fechas', () => {
         meta,
       ),
     ).rejects.toThrow(ValidationError);
+  });
+});
+
+// ── Idempotencia (Etapa 5C.1) ─────────────────────────────────────────────
+
+function expectCreated(result: CreateStockMovementResult) {
+  if (result.kind !== 'created') {
+    throw new Error(`Se esperaba kind=created y llegó ${result.kind}`);
+  }
+  return result;
+}
+
+describe('computeMovementRequestHash — huella canónica de la request', () => {
+  const endpoint = `POST /stock/items/${ITEM_DETERGENTE}/movements`;
+  const effectiveDate = '2026-09-24';
+
+  it('la representación de la cantidad no cambia la huella (1 y 1.00 es el mismo request)', () => {
+    expect(
+      computeMovementRequestHash(
+        endpoint,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1' },
+        effectiveDate,
+      ),
+    ).toBe(
+      computeMovementRequestHash(
+        endpoint,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1.00' },
+        effectiveDate,
+      ),
+    );
+  });
+
+  it('cualquier campo distinto del body o del endpoint lógico cambia la huella', () => {
+    const base = computeMovementRequestHash(
+      endpoint,
+      ITEM_DETERGENTE,
+      { type: 'INCOME', quantity: '1' },
+      effectiveDate,
+    );
+    expect(
+      computeMovementRequestHash(
+        endpoint,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '2' },
+        effectiveDate,
+      ),
+    ).not.toBe(base);
+    expect(
+      computeMovementRequestHash(
+        endpoint,
+        ITEM_DETERGENTE,
+        { type: 'CONSUMPTION', quantity: '1' },
+        effectiveDate,
+      ),
+    ).not.toBe(base);
+    expect(
+      computeMovementRequestHash(
+        endpoint,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1', reason: 'Otro motivo' },
+        effectiveDate,
+      ),
+    ).not.toBe(base);
+    expect(
+      computeMovementRequestHash(
+        `POST /stock/items/${ITEM_FERTILIZANTE}/movements`,
+        ITEM_FERTILIZANTE,
+        { type: 'INCOME', quantity: '1' },
+        effectiveDate,
+      ),
+    ).not.toBe(base);
+    expect(
+      computeMovementRequestHash(
+        endpoint,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1' },
+        '2026-09-25',
+      ),
+    ).not.toBe(base);
+  });
+
+  it('omitido y undefined son el mismo opcional; un valor real cambia la huella', () => {
+    const omitted = computeMovementRequestHash(
+      endpoint,
+      ITEM_DETERGENTE,
+      { type: 'CONSUMPTION', quantity: '1' },
+      effectiveDate,
+    );
+    const undefinedOptionals = computeMovementRequestHash(
+      endpoint,
+      ITEM_DETERGENTE,
+      { type: 'CONSUMPTION', quantity: '1', destinationId: undefined, reason: undefined },
+      effectiveDate,
+    );
+    const withReason = computeMovementRequestHash(
+      endpoint,
+      ITEM_DETERGENTE,
+      { type: 'CONSUMPTION', quantity: '1', reason: 'Uso operativo' },
+      effectiveDate,
+    );
+    expect(undefinedOptionals).toBe(omitted);
+    expect(withReason).not.toBe(omitted);
+  });
+
+  it('los UUID se canonicalizan en minúsculas; el destino sigue siendo parte de la huella', () => {
+    const DEST_HEX = 'abcdef12-3456-4abc-8def-abcdef123456';
+    const lower = computeMovementRequestHash(
+      endpoint,
+      ITEM_DETERGENTE,
+      { type: 'CONSUMPTION', quantity: '1', destinationId: DEST_HEX },
+      effectiveDate,
+    );
+    const upper = computeMovementRequestHash(
+      endpoint,
+      ITEM_DETERGENTE,
+      { type: 'CONSUMPTION', quantity: '1', destinationId: DEST_HEX.toUpperCase() },
+      effectiveDate,
+    );
+    const withoutDestination = computeMovementRequestHash(
+      endpoint,
+      ITEM_DETERGENTE,
+      { type: 'CONSUMPTION', quantity: '1' },
+      effectiveDate,
+    );
+    expect(upper).toBe(lower);
+    expect(withoutDestination).not.toBe(lower);
+  });
+
+  it('decimales equivalentes producen la misma huella; distintos, otra', () => {
+    const hash = (quantity: string) =>
+      computeMovementRequestHash(
+        endpoint,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity },
+        effectiveDate,
+      );
+    expect(hash('1.5')).toBe(hash('1.50'));
+    expect(hash('0.5')).toBe(hash('0.50'));
+    expect(hash('10')).toBe(hash('10.0'));
+    expect(hash('1.5')).not.toBe(hash('1.05'));
+    expect(hash('10')).not.toBe(hash('1'));
+  });
+
+  it('es un SHA-256 hex estable (sin aleatoriedad)', () => {
+    const value = computeMovementRequestHash(
+      endpoint,
+      ITEM_DETERGENTE,
+      { type: 'INCOME', quantity: '1' },
+      effectiveDate,
+    );
+    expect(value).toMatch(/^[0-9a-f]{64}$/);
+    expect(
+      computeMovementRequestHash(
+        endpoint,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1' },
+        effectiveDate,
+      ),
+    ).toBe(value);
+  });
+});
+
+describe('createStockMovement — Idempotency-Key', () => {
+  const KEY = 'test-key-0001';
+
+  it('clave con formato inválido → 400 controlado y sin escritura', async () => {
+    await expect(
+      createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1' },
+        meta,
+        new Date(),
+        'corta',
+      ),
+    ).rejects.toMatchObject({ statusCode: 400, code: 'IDEMPOTENCY_KEY_INVALID' });
+    const fake = getFakeStockPrisma();
+    expect(fake.movements).toHaveLength(2);
+    expect(fake.idempotencyRecords).toHaveLength(0);
+  });
+
+  it('replay: misma clave y mismo body → UNA sola escritura y la respuesta almacenada', async () => {
+    const first = expectCreated(
+      await createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'CONSUMPTION', quantity: '0.5' },
+        meta,
+        new Date(),
+        KEY,
+      ),
+    );
+    const second = await createStockMovement(
+      employee,
+      ITEM_DETERGENTE,
+      { type: 'CONSUMPTION', quantity: '0.5' },
+      meta,
+      new Date(),
+      KEY,
+    );
+    expect(second).toEqual({
+      kind: 'replay',
+      status: 201,
+      body: { movement: first.movement, item: first.item },
+    });
+    const fake = getFakeStockPrisma();
+    expect(fake.movements).toHaveLength(3); // 2 del seed + exactamente 1
+    expect(
+      fake.auditLogs.filter((entry) => entry.action === 'stock.movement.created'),
+    ).toHaveLength(1);
+    expect(fake.items.get(ITEM_DETERGENTE)?.currentQuantity).toBe('1.5'); // descontado una sola vez
+    expect(fake.idempotencyRecords).toHaveLength(1);
+    expect(fake.idempotencyRecords[0]?.responseStatus).toBe(201);
+    expect(fake.idempotencyRecords[0]?.responseBody).toEqual({
+      movement: first.movement,
+      item: first.item,
+    });
+    expect(fake.idempotencyRecords[0]?.completedAt).not.toBeNull();
+  });
+
+  it('fecha omitida: reintenta el mismo día, pero la misma clave al día siguiente entra en conflicto', async () => {
+    const firstDay = new Date('2026-09-24T15:00:00.000Z');
+    const sameBusinessDay = new Date('2026-09-24T20:00:00.000Z');
+    const nextBusinessDay = new Date('2026-09-25T15:00:00.000Z');
+    await createStockMovement(
+      employee,
+      ITEM_DETERGENTE,
+      { type: 'INCOME', quantity: '1' },
+      meta,
+      firstDay,
+      KEY,
+    );
+    await expect(
+      createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1' },
+        meta,
+        sameBusinessDay,
+        KEY,
+      ),
+    ).resolves.toMatchObject({ kind: 'replay', status: 201 });
+    await expect(
+      createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1' },
+        meta,
+        nextBusinessDay,
+        KEY,
+      ),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'IDEMPOTENCY_KEY_CONFLICT' });
+    expect(getFakeStockPrisma().movements).toHaveLength(3);
+  });
+
+  it('misma clave con body distinto → 409 y sin nuevas escrituras', async () => {
+    await createStockMovement(
+      employee,
+      ITEM_DETERGENTE,
+      { type: 'CONSUMPTION', quantity: '0.5' },
+      meta,
+      new Date(),
+      KEY,
+    );
+    await expect(
+      createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'CONSUMPTION', quantity: '1' },
+        meta,
+        new Date(),
+        KEY,
+      ),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'IDEMPOTENCY_KEY_CONFLICT' });
+    const fake = getFakeStockPrisma();
+    expect(fake.movements).toHaveLength(3);
+    expect(fake.items.get(ITEM_DETERGENTE)?.currentQuantity).toBe('1.5');
+    expect(fake.auditLogs).toHaveLength(1);
+  });
+
+  it('actores distintos con la misma clave no colisionan (la clave es por actor)', async () => {
+    await createStockMovement(
+      employee,
+      ITEM_DETERGENTE,
+      { type: 'CONSUMPTION', quantity: '0.5' },
+      meta,
+      new Date(),
+      KEY,
+    );
+    await createStockMovement(
+      admin,
+      ITEM_DETERGENTE,
+      { type: 'CONSUMPTION', quantity: '0.5' },
+      meta,
+      new Date(),
+      KEY,
+    );
+    const fake = getFakeStockPrisma();
+    expect(fake.movements).toHaveLength(4);
+    expect(fake.idempotencyRecords).toHaveLength(2);
+    expect(fake.auditLogs).toHaveLength(2);
+  });
+
+  it('misma clave en endpoints distintos (otro producto) no colisiona', async () => {
+    await createStockMovement(
+      employee,
+      ITEM_DETERGENTE,
+      { type: 'INCOME', quantity: '1' },
+      meta,
+      new Date(),
+      KEY,
+    );
+    await createStockMovement(
+      employee,
+      ITEM_FERTILIZANTE,
+      { type: 'INCOME', quantity: '1' },
+      meta,
+      new Date(),
+      KEY,
+    );
+    const fake = getFakeStockPrisma();
+    expect(fake.movements).toHaveLength(4);
+    expect(fake.idempotencyRecords).toHaveLength(2);
+  });
+
+  it('si falla la escritura, la clave queda libre (sin registro incompleto) y el reintento funciona', async () => {
+    const fake = getFakeStockPrisma();
+    fake.hooks.beforeStockMovementCreate = () => {
+      throw new Error('fallo sintético de movimiento');
+    };
+    await expect(
+      createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1' },
+        meta,
+        new Date(),
+        KEY,
+      ),
+    ).rejects.toThrow('fallo sintético de movimiento');
+    fake.hooks.beforeStockMovementCreate = undefined;
+    expect(fake.idempotencyRecords).toHaveLength(0);
+    expect(fake.movements).toHaveLength(2);
+    expect(fake.items.get(ITEM_DETERGENTE)?.currentQuantity).toBe('2');
+
+    const retry = await createStockMovement(
+      employee,
+      ITEM_DETERGENTE,
+      { type: 'INCOME', quantity: '1' },
+      meta,
+      new Date(),
+      KEY,
+    );
+    expect(retry.kind).toBe('created');
+    expect(fake.idempotencyRecords).toHaveLength(1);
+    expect(fake.items.get(ITEM_DETERGENTE)?.currentQuantity).toBe('3');
+  });
+
+  it('si falla la auditoría se revierte también el registro idempotente', async () => {
+    const fake = getFakeStockPrisma();
+    fake.hooks.beforeAuditLogCreate = () => {
+      throw new Error('fallo sintético de auditoría');
+    };
+    await expect(
+      createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1' },
+        meta,
+        new Date(),
+        KEY,
+      ),
+    ).rejects.toThrow('fallo sintético de auditoría');
+    fake.hooks.beforeAuditLogCreate = undefined;
+    expect(fake.idempotencyRecords).toHaveLength(0);
+    expect(fake.movements).toHaveLength(2);
+    expect(fake.items.get(ITEM_DETERGENTE)?.currentQuantity).toBe('2');
+  });
+
+  it('si falla completar status/body/completedAt, revierte movimiento, auditoría, saldo y reserva', async () => {
+    const fake = getFakeStockPrisma();
+    fake.hooks.beforeIdempotencyRecordUpdate = () => {
+      throw new Error('fallo sintético al completar idempotencia');
+    };
+    await expect(
+      createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1' },
+        meta,
+        new Date('2026-09-24T15:00:00.000Z'),
+        KEY,
+      ),
+    ).rejects.toThrow('fallo sintético al completar idempotencia');
+    expect(fake.idempotencyRecords).toHaveLength(0);
+    expect(fake.movements).toHaveLength(2);
+    expect(fake.auditLogs).toHaveLength(0);
+    expect(fake.items.get(ITEM_DETERGENTE)?.currentQuantity).toBe('2');
+  });
+
+  it('dos llamadas concurrentes con la misma clave crean UN solo movimiento', async () => {
+    const [first, second] = await Promise.all([
+      createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'CONSUMPTION', quantity: '0.5' },
+        meta,
+        new Date(),
+        KEY,
+      ),
+      createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'CONSUMPTION', quantity: '0.5' },
+        meta,
+        new Date(),
+        KEY,
+      ),
+    ]);
+    expect([first.kind, second.kind].sort()).toEqual(['created', 'replay']);
+    const fake = getFakeStockPrisma();
+    expect(fake.movements).toHaveLength(3);
+    expect(fake.idempotencyRecords).toHaveLength(1);
+    expect(fake.items.get(ITEM_DETERGENTE)?.currentQuantity).toBe('1.5');
+  });
+
+  it('dos llamadas concurrentes con la misma clave y distinto body: una gana y la otra devuelve conflicto', async () => {
+    const results = await Promise.allSettled([
+      createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1' },
+        meta,
+        new Date('2026-09-24T15:00:00.000Z'),
+        KEY,
+      ),
+      createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '2' },
+        meta,
+        new Date('2026-09-24T15:00:00.000Z'),
+        KEY,
+      ),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((result) => result.status === 'rejected');
+    expect(rejected).toMatchObject({
+      status: 'rejected',
+      reason: { code: 'IDEMPOTENCY_KEY_CONFLICT' },
+    });
+    expect(getFakeStockPrisma().movements).toHaveLength(3);
+    expect(getFakeStockPrisma().auditLogs).toHaveLength(1);
+  });
+
+  it('si el primer ganador revierte, el request concurrente puede reservar y ejecutar una sola vez', async () => {
+    const fake = getFakeStockPrisma();
+    let movementAttempts = 0;
+    fake.hooks.beforeStockMovementCreate = () => {
+      movementAttempts += 1;
+      if (movementAttempts === 1) throw new Error('ganador sintético revertido');
+    };
+    const results = await Promise.allSettled([
+      createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1' },
+        meta,
+        new Date('2026-09-24T15:00:00.000Z'),
+        KEY,
+      ),
+      createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1' },
+        meta,
+        new Date('2026-09-24T15:00:00.000Z'),
+        KEY,
+      ),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(fake.idempotencyRecords).toHaveLength(1);
+    expect(fake.movements).toHaveLength(3);
+    expect(fake.auditLogs).toHaveLength(1);
+    expect(fake.items.get(ITEM_DETERGENTE)?.currentQuantity).toBe('3');
+  });
+
+  it('P2002 de la reserva sin registro visible devuelve pendiente y nunca reintenta la escritura', async () => {
+    const fake = getFakeStockPrisma();
+    fake.hooks.beforeIdempotencyRecordCreate = () => {
+      fakeP2002('idempotency_records_actor_user_id_endpoint_key_key', 'idempotency_records');
+    };
+    await expect(
+      createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1' },
+        meta,
+        new Date('2026-09-24T15:00:00.000Z'),
+        KEY,
+      ),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'IDEMPOTENCY_RECORD_PENDING' });
+    expect(fake.movements).toHaveLength(2);
+    expect(fake.idempotencyRecords).toHaveLength(0);
+  });
+
+  it('un P2002 ajeno a la reserva no se transforma en replay idempotente', async () => {
+    const fake = getFakeStockPrisma();
+    fake.hooks.beforeStockMovementCreate = () => {
+      fakeP2002('stock_movements_reference_key', 'stock_movements');
+    };
+    await expect(
+      createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1' },
+        meta,
+        new Date('2026-09-24T15:00:00.000Z'),
+        KEY,
+      ),
+    ).rejects.toMatchObject({ code: 'P2002' });
+    expect(fake.idempotencyRecords).toHaveLength(0);
+    expect(fake.movements).toHaveLength(2);
+    expect(fake.items.get(ITEM_DETERGENTE)?.currentQuantity).toBe('2');
+  });
+
+  it('la forma legacy `meta.target` del P2002 de la reserva también resuelve a replay', async () => {
+    const now = new Date('2026-09-24T15:00:00.000Z');
+    const first = expectCreated(
+      await createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1' },
+        meta,
+        now,
+        KEY,
+      ),
+    );
+    const fake = getFakeStockPrisma();
+    fake.hooks.beforeIdempotencyRecordCreate = () => {
+      fakeLegacyP2002(['actor_user_id', 'endpoint', 'key']);
+    };
+    await expect(
+      createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1' },
+        meta,
+        now,
+        KEY,
+      ),
+    ).resolves.toEqual({
+      kind: 'replay',
+      status: 201,
+      body: { movement: first.movement, item: first.item },
+    });
+    expect(fake.movements).toHaveLength(3);
+    expect(fake.auditLogs).toHaveLength(1);
+  });
+
+  it('un P2002 sin identidad de restricción se propaga: nunca se asume replay', async () => {
+    const fake = getFakeStockPrisma();
+    fake.hooks.beforeIdempotencyRecordCreate = fakeAnonymousP2002;
+    await expect(
+      createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1' },
+        meta,
+        new Date('2026-09-24T15:00:00.000Z'),
+        KEY,
+      ),
+    ).rejects.toMatchObject({ code: 'P2002' });
+    expect(fake.idempotencyRecords).toHaveLength(0);
+    expect(fake.movements).toHaveLength(2);
+    expect(fake.auditLogs).toHaveLength(0);
+  });
+
+  it('el UUID del producto con otra capitalización es el mismo endpoint lógico (sin segunda escritura)', async () => {
+    const ITEM_HEX = 'abcdef12-3456-4abc-8def-abcdef123456';
+    const base = seed();
+    resetFakeStockPrisma({
+      ...base,
+      items: [
+        ...base.items,
+        {
+          id: ITEM_HEX,
+          name: 'Producto sintético hex',
+          area: 'HOUSE' as const,
+          categoryId: CAT_HOUSE,
+          unit: 'unidad',
+          minimumQuantity: '1',
+          currentQuantity: '5',
+          active: true,
+        },
+      ],
+    });
+    const now = new Date('2026-09-24T15:00:00.000Z');
+    const first = expectCreated(
+      await createStockMovement(
+        employee,
+        ITEM_HEX,
+        { type: 'INCOME', quantity: '1' },
+        meta,
+        now,
+        KEY,
+      ),
+    );
+    const second = await createStockMovement(
+      employee,
+      ITEM_HEX.toUpperCase(),
+      { type: 'INCOME', quantity: '1.00' },
+      meta,
+      now,
+      KEY,
+    );
+    expect(second).toEqual({
+      kind: 'replay',
+      status: 201,
+      body: { movement: first.movement, item: first.item },
+    });
+    const fake = getFakeStockPrisma();
+    expect(fake.idempotencyRecords).toHaveLength(1);
+    expect(fake.idempotencyRecords[0]?.endpoint).toBe(`POST /stock/items/${ITEM_HEX}/movements`);
+    expect(fake.items.get(ITEM_HEX)?.currentQuantity).toBe('6');
+    expect(fake.movements.filter((movement) => movement.type === 'INCOME')).toHaveLength(1);
+  });
+
+  it('el timeout transaccional queda acotado y se expone como pendiente reintentable', async () => {
+    const fake = getFakeStockPrisma();
+    fake.hooks.beforeIdempotencyRecordCreate = fakeP2028;
+    await expect(
+      createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1' },
+        meta,
+        new Date('2026-09-24T15:00:00.000Z'),
+        KEY,
+      ),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'IDEMPOTENCY_RECORD_PENDING' });
+    expect(fake.idempotencyRecords).toHaveLength(0);
+    expect(fake.movements).toHaveLength(2);
+  });
+
+  it('un registro pendiente (estado inesperado) → 409 controlado, sin re-ejecutar', async () => {
+    const fake = getFakeStockPrisma();
+    fake.idempotencyRecords.push({
+      id: crypto.randomUUID(),
+      actorUserId: USER_EMPLOYEE,
+      endpoint: `POST /stock/items/${ITEM_DETERGENTE}/movements`,
+      key: KEY,
+      requestHash: 'x'.repeat(64),
+      responseStatus: null,
+      responseBody: null,
+      completedAt: null,
+      createdAt: new Date(),
+    });
+    await expect(
+      createStockMovement(
+        employee,
+        ITEM_DETERGENTE,
+        { type: 'CONSUMPTION', quantity: '0.5' },
+        meta,
+        new Date(),
+        KEY,
+      ),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'IDEMPOTENCY_RECORD_PENDING' });
+    expect(fake.movements).toHaveLength(2);
+    expect(fake.auditLogs).toHaveLength(0);
+  });
+
+  it('sin clave no se crean registros (camino idéntico a la Etapa 5A)', async () => {
+    const result = await createStockMovement(
+      employee,
+      ITEM_DETERGENTE,
+      { type: 'CONSUMPTION', quantity: '0.5' },
+      meta,
+    );
+    expect(result.kind).toBe('created');
+    expect(getFakeStockPrisma().idempotencyRecords).toHaveLength(0);
+  });
+
+  it('ni la respuesta creada ni el replay exponen la huella de la request', async () => {
+    const first = await createStockMovement(
+      employee,
+      ITEM_DETERGENTE,
+      { type: 'CONSUMPTION', quantity: '0.5' },
+      meta,
+      new Date(),
+      KEY,
+    );
+    const second = await createStockMovement(
+      employee,
+      ITEM_DETERGENTE,
+      { type: 'CONSUMPTION', quantity: '0.5' },
+      meta,
+      new Date(),
+      KEY,
+    );
+    expect(JSON.stringify(first)).not.toMatch(/requestHash|hash/i);
+    expect(JSON.stringify(second)).not.toMatch(/requestHash|hash/i);
   });
 });
 

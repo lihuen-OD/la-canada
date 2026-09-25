@@ -3,18 +3,22 @@ import type { z } from 'zod';
 import { AuthenticationRequiredError, ValidationError } from '../errors/AppError';
 import {
   createStockCategoryBodySchema,
+  createStockDestinationBodySchema,
   createStockItemBodySchema,
   createStockMovementBodySchema,
   listStockCategoriesQuerySchema,
+  listStockDestinationsQuerySchema,
   listStockItemsQuerySchema,
   listStockMovementsQuerySchema,
   stockIdParamSchema,
   stockStatusBodySchema,
   updateStockCategoryBodySchema,
+  updateStockDestinationBodySchema,
   updateStockItemBodySchema,
 } from '../stock/stockSchemas';
 import {
   createStockCategory,
+  createStockDestination,
   createStockItem,
   createStockMovement,
   getStockItem as getStockItemDetail,
@@ -25,6 +29,7 @@ import {
   resolveActor,
   setStockItemActive,
   updateStockCategory,
+  updateStockDestination,
   updateStockItem,
   type RequestMeta,
   type StockActor,
@@ -74,8 +79,13 @@ export async function getStockItems(req: Request, res: Response): Promise<void> 
 }
 
 export async function getStockDestinations(req: Request, res: Response): Promise<void> {
-  await actorFrom(req);
-  send(res, 200, await listStockDestinations());
+  const actor = await actorFrom(req);
+  const filters = parseOrThrow(
+    listStockDestinationsQuerySchema,
+    req.query,
+    'Filtros de destinos inválidos.',
+  );
+  send(res, 200, await listStockDestinations(actor, filters));
 }
 
 export async function getStockItem(req: Request, res: Response): Promise<void> {
@@ -119,6 +129,31 @@ export async function patchStockCategory(req: Request, res: Response): Promise<v
   send(res, 200, await updateStockCategory(actor, categoryId, input, requestMeta(req)));
 }
 
+export async function postStockDestination(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const input = parseOrThrow(
+    createStockDestinationBodySchema,
+    req.body,
+    'Datos de destino inválidos.',
+  );
+  send(res, 201, await createStockDestination(actor, input, requestMeta(req)));
+}
+
+export async function patchStockDestination(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const destinationId = parseOrThrow(
+    stockIdParamSchema,
+    req.params.id,
+    'Identificador de destino inválido.',
+  );
+  const input = parseOrThrow(
+    updateStockDestinationBodySchema,
+    req.body,
+    'Datos de destino inválidos.',
+  );
+  send(res, 200, await updateStockDestination(actor, destinationId, input, requestMeta(req)));
+}
+
 export async function postStockItem(req: Request, res: Response): Promise<void> {
   const actor = await actorFrom(req);
   const input = parseOrThrow(createStockItemBodySchema, req.body, 'Datos de producto inválidos.');
@@ -147,5 +182,20 @@ export async function postStockMovement(req: Request, res: Response): Promise<vo
     req.body,
     'Datos de movimiento inválidos.',
   );
-  send(res, 201, await createStockMovement(actor, itemId, input, requestMeta(req)));
+  // Header `Idempotency-Key` opcional (Etapa 5C.1). En replay se devuelve
+  // exactamente el status + body almacenados, sin re-ejecutar la escritura.
+  const idempotencyKey = req.header('idempotency-key') ?? undefined;
+  const result = await createStockMovement(
+    actor,
+    itemId,
+    input,
+    requestMeta(req),
+    undefined,
+    idempotencyKey,
+  );
+  if (result.kind === 'replay') {
+    send(res, result.status, result.body);
+    return;
+  }
+  send(res, 201, { movement: result.movement, item: result.item });
 }

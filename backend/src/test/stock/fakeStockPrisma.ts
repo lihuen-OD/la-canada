@@ -1,12 +1,18 @@
 import { Prisma } from '../../generated/prisma/client';
+import { matchesStockLevel, STOCK_LEVEL_IDS_SQL_PREFIX } from '../../stock/stockLevel';
 
 /**
  * Fake de Prisma en memoria para el módulo Stock — implementa exactamente los
- * métodos que usa `stockService.ts`, nada más. deliberadamente NO expone
- * `stockMovement.update` / `.delete` / `.updateMany`: el historial de
- * movimientos es inmutable y un test de la suite lo verifica. `$transaction`
+ * métodos que usa `stockService.ts`, nada más. Deliberadamente NO expone
+ * `stockMovement.update` / `.delete` / `.updateMany` (el historial de
+ * movimientos es inmutable) ni `consumptionDestination.delete` (los destinos
+ * solo se inactivan, Etapa 5C.1): tests de la suite lo verifican. `$transaction`
  * toma/restaura un snapshot para imitar el rollback de PostgreSQL también
- * cuando el movimiento o la auditoría fallan después de actualizar el saldo.
+ * cuando el movimiento o la auditoría fallan después de actualizar el saldo,
+ * y serializa las transacciones para poder ejercitar la colisión idempotente.
+ * `$queryRaw` implementa UNA sola consulta — el filtro server-side por nivel
+ * de `stock/stockLevel.ts` — con la misma semántica que su SQL y falla en
+ * voz alta ante cualquier otra.
  */
 
 type StockAreaValue = 'HOUSE' | 'GARDEN' | 'BOTH';
@@ -76,6 +82,18 @@ export interface FakeAuditRecord {
   createdAt: Date;
 }
 
+export interface FakeIdempotencyRecord {
+  id: string;
+  actorUserId: string;
+  endpoint: string;
+  key: string;
+  requestHash: string;
+  responseStatus: number | null;
+  responseBody: unknown;
+  completedAt: Date | null;
+  createdAt: Date;
+}
+
 export interface FakeStockSeed {
   categories?: Omit<FakeStockCategory, 'createdAt' | 'updatedAt'>[];
   items?: Omit<FakeStockItem, 'createdAt' | 'updatedAt'>[];
@@ -91,21 +109,72 @@ export interface FakeStockCalls {
 export interface FakeStockHooks {
   /** Se invoca ANTES de evaluar el `updateMany` del saldo (para simular una carrera). */
   beforeStockItemUpdateMany?: () => void;
+  beforeIdempotencyRecordCreate?: () => void;
+  beforeIdempotencyRecordUpdate?: () => void;
   beforeStockMovementCreate?: () => void;
   beforeAuditLogCreate?: () => void;
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- fake deliberadamente laxo, solo para tests */
 
-function p2002(): never {
+/**
+ * P2002 con la forma REAL de Prisma 7 + `@prisma/adapter-pg` (la del runtime
+ * de producción): Postgres informa `23505` con el nombre del índice, el
+ * adapter lo traduce a `UniqueConstraintViolation { constraint: { index } }`
+ * y el cliente lo expone en `meta.driverAdapterError.cause` — sin
+ * `meta.target`. Verificado contra `@prisma/adapter-pg@7.10.0`
+ * (`dist/index.js`, caso "23505") y `@prisma/client/runtime/client.js`.
+ */
+export function fakeP2002(index: string, table?: string): never {
+  throw new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+    code: 'P2002',
+    clientVersion: 'fake-stock',
+    meta: {
+      ...(table ? { table } : {}),
+      driverAdapterError: {
+        name: 'DriverAdapterError',
+        cause: {
+          kind: 'UniqueConstraintViolation',
+          originalCode: '23505',
+          constraint: { index },
+          ...(table ? { table } : {}),
+        },
+      },
+    },
+  });
+}
+
+/** P2002 con la forma `meta.target` de engines/versiones anteriores (compatibilidad). */
+export function fakeLegacyP2002(target: readonly string[]): never {
+  throw new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+    code: 'P2002',
+    clientVersion: 'fake-stock',
+    meta: { target: [...target] },
+  });
+}
+
+/** P2002 sin identidad de restricción: nunca debe tratarse como duplicado ni replay. */
+export function fakeAnonymousP2002(): never {
   throw new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
     code: 'P2002',
     clientVersion: 'fake-stock',
   });
 }
 
+export function fakeP2028(): never {
+  throw new Prisma.PrismaClientKnownRequestError('Transaction timed out', {
+    code: 'P2028',
+    clientVersion: 'fake-stock',
+  });
+}
+
 function decimal(value: unknown): InstanceType<typeof Prisma.Decimal> {
   return new Prisma.Decimal(String(value));
+}
+
+/** Postgres compara UUID sin distinguir mayúsculas; los ids del fake se guardan en minúsculas. */
+function uuidKey(value: unknown): string {
+  return String(value).toLowerCase();
 }
 
 const AREA_ORDER: Record<StockAreaValue, number> = { HOUSE: 0, GARDEN: 1, BOTH: 2 };
@@ -120,6 +189,7 @@ export interface FakeStockPrisma {
   employees: Map<string, FakeEmployeeSummary>;
   movements: FakeMovement[];
   auditLogs: FakeAuditRecord[];
+  idempotencyRecords: FakeIdempotencyRecord[];
   reset(seed?: FakeStockSeed): void;
 }
 
@@ -130,6 +200,7 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
   const employees = new Map<string, FakeEmployeeSummary>();
   const movements: FakeMovement[] = [];
   const auditLogs: FakeAuditRecord[] = [];
+  const idempotencyRecords: FakeIdempotencyRecord[] = [];
   const calls: FakeStockCalls = { stockItemUpdateMany: [] };
   const hooks: FakeStockHooks = {};
   let transactionTail: Promise<void> = Promise.resolve();
@@ -142,8 +213,11 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
     employees.clear();
     movements.length = 0;
     auditLogs.length = 0;
+    idempotencyRecords.length = 0;
     calls.stockItemUpdateMany.length = 0;
     hooks.beforeStockItemUpdateMany = undefined;
+    hooks.beforeIdempotencyRecordCreate = undefined;
+    hooks.beforeIdempotencyRecordUpdate = undefined;
     hooks.beforeStockMovementCreate = undefined;
     hooks.beforeAuditLogCreate = undefined;
     transactionTail = Promise.resolve();
@@ -173,6 +247,7 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
   }
 
   function itemMatches(row: FakeStockItem, where: any = {}): boolean {
+    if (where.id?.in !== undefined && !where.id.in.includes(row.id)) return false;
     if (where.active !== undefined && row.active !== where.active) return false;
     if (where.area !== undefined && row.area !== where.area) return false;
     if (where.categoryId !== undefined && row.categoryId !== where.categoryId) return false;
@@ -241,7 +316,7 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
       },
       create: async ({ data }: any) => {
         if ([...categories.values()].some((r) => r.name === data.name && r.area === data.area)) {
-          p2002();
+          fakeP2002('stock_categories_name_area_key', 'stock_categories');
         }
         const now = new Date();
         const row: FakeStockCategory = {
@@ -263,7 +338,7 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
             (r) => r.id !== where.id && r.name === data.name && r.area === existing.area,
           )
         ) {
-          p2002();
+          fakeP2002('stock_categories_name_area_key', 'stock_categories');
         }
         const updated = { ...existing, ...data, updatedAt: new Date() };
         categories.set(where.id, updated);
@@ -272,7 +347,7 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
     },
     stockItem: {
       findUnique: async ({ where }: any) => {
-        const row = items.get(where.id);
+        const row = items.get(uuidKey(where.id));
         return row ? withCategory(row) : null;
       },
       findMany: async ({ where = {}, skip, take }: any = {}) => {
@@ -283,7 +358,7 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
         [...items.values()].filter((row) => itemMatches(row, where)).length,
       create: async ({ data }: any) => {
         if ([...items.values()].some((r) => r.area === data.area && r.name === data.name)) {
-          p2002();
+          fakeP2002('stock_items_area_name_key', 'stock_items');
         }
         const now = new Date();
         const row: FakeStockItem = {
@@ -307,7 +382,7 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
             (r) => r.id !== where.id && r.area === existing.area && r.name === data.name,
           )
         ) {
-          p2002();
+          fakeP2002('stock_items_area_name_key', 'stock_items');
         }
         const updated: FakeStockItem = {
           ...existing,
@@ -326,7 +401,7 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
         hooks.beforeStockItemUpdateMany?.();
         let count = 0;
         for (const item of items.values()) {
-          if (where.id !== undefined && item.id !== where.id) continue;
+          if (where.id !== undefined && item.id !== uuidKey(where.id)) continue;
           if (where.active !== undefined && item.active !== where.active) continue;
           const gte = where.currentQuantity?.gte;
           if (gte !== undefined && !decimal(item.currentQuantity).gte(decimal(gte))) continue;
@@ -354,7 +429,7 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
       create: async ({ data }: any) => {
         hooks.beforeStockMovementCreate?.();
         if (data.reference != null && movements.some((m) => m.reference === data.reference)) {
-          p2002();
+          fakeP2002('stock_movements_reference_key', 'stock_movements');
         }
         const now = new Date();
         const row: FakeMovement = {
@@ -383,17 +458,114 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
         movements.filter((row) => movementMatches(row, where)).length,
     },
     consumptionDestination: {
-      findUnique: async ({ where }: any) => destinations.get(where.id) ?? null,
+      // Sin delete/deleteMany a propósito: los destinos solo se inactivan.
+      findUnique: async ({ where }: any) => destinations.get(uuidKey(where.id)) ?? null,
       findMany: async ({ where = {} }: any = {}) => {
         let rows = [...destinations.values()];
         if (where.active !== undefined) rows = rows.filter((r) => r.active === where.active);
         return (
           [...rows]
             .sort((a, b) => a.name.localeCompare(b.name, 'es'))
-            // Proyecta como el `select` real del service (sin `active`).
-            .map(({ id, name, type }) => ({ id, name, type }))
+            // Proyecta como el `select` real del service.
+            .map(({ id, name, type, active }) => ({ id, name, type, active }))
         );
       },
+      create: async ({ data }: any) => {
+        // `ConsumptionDestination.name` es @unique global en el schema.
+        if ([...destinations.values()].some((r) => r.name === data.name)) {
+          fakeP2002('consumption_destinations_name_key', 'consumption_destinations');
+        }
+        const row: FakeDestination = {
+          active: true,
+          ...data,
+          id: data.id ?? nextId(),
+        };
+        destinations.set(row.id, row);
+        return row;
+      },
+      update: async ({ where, data }: any) => {
+        const existing = destinations.get(where.id);
+        if (!existing) throw new Error('fakeStockPrisma: destination not found');
+        if (
+          data.name !== undefined &&
+          [...destinations.values()].some((r) => r.id !== where.id && r.name === data.name)
+        ) {
+          fakeP2002('consumption_destinations_name_key', 'consumption_destinations');
+        }
+        const updated = { ...existing, ...data };
+        destinations.set(where.id, updated);
+        return updated;
+      },
+    },
+    idempotencyRecord: {
+      create: async ({ data }: any) => {
+        hooks.beforeIdempotencyRecordCreate?.();
+        // @@unique([actorUserId, endpoint, key]) — la colisión idempotente.
+        if (
+          idempotencyRecords.some(
+            (r) =>
+              r.actorUserId === data.actorUserId &&
+              r.endpoint === data.endpoint &&
+              r.key === data.key,
+          )
+        ) {
+          fakeP2002('idempotency_records_actor_user_id_endpoint_key_key', 'idempotency_records');
+        }
+        const record: FakeIdempotencyRecord = {
+          id: data.id ?? nextId(),
+          responseStatus: null,
+          responseBody: null,
+          completedAt: null,
+          createdAt: new Date(),
+          ...data,
+        };
+        idempotencyRecords.push(record);
+        return record;
+      },
+      update: async ({ where, data }: any) => {
+        hooks.beforeIdempotencyRecordUpdate?.();
+        const record = idempotencyRecords.find((r) => r.id === where.id);
+        if (!record) throw new Error('fakeStockPrisma: idempotency record not found');
+        Object.assign(record, data);
+        return record;
+      },
+      findUnique: async ({ where }: any) => {
+        if (where.id !== undefined) {
+          return idempotencyRecords.find((r) => r.id === where.id) ?? null;
+        }
+        const compound = where.actorUserId_endpoint_key;
+        if (compound !== undefined) {
+          return (
+            idempotencyRecords.find(
+              (r) =>
+                r.actorUserId === compound.actorUserId &&
+                r.endpoint === compound.endpoint &&
+                r.key === compound.key,
+            ) ?? null
+          );
+        }
+        throw new Error('fakeStockPrisma: idempotency findUnique no soportado');
+      },
+    },
+    /**
+     * Única consulta SQL admitida: el filtro server-side por nivel de
+     * `stock/stockLevel.ts`. El predicado es el mismo `matchesStockLevel`
+     * que define la regla; el test de stockLevel fija el texto del SQL.
+     */
+    $queryRaw: async (query: any) => {
+      const first = query?.strings?.[0];
+      if (typeof first !== 'string' || !first.startsWith(STOCK_LEVEL_IDS_SQL_PREFIX)) {
+        throw new Error(
+          `fakeStockPrisma: consulta $queryRaw no soportada: ${String(first ?? query)}`,
+        );
+      }
+      const level = query.values[0];
+      if (level !== 'ok' && level !== 'low' && level !== 'critical') {
+        throw new Error(`fakeStockPrisma: nivel de stock desconocido: ${String(level)}`);
+      }
+      return [...items.values()]
+        .filter((row) => matchesStockLevel(row.currentQuantity, row.minimumQuantity, level))
+        .map((row) => ({ id: row.id }));
     },
     auditLog: {
       create: async ({ data }: any) => {
@@ -421,8 +593,10 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
         id,
         { ...row },
       ]);
+      const destinationSnapshot = [...destinations.values()].map((row) => ({ ...row }));
       const movementSnapshot = movements.map((row) => ({ ...row }));
       const auditSnapshot = auditLogs.map((row) => ({ ...row }));
+      const idempotencySnapshot = idempotencyRecords.map((row) => ({ ...row }));
       try {
         return await fn(api);
       } catch (error) {
@@ -430,8 +604,11 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
         for (const [id, row] of categorySnapshot) categories.set(id, row);
         items.clear();
         for (const [id, row] of itemSnapshot) items.set(id, row);
+        destinations.clear();
+        for (const row of destinationSnapshot) destinations.set(row.id, row);
         movements.splice(0, movements.length, ...movementSnapshot);
         auditLogs.splice(0, auditLogs.length, ...auditSnapshot);
+        idempotencyRecords.splice(0, idempotencyRecords.length, ...idempotencySnapshot);
         throw error;
       } finally {
         release();
@@ -449,6 +626,7 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
     employees,
     movements,
     auditLogs,
+    idempotencyRecords,
     reset,
   };
 }

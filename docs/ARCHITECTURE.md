@@ -644,3 +644,25 @@ Cada movimiento ejecuta en una sola `prisma.$transaction`: actualización condic
 La fecha efectiva se interpreta como fecha de calendario en `BUSINESS_TIME_ZONE`: nunca futura, hoy para `EMPLOYEE`, pasada permitida solo a `ADMIN`. `@db.Date` persiste la fecha sin hora. El destino es opcional durante 5A porque `demo` no tiene destinos reales y el CRUD se difiere; si se informa, el backend exige que exista, esté activo y que el movimiento sea `CONSUMPTION`.
 
 No hubo cambio de `schema.prisma` ni migración: el modelo creado en Etapa 2 y migrado en 3A ya soporta este contrato. 5A no incluye frontend, reportes, compras ni administración de destinos.
+
+## 21. Stock — destinos, nivel server-side e idempotencia (Etapa 5C.1)
+
+Extiende el contrato de §20 sin romperlo. Los nuevos endpoints siguen detrás de `requireAuth` y la decisión de permiso sigue viviendo en `stockService.ts`:
+
+| Operación | Permiso |
+| --- | --- |
+| `GET /stock/destinations?status=active\|all` (`all` muestra inactivos) | todo autenticado / `all` solo `ADMIN` |
+| `POST /stock/destinations` | solo `ADMIN` |
+| `PATCH /stock/destinations/:id` (nombre y/o estado; `type` inmutable) | solo `ADMIN` |
+| `GET /stock/items?stockLevel=ok\|low\|critical` | todo usuario autenticado (mismo gate que el listado) |
+| `POST /stock/items/:id/movements` con header opcional `Idempotency-Key` | igual que 5A |
+
+**Sin borrado físico de destinos**: el router no declara `DELETE` en ningún recurso de stock; la baja de un destino es `PATCH { active: false }`, siempre permitida (los `StockMovement` históricos conservan su FK con `ON DELETE RESTRICT`). Auditorías con acciones separadas: `stock.destination.created`, `stock.destination.updated`, `stock.destination.status_changed`.
+
+**Filtro de nivel en Postgres**: Prisma no puede expresar comparaciones columna-vs-columna (`current_quantity < minimum_quantity`) en su `where`, así que `listStockItems` resuelve los ids del nivel con un `prisma.$queryRaw` parametrizado (`backend/src/stock/stockLevel.ts` — el único módulo que define la regla, compartido por el DTO, el SQL y el fake de tests) y aplica sobre esos ids el resto de los filtros, el conteo, el orden enum y la paginación, que siguen yendo a Postgres. Nunca se carga el inventario completo para filtrar en memoria. El DTO de producto incluye `stockLevel` calculado en el backend; `barPercent` de la barra visual sigue siendo una responsabilidad del frontend (decisión aprobada en 5C.1).
+
+**Idempotencia opcional**: `Idempotency-Key` (`^[A-Za-z0-9_-]{8,64}$`) en `POST /stock/items/:id/movements`. La tabla `idempotency_records` guarda (actor, endpoint lógico, clave) como único, con `request_hash` (SHA-256 de una serialización canónica de orden fijo: endpoint, producto, tipo, cantidad decimal, fecha efectiva resuelta en `BUSINESS_TIME_ZONE`, destino y motivo) y `response_status`/`response_body`/`completed_at`. El flujo en UNA transacción: INSERT de reserva (primero) → actualización condicional del saldo → `StockMovement` → `AuditLog` → respuesta armada → UPDATE de completitud. Si la transacción falla en cualquier paso, no sobrevive ningún registro incompleto. Creación y replay responden `201` con el mismo contrato público `{ movement, item }`; el controller descarta el discriminante interno `kind` y nunca expone `requestHash` ni el registro. Los UUID del producto y del destino se canonicalizan en minúsculas en el endpoint lógico y en la huella. Un `P2002` se trata como idempotencia solo si identifica exactamente el unique de reserva (con Prisma 7 + `@prisma/adapter-pg` la identidad llega como `meta.driverAdapterError.cause.constraint.index = "idempotency_records_actor_user_id_endpoint_key_key"`, verificado contra `adapter-pg@7.10.0`; la forma `meta.target` de otros engines también se acepta; un `P2002` sin identidad se propaga) y se lee el registro una vez, después del rollback del perdedor: existe → replay/conflicto/pendiente según su estado y huella; no visible → `409 IDEMPOTENCY_RECORD_PENDING`, sin reintento ciego. La transacción tiene timeout acotado y un `P2002` de otro unique se propaga sin convertirse en replay. No hay caché en memoria ni reutilización de `StockMovement.reference`. La purga de registros viejos NO existe en esta etapa: hay índice sobre `created_at` para el futuro proceso y la deuda está documentada en `docs/DATABASE.md`.
+
+**Errores nuevos**: `409 STOCK_DESTINATION_DUPLICATE`, `400 IDEMPOTENCY_KEY_INVALID`, `409 IDEMPOTENCY_KEY_CONFLICT`, `409 IDEMPOTENCY_RECORD_PENDING` (todos operacionales, con código estable).
+
+**Migración**: `20260924210000_stock_idempotency_balance_check` — tabla `idempotency_records` + índices + FK `RESTRICT` generados offline con `prisma migrate diff` entre dos archivos de schema, más un `CHECK (current_quantity >= 0)` agregado a mano (piso de defensa en profundidad de la invariante de saldo no negativo; la garantía frente a concurrencia sigue siendo la actualización condicional de §20). **NO aplicada**: la corrección contra `demo` corresponde a 5C.1C, con autorización humana. Sin `db push`, reset, seed ni deploy en esta etapa.
