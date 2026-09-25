@@ -10,6 +10,7 @@ vi.mock('./httpClient', () => ({ apiRequest: apiRequestMock }));
 
 import {
   createStockCategory,
+  createStockDestination,
   createStockItem,
   createStockMovement,
   fetchStockCategories,
@@ -17,8 +18,12 @@ import {
   fetchStockItem,
   fetchStockItemMovements,
   fetchStockItems,
+  fetchStockReportMovements,
+  fetchStockReportCsv,
+  fetchStockReportSummary,
   setStockItemActive,
   updateStockCategory,
+  updateStockDestination,
   updateStockItem,
 } from './stockApi';
 
@@ -63,7 +68,13 @@ describe('stockApi — rutas y verbos del contrato 5A', () => {
 
   it('GET /stock/destinations, /items/:id y /items/:id/movements', async () => {
     await fetchStockDestinations();
-    expect(apiRequestMock).toHaveBeenCalledWith('/stock/destinations', { authenticated: true });
+    expect(apiRequestMock).toHaveBeenCalledWith('/stock/destinations?status=active', {
+      authenticated: true,
+    });
+    await fetchStockDestinations('all');
+    expect(apiRequestMock).toHaveBeenLastCalledWith('/stock/destinations?status=all', {
+      authenticated: true,
+    });
 
     await fetchStockItem('i1');
     expect(apiRequestMock).toHaveBeenCalledWith('/stock/items/i1', { authenticated: true });
@@ -120,14 +131,62 @@ describe('stockApi — rutas y verbos del contrato 5A', () => {
     });
   });
 
-  it('POST de movimiento: nunca envía employeeId ni stockItemId', async () => {
+  it('POST de movimiento: Idempotency-Key solo como header, nunca en el body', async () => {
     const body: CreateStockMovementRequest = { type: 'INCOME', quantity: '5' };
-    await createStockMovement('i1', body);
+    await createStockMovement('i1', body, 'clave-sintetica-0001');
     expect(apiRequestMock).toHaveBeenCalledWith('/stock/items/i1/movements', {
       method: 'POST',
       body,
       authenticated: true,
+      headers: { 'Idempotency-Key': 'clave-sintetica-0001' },
     });
-    expect(JSON.stringify(body)).not.toMatch(/employeeId|stockItemId/);
+    expect(JSON.stringify(body)).not.toMatch(/employeeId|stockItemId|idempotency/i);
+  });
+
+  it('destinos: POST/PATCH sin `type` en la edición (inmutable)', async () => {
+    await createStockDestination({ name: 'Destino', type: 'SECTOR' });
+    expect(apiRequestMock).toHaveBeenCalledWith('/stock/destinations', {
+      method: 'POST',
+      body: { name: 'Destino', type: 'SECTOR' },
+      authenticated: true,
+    });
+    await updateStockDestination('d1', { active: false });
+    expect(apiRequestMock).toHaveBeenLastCalledWith('/stock/destinations/d1', {
+      method: 'PATCH',
+      body: { active: false },
+      authenticated: true,
+    });
+  });
+
+  it('reportes: GET con filtros server-side, sin headers de idempotencia', async () => {
+    await fetchStockReportSummary({ from: '2026-09-01', to: '2026-09-25', area: 'HOUSE' });
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      '/stock/reports/summary?from=2026-09-01&to=2026-09-25&area=HOUSE',
+      { authenticated: true },
+    );
+    await fetchStockReportMovements({
+      from: '2026-09-01',
+      to: '2026-09-25',
+      type: 'CONSUMPTION',
+      page: 2,
+      pageSize: 20,
+    });
+    expect(apiRequestMock).toHaveBeenLastCalledWith(
+      '/stock/reports/movements?from=2026-09-01&to=2026-09-25&type=CONSUMPTION&page=2&pageSize=20',
+      { authenticated: true },
+    );
+    await fetchStockReportCsv({ from: '2026-09-01', to: '2026-09-25' });
+    expect(apiRequestMock).toHaveBeenLastCalledWith(
+      '/stock/reports/movements.csv?from=2026-09-01&to=2026-09-25',
+      { authenticated: true, responseType: 'text' },
+    );
+  });
+
+  it('listado con nivel y orden server-side (Compras)', async () => {
+    await fetchStockItems({ status: 'active', stockLevel: 'critical', sort: 'name' });
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      '/stock/items?status=active&stockLevel=critical&sort=name',
+      { authenticated: true },
+    );
   });
 });

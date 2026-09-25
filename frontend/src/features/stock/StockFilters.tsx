@@ -1,16 +1,21 @@
 import { useId } from 'react';
-import type { StockCategory, StockItemArea, StockStatusFilter } from '../../api/stockTypes';
-import { Chip } from '../../components/ui/Chip';
-import { AREA_EMOJI, AREA_LABEL } from './stockLabels';
+import type {
+  StockCategory,
+  StockItemArea,
+  StockLevel,
+  StockStatusFilter,
+} from '../../api/stockTypes';
+import { LEVEL_LABEL } from './stockLabels';
 
-const AREAS: readonly StockItemArea[] = ['HOUSE', 'GARDEN'];
+const LEVELS: readonly StockLevel[] = ['critical', 'low', 'ok'];
 
 interface StockFiltersProps {
   area: StockItemArea;
-  onAreaChange: (area: StockItemArea) => void;
   categories: StockCategory[];
   categoryId: string;
   onCategoryIdChange: (categoryId: string) => void;
+  stockLevel: StockLevel | '';
+  onStockLevelChange: (level: StockLevel | '') => void;
   status: StockStatusFilter;
   onStatusChange: (status: StockStatusFilter) => void;
   /** Solo ADMIN: el backend rechaza `status≠active` con 403 para el resto. */
@@ -20,17 +25,18 @@ interface StockFiltersProps {
 }
 
 /**
- * Filtros del inventario — TODOS server-side (área, categoría, estado y
- * búsqueda viajan como query de `GET /stock/items`; nada se filtra sobre
- * una página cargada). La búsqueda la debouncea la pantalla madre antes de
- * setear `searchInput` aquí como valor controlado.
+ * Filtros del inventario de un área — TODOS server-side (categoría, nivel,
+ * estado y búsqueda viajan como query de `GET /stock/items`; nada se filtra
+ * sobre una página cargada). El área la decide la pestaña (🏠/🌿). La
+ * búsqueda la debouncea la vista antes de consultar.
  */
 export function StockFilters({
   area,
-  onAreaChange,
   categories,
   categoryId,
   onCategoryIdChange,
+  stockLevel,
+  onStockLevelChange,
   status,
   onStatusChange,
   isAdmin,
@@ -40,6 +46,7 @@ export function StockFilters({
   const searchId = useId();
   const statusId = useId();
   const categoryIdId = useId();
+  const levelId = useId();
 
   // Un filtro de categoría de otra área devolvería siempre vacío: las
   // opciones se limitan al área visible (Ambas aplica a ambas).
@@ -49,23 +56,6 @@ export function StockFilters({
 
   return (
     <div className="stock-filters">
-      <div className="filter-scroller" role="group" aria-label="Filtrar por área">
-        {AREAS.map((value) => (
-          <Chip
-            key={value}
-            selected={area === value}
-            onSelect={() => {
-              onAreaChange(value);
-              // La categoría elegida puede no pertenecer al nuevo área.
-              onCategoryIdChange('');
-            }}
-            leading={<span aria-hidden="true">{AREA_EMOJI[value]}</span>}
-          >
-            {AREA_LABEL[value]}
-          </Chip>
-        ))}
-      </div>
-
       <div className="stock-filters__row">
         <div className="field stock-filters__field">
           <label className="field__label" htmlFor={searchId}>
@@ -97,6 +87,25 @@ export function StockFilters({
               <option key={category.id} value={category.id}>
                 {category.name}
                 {!category.active ? ' (inactiva)' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="field stock-filters__field">
+          <label className="field__label" htmlFor={levelId}>
+            Nivel de stock
+          </label>
+          <select
+            id={levelId}
+            className="field__input"
+            value={stockLevel}
+            onChange={(event) => onStockLevelChange(event.target.value as StockLevel | '')}
+          >
+            <option value="">Todos</option>
+            {LEVELS.map((level) => (
+              <option key={level} value={level}>
+                {LEVEL_LABEL[level]}
               </option>
             ))}
           </select>

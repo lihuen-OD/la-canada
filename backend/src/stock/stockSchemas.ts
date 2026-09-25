@@ -163,6 +163,11 @@ export const listStockItemsQuerySchema = z
     stockLevel: z
       .enum(['ok', 'low', 'critical'], { message: 'Nivel de stock inválido.' })
       .optional(),
+    /**
+     * Orden del listado: `area` (Casa primero, luego nombre — inventario) o
+     * `name` (solo nombre — Compras, donde el área es una columna más).
+     */
+    sort: z.enum(['area', 'name'], { message: 'Orden inválido.' }).default('area'),
     page: pageSchema,
     pageSize: pageSizeSchema,
   })
@@ -204,18 +209,61 @@ export const createStockMovementBodySchema = z
     }),
     quantity: stockQuantityTextSchema,
     effectiveDate: dateSchema.optional(),
+    /** Opcional en todo tipo de movimiento (paridad con el prototipo, Etapa 5C.2). */
     destinationId: uuidSchema.optional(),
+    /**
+     * Persona del movimiento (paridad con el "¿Quién consumió?" del
+     * prototipo): solo ADMIN la elige — un empleado activo, o `null` =
+     * "Administrador". Ausente = la persona de la sesión. EMPLOYEE queda
+     * fijado a sí mismo (lo decide el servicio). El actor real SIEMPRE sale
+     * de la sesión y queda en la auditoría.
+     */
+    employeeId: uuidSchema.nullable().optional(),
     reason: plainText('El motivo', 3, STOCK_REASON_MAX_LENGTH).optional(),
   })
-  .strict()
-  .refine((body) => body.destinationId === undefined || body.type === 'CONSUMPTION', {
-    message: 'El destino solo aplica a consumos.',
-  });
+  .strict();
 
 export const listStockMovementsQuerySchema = z
   .object({
     type: z.enum(ALL_MOVEMENT_TYPES, { message: 'Tipo de movimiento inválido.' }).optional(),
     page: pageSchema,
     pageSize: pageSizeSchema,
+  })
+  .strict();
+
+// ── Reportes (Etapa 5C.2) ─────────────────────────────────────────────────
+
+/** Rango máximo de un reporte: un año calendario (el prototipo ofrecía 7/30/90/365 días). */
+export const STOCK_REPORT_MAX_DAYS = 366;
+
+/**
+ * Filtros comunes de `/stock/reports/*`. `from`/`to` son fechas de
+ * calendario de `BUSINESS_TIME_ZONE` (la misma semántica que
+ * `StockMovement.effectiveDate`, `@db.Date`); el servicio valida el orden, el
+ * rango máximo y recorta `to` a hoy.
+ */
+const stockReportFilterShape = {
+  from: dateSchema,
+  to: dateSchema,
+  area: z.enum(STOCK_ITEM_AREAS, { message: 'Área inválida.' }).optional(),
+  categoryId: uuidSchema.optional(),
+  type: z.enum(ALL_MOVEMENT_TYPES, { message: 'Tipo de movimiento inválido.' }).optional(),
+  itemId: uuidSchema.optional(),
+  employeeId: uuidSchema.optional(),
+  destinationId: uuidSchema.optional(),
+};
+
+export const stockReportSummaryQuerySchema = z.object(stockReportFilterShape).strict();
+
+export const stockReportMovementsQuerySchema = z
+  .object({
+    ...stockReportFilterShape,
+    page: pageSchema,
+    pageSize: z.coerce
+      .number()
+      .int('El tamaño de página debe ser un número entero.')
+      .min(1)
+      .max(50)
+      .default(20),
   })
   .strict();

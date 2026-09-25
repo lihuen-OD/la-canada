@@ -206,6 +206,7 @@ export interface ListStockItemsFilters {
   status: 'active' | 'inactive' | 'all';
   q?: string;
   stockLevel?: StockLevel;
+  sort?: 'area' | 'name';
   page: number;
   pageSize: number;
 }
@@ -247,7 +248,10 @@ export async function listStockItems(actor: StockActor, filters: ListStockItemsF
     prisma.stockItem.findMany({
       where,
       select: itemSelect,
-      orderBy: [{ area: 'asc' }, { name: 'asc' }],
+      orderBy:
+        filters.sort === 'name'
+          ? [{ name: 'asc' }, { area: 'asc' }]
+          : [{ area: 'asc' }, { name: 'asc' }],
       skip,
       take: filters.pageSize,
     }),
@@ -728,21 +732,16 @@ const ADMIN_ONLY_TYPES = new Set(['ADJUSTMENT_INCREASE', 'ADJUSTMENT_DECREASE'])
 /**
  * Fecha de efecto: la del body si viene (validada como fecha real de
  * calendario), si no el día de hoy en la zona de negocio. Se guarda como
- * `@db.Date` (medianoche UTC de esa fecha local).
+ * `@db.Date` (medianoche UTC de esa fecha local). Paridad con el prototipo
+ * (Etapa 5C.2): cualquier usuario registra hoy o una fecha pasada; nunca
+ * futura (esa restricción es una mejora de integridad).
  */
-function resolveEffectiveDate(
-  text: string | undefined,
-  now: Date,
-  actor: StockActor,
-): { date: Date; text: string } {
+function resolveEffectiveDate(text: string | undefined, now: Date): { date: Date; text: string } {
   const local = text ? parseLocalDate(text) : toLocalDate(now, config.businessTimeZone);
   if (!local) throw new ValidationError('La fecha no es válida.');
   const today = toLocalDate(now, config.businessTimeZone);
   if (compareLocalDates(local, today) > 0) {
     throw new ValidationError('La fecha efectiva no puede ser futura.');
-  }
-  if (actor.role !== 'ADMIN' && compareLocalDates(local, today) !== 0) {
-    throw new ForbiddenError('Solo un administrador puede registrar movimientos retroactivos.');
   }
   return {
     date: new Date(Date.UTC(local.year, local.month - 1, local.day)),
@@ -759,6 +758,8 @@ interface MovementWriteContext {
   effectiveDate: Date;
   effectiveDateText: string;
   decreasing: boolean;
+  /** Empleado elegido por un ADMIN (distinto del de su sesión): se valida activo dentro de la transacción. */
+  chosenEmployeeId: string | null;
   meta: RequestMeta;
 }
 
@@ -788,6 +789,16 @@ async function writeMovement(
   });
   if (!item) throw new StockItemNotFoundError();
   if (!item.active) throw new StockItemInactiveError();
+
+  if (ctx.chosenEmployeeId) {
+    const chosen = await tx.employee.findUnique({
+      where: { id: ctx.chosenEmployeeId },
+      select: { id: true, active: true },
+    });
+    if (!chosen || !chosen.active) {
+      throw new ValidationError('La persona elegida no existe o está inactiva.');
+    }
+  }
 
   if (input.destinationId) {
     const destination = await tx.consumptionDestination.findUnique({
@@ -877,6 +888,7 @@ export function computeMovementRequestHash(
   itemId: string,
   input: CreateMovementInput,
   resolvedEffectiveDate: string,
+  resolvedEmployeeId: string | null = null,
 ): string {
   const canonical = JSON.stringify({
     endpoint,
@@ -888,6 +900,8 @@ export function computeMovementRequestHash(
     // no un replay silencioso del movimiento del día anterior.
     effectiveDate: resolvedEffectiveDate,
     destinationId: input.destinationId?.toLowerCase() ?? null,
+    // Persona del movimiento ya resuelta (elegida por ADMIN o la de la sesión).
+    employeeId: resolvedEmployeeId?.toLowerCase() ?? null,
     reason: input.reason ?? null,
   });
   return createHash('sha256').update(canonical).digest('hex');
@@ -934,21 +948,33 @@ export async function createStockMovement(
   if (ADMIN_ONLY_TYPES.has(input.type) && actor.role !== 'ADMIN') {
     throw new ForbiddenError('Solo un administrador puede registrar ajustes de stock.');
   }
-  if (input.destinationId && input.type !== 'CONSUMPTION') {
-    throw new ValidationError('El destino solo aplica a consumos.');
-  }
-  // Cualquier usuario logueado registra ingresos y consumos ( BUSINESS_RULES
-  // §1: "sin gate de admin"); el responsable de la operación sale SIEMPRE de
-  // la sesión, nunca del body.
+  // Cualquier usuario logueado registra ingresos y consumos (BUSINESS_RULES
+  // §1: "sin gate de admin"). Persona del movimiento (paridad con el
+  // prototipo, Etapa 5C.2): un ADMIN elige un empleado activo o `null`
+  // ("Administrador"); un EMPLOYEE queda fijado a sí mismo. El actor real
+  // (usuario de la sesión) queda siempre en la auditoría.
   if (actor.role !== 'ADMIN' && !actor.employeeId) {
     throw new EmployeeLinkRequiredError();
   }
-  const employeeId = actor.employeeId;
+  let employeeId = actor.employeeId;
+  let chosenEmployeeId: string | null = null;
+  if (input.employeeId !== undefined) {
+    const requested = input.employeeId?.toLowerCase() ?? null;
+    if (actor.role !== 'ADMIN') {
+      if (requested !== actor.employeeId?.toLowerCase()) {
+        throw new ForbiddenError(
+          'Solo un administrador puede registrar movimientos a nombre de otra persona.',
+        );
+      }
+    } else {
+      employeeId = requested;
+      chosenEmployeeId = requested;
+    }
+  }
   const quantity = new Prisma.Decimal(input.quantity);
   const { date: effectiveDate, text: effectiveDateText } = resolveEffectiveDate(
     input.effectiveDate,
     now,
-    actor,
   );
   const decreasing = DECREASING_TYPES.has(input.type);
   const ctx: MovementWriteContext = {
@@ -960,6 +986,7 @@ export async function createStockMovement(
     effectiveDate,
     effectiveDateText,
     decreasing,
+    chosenEmployeeId,
     meta,
   };
 
@@ -984,7 +1011,13 @@ export async function createStockMovement(
   // producto escrito con otra capitalización no abra una segunda reserva
   // (y con ella una segunda escritura) bajo la misma clave.
   const endpoint = `POST /stock/items/${itemId.toLowerCase()}/movements`;
-  const requestHash = computeMovementRequestHash(endpoint, itemId, input, effectiveDateText);
+  const requestHash = computeMovementRequestHash(
+    endpoint,
+    itemId,
+    input,
+    effectiveDateText,
+    employeeId,
+  );
 
   try {
     const response = await prisma.$transaction(

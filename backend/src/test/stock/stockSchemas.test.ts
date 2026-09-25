@@ -149,28 +149,32 @@ describe('createStockMovementBodySchema', () => {
     ).toBe(false);
   });
 
-  it('rechaza destino en un ingreso (solo aplica a consumos)', () => {
-    expect(
-      createStockMovementBodySchema.safeParse({
-        type: 'INCOME',
-        quantity: '1',
-        destinationId: DESTINATION_ID,
-      }).success,
-    ).toBe(false);
+  it('acepta destino opcional en cualquier tipo (paridad con el prototipo)', () => {
+    for (const type of ['INCOME', 'CONSUMPTION', 'ADJUSTMENT_INCREASE', 'ADJUSTMENT_DECREASE']) {
+      expect(
+        createStockMovementBodySchema.safeParse({
+          type,
+          quantity: '1',
+          destinationId: DESTINATION_ID,
+        }).success,
+      ).toBe(true);
+    }
   });
 
-  it('rechaza destino en un ajuste', () => {
+  it('employeeId: UUID o null ("Administrador"); cualquier otra cosa se rechaza', () => {
     expect(
-      createStockMovementBodySchema.safeParse({
-        type: 'ADJUSTMENT_DECREASE',
-        quantity: '1',
-        destinationId: DESTINATION_ID,
-      }).success,
-    ).toBe(false);
+      createStockMovementBodySchema.safeParse({ ...base, employeeId: DESTINATION_ID }).success,
+    ).toBe(true);
+    expect(createStockMovementBodySchema.safeParse({ ...base, employeeId: null }).success).toBe(
+      true,
+    );
+    expect(createStockMovementBodySchema.safeParse({ ...base, employeeId: 'coke' }).success).toBe(
+      false,
+    );
   });
 
   it('rechaza campos desconocidos (.strict)', () => {
-    for (const field of ['employeeId', 'stockItemId', 'currentQuantity', 'area', 'active']) {
+    for (const field of ['stockItemId', 'currentQuantity', 'area', 'active', 'actorUserId']) {
       expect(
         createStockMovementBodySchema.safeParse({ ...base, [field]: DESTINATION_ID }).success,
       ).toBe(false);
@@ -205,14 +209,20 @@ describe('createStockCategoryBodySchema / updateStockCategoryBodySchema', () => 
 });
 
 describe('listStockItemsQuerySchema', () => {
-  it('aplica defaults: status active, page 1, pageSize 50', () => {
+  it('aplica defaults: status active, orden por área, page 1, pageSize 50', () => {
     const parsed = listStockItemsQuerySchema.safeParse({});
     expect(parsed.success).toBe(true);
     expect(parsed.success && parsed.data).toEqual({
       status: 'active',
+      sort: 'area',
       page: 1,
       pageSize: 50,
     });
+  });
+
+  it('sort admite solo area|name (Compras ordena por nombre)', () => {
+    expect(listStockItemsQuerySchema.safeParse({ sort: 'name' }).success).toBe(true);
+    expect(listStockItemsQuerySchema.safeParse({ sort: 'stock' }).success).toBe(false);
   });
 
   it('coercea page/pageSize desde query string', () => {

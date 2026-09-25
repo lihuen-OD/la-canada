@@ -1,21 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { movementSignedPrefix, stockBarPercent, stockLevel } from './stockStatus';
+import { movementSignedPrefix, purchaseShortfall, stockBarPercent } from './stockStatus';
 
-describe('stockLevel (docs/BUSINESS_RULES.md §7)', () => {
-  it('crítico si stock ≤ 0', () => {
-    expect(stockLevel('0', '5')).toBe('crit');
-    expect(stockLevel('0.00', '0')).toBe('crit');
+describe('nivel de stock: responsabilidad exclusiva del backend', () => {
+  it('el módulo visual ya no exporta una regla de nivel propia', async () => {
+    const module = await import('./stockStatus');
+    expect(module).not.toHaveProperty('stockLevel');
+  });
+});
+
+describe('purchaseShortfall (Compras: máximo(mínimo − actual, 0))', () => {
+  it('aritmética exacta en centésimos, sin errores de float', () => {
+    expect(purchaseShortfall('3', '10')).toBe('7');
+    expect(purchaseShortfall('0.1', '0.3')).toBe('0.2');
+    expect(purchaseShortfall('2.35', '10')).toBe('7.65');
+    expect(purchaseShortfall('9.5', '10')).toBe('0.5');
   });
 
-  it('bajo si stock < mínimo (excluyendo el crítico)', () => {
-    expect(stockLevel('3', '10')).toBe('low');
-    expect(stockLevel('9.99', '10')).toBe('low');
+  it('nunca negativa: con saldo ≥ mínimo la referencia es 0', () => {
+    expect(purchaseShortfall('25', '10')).toBe('0');
+    expect(purchaseShortfall('0', '0')).toBe('0');
   });
 
-  it('ok si stock ≥ mínimo (stock === mínimo cuenta como OK)', () => {
-    expect(stockLevel('10', '10')).toBe('ok');
-    expect(stockLevel('100', '10')).toBe('ok');
-    expect(stockLevel('1', '0')).toBe('ok');
+  it('formato inesperado → null (no inventa una cantidad)', () => {
+    expect(purchaseShortfall('1e3', '10')).toBeNull();
   });
 });
 

@@ -14,6 +14,13 @@ const STOCK_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   STOCK_DESTINATION_INACTIVE: 'El destino está inactivo.',
   STOCK_ITEM_DUPLICATE: 'Ya existe un producto con ese nombre en esa área.',
   STOCK_CATEGORY_DUPLICATE: 'Ya existe una categoría con ese nombre en esa área.',
+  STOCK_DESTINATION_DUPLICATE: 'Ya existe un destino con ese nombre.',
+  IDEMPOTENCY_KEY_CONFLICT:
+    'El formulario cambió respecto del envío anterior. Revisá los datos y registralo de nuevo: se tratará como una operación nueva.',
+  IDEMPOTENCY_RECORD_PENDING:
+    'La operación anterior todavía se está resolviendo. Esperá unos segundos y tocá «Consultar estado»: no se registrará dos veces.',
+  IDEMPOTENCY_KEY_INVALID:
+    'No pudimos identificar el envío. Cerrá el formulario y volvé a intentar.',
 };
 
 /** Mensaje humano del backend (`ApiError.message`, que ya trae texto legible para los códigos `STOCK_*`). */

@@ -44,6 +44,14 @@ export interface RequestOptions {
    * refresh-y-reintento (evita cualquier posibilidad de loop).
    */
   authenticated?: boolean;
+  /**
+   * Headers adicionales de ESTA request (p. ej. `Idempotency-Key` de un
+   * movimiento de stock). Viajan idénticos en el único reintento tras 401 +
+   * refresh: es la misma request técnica, no una operación nueva.
+   */
+  headers?: Readonly<Record<string, string>>;
+  /** Respuestas no JSON, actualmente solo el CSV server-side de Stock. */
+  responseType?: 'json' | 'text';
 }
 
 /**
@@ -54,8 +62,14 @@ export interface RequestOptions {
  * caso por caso.
  */
 async function rawRequest<T>(path: string, options: RequestOptions): Promise<T> {
-  const { method = 'GET', body, authenticated } = options;
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const {
+    method = 'GET',
+    body,
+    authenticated,
+    headers: extraHeaders,
+    responseType = 'json',
+  } = options;
+  const headers: Record<string, string> = { ...extraHeaders, 'Content-Type': 'application/json' };
 
   if (authenticated) {
     const token = getAccessToken();
@@ -77,7 +91,7 @@ async function rawRequest<T>(path: string, options: RequestOptions): Promise<T> 
   if (response.status === 204) {
     return undefined as T;
   }
-  return (await response.json()) as T;
+  return (responseType === 'text' ? await response.text() : await response.json()) as T;
 }
 
 /**
@@ -107,7 +121,8 @@ async function attemptWithRefresh<T>(path: string, options: RequestOptions): Pro
       if (refreshError instanceof ApiError && refreshError.status < 500) throw error;
       throw refreshError;
     }
-    // Reintento único, con el token ya renovado en accessTokenStore.
+    // Reintento único, con el token ya renovado en accessTokenStore. Mismas
+    // `options` (incluidos sus headers): nunca una clave de idempotencia nueva.
     return rawRequest<T>(path, options);
   }
 }

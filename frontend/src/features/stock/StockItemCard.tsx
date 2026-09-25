@@ -2,7 +2,7 @@ import type { StockItem } from '../../api/stockTypes';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { LEVEL_LABEL, LEVEL_TONE } from './stockLabels';
-import { stockBarPercent, stockLevel } from './stockStatus';
+import { stockBarPercent } from './stockStatus';
 
 interface StockItemCardProps {
   item: StockItem;
@@ -15,11 +15,13 @@ interface StockItemCardProps {
  * Un producto del inventario (docs/UI_CONTEXT.md, "Stock"): cantidad y
  * etiqueta textual como información principal, barra de progreso solo
  * cuando el mínimo permite un porcentaje significativo (mínimo 0 → sin
- * barra: 100% fijo sería engañoso). Los movimientos de un producto
- * desactivado quedan deshabilitados — el backend también los rechaza.
+ * barra: 100% fijo sería engañoso). El nivel es `item.stockLevel`, calculado
+ * por el backend; la barra es solo su representación visual. Los
+ * movimientos de un producto desactivado quedan deshabilitados — el backend
+ * también los rechaza.
  */
 export function StockItemCard({ item, isAdmin, onMovement, onDetail }: StockItemCardProps) {
-  const level = stockLevel(item.currentQuantity, item.minimumQuantity);
+  const level = item.stockLevel;
   const percent = stockBarPercent(item.currentQuantity, item.minimumQuantity);
   const accessibleName = item.name;
 
@@ -57,18 +59,9 @@ export function StockItemCard({ item, isAdmin, onMovement, onDetail }: StockItem
           size="sm"
           variant="secondary"
           disabled={!item.active}
-          onClick={() => onMovement(item, 'income')}
-        >
-          <span aria-hidden="true">➕ </span>Entrada
-          <span className="visually-hidden">: {accessibleName}</span>
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={!item.active}
           onClick={() => onMovement(item, 'consumption')}
         >
-          <span aria-hidden="true">➖ </span>Consumo
+          <span aria-hidden="true">📤 </span>Registrar movimiento
           <span className="visually-hidden">: {accessibleName}</span>
         </Button>
         {isAdmin ? (

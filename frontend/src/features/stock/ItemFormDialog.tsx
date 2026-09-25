@@ -28,6 +28,8 @@ interface ItemFormDialogProps {
   item?: StockItem;
   /** Categorías visibles para el área elegida (activas + la actual si quedó inactiva). */
   categories: StockCategory[];
+  /** Área preseleccionada al crear desde 🏠 Casa / 🌿 Jardín (como el "+ Agregar ítem" del prototipo). */
+  defaultArea?: StockItemArea;
   onCancel: () => void;
   onSubmit: (body: CreateStockItemRequest | UpdateStockItemRequest) => Promise<void>;
   onSessionExpired: () => void;
@@ -43,6 +45,7 @@ interface ItemFormDialogProps {
 export function ItemFormDialog({
   item,
   categories,
+  defaultArea,
   onCancel,
   onSubmit,
   onSessionExpired,
@@ -50,7 +53,7 @@ export function ItemFormDialog({
   const titleId = useId();
   const isEdit = item !== undefined;
   const [name, setName] = useState(item?.name ?? '');
-  const [area, setArea] = useState<StockItemArea>(item?.area ?? 'HOUSE');
+  const [area, setArea] = useState<StockItemArea>(item?.area ?? defaultArea ?? 'HOUSE');
   const [categoryId, setCategoryId] = useState(item?.category.id ?? '');
   const [unit, setUnit] = useState(item?.unit ?? '');
   const [minimumQuantity, setMinimumQuantity] = useState(item?.minimumQuantity ?? '0');

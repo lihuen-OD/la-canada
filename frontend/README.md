@@ -91,6 +91,15 @@ Detalle completo en `docs/ARCHITECTURE.md` (sección 15) y `docs/SECURITY.md`, e
 - **Sesión vencida**: un 401 que sobrevive al refresh-y-reintento de `httpClient` llama al `logout()` existente.
 - **Fechas**: el frontend solo formatea (`completedAt` en la zona que informa la API); nunca calcula períodos.
 
+## Stock (Etapas 5B–5C.2)
+
+`/stock/*` (`src/features/stock/StockModule.tsx`), para todo usuario autenticado. Detalle en `docs/ARCHITECTURE.md` §20–§23.
+
+- **Subvistas SPA**: 🏠 Casa (`/stock`) y 🌿 Jardín (`/stock/garden`) son el mismo `InventoryView`; 🛒 Compras (`/stock/purchases`), 📊 Reportes (`/stock/reports`), ⚙️ Catálogo (`/stock/catalog`, solo ADMIN). Pestañas `NavLink`; filtros por vista en memoria (`StockViewStateProvider`), nunca storage.
+- **Nivel**: siempre `item.stockLevel` del backend; `stockStatus.ts` solo calcula la barra y la diferencia de Compras.
+- **Movimientos**: `MovementDialog` genera y conserva la `Idempotency-Key` de la intención (`src/api/idempotency.ts`) y usa `useSubmitStockMovement` (`useStockCache.ts`) para enviar e invalidar solo lo afectado. Destino opcional solo en consumos, solo activos.
+- **Reportes**: los catálogos de "Más filtros" se piden al abrirlos; las barras son proporcionales a conteos, nunca a cantidades de unidades distintas.
+
 ## Sistema visual (Etapa 3E)
 
 La fuente de verdad visual es `docs/UI_CONTEXT.md` (raíz del repo). Esta sección documenta cómo quedó implementada, sin repetir esa guía.

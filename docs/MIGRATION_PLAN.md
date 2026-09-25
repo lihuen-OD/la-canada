@@ -245,6 +245,13 @@ Con el código de esta etapa ya validado (ver checklist más abajo), crear el pr
 - **Medición** (Chrome, build de producción, 150 ms por request): Tareas → Desempeño 833 → 193 ms (sin recarga ni `refresh`/`me`); Desempeño → Tareas 840 → 50 ms (0 requests); revisitas 164–848 → 11–58 ms (0 requests). Bundle JS 355,8 → 393,0 KB (+10,8 KB gzip por TanStack Query).
 - **Pendiente**: 5C.2 (frontend de destinos/`stockLevel`/`Idempotency-Key` obligatorio) sigue sin autorizar; migrar a Query el catálogo administrativo y el detalle de producto cuando se toquen.
 
+### Etapa 5C.2 — Cierre funcional de Stock 🟡 implementada y validada, sin commit — pendiente de aprobación visual
+
+- **Frontend**: subnavegación SPA 🏠 Casa / 🌿 Jardín / 🛒 Compras / 📊 Reportes / ⚙️ Catálogo (solo ADMIN); modal unificado Consumo/Ingreso, persona seleccionable por `ADMIN`, fechas pasadas para todos y destino opcional; ajustes rápidos separados; FAB móvil y alta de escritorio; `Idempotency-Key` en todo movimiento; Compras derivada agrupable y compartible; Reportes ampliados y CSV; detalle y catálogo con TanStack Query.
+- **Backend**: reportes summary/movements/CSV para todo autenticado sin recorte por estado activo, SQL parametrizado y sin N+1; persona operativa separada del actor auditado; fecha no futura y destino activo opcional. `sort=area|name` en productos. Sin migración ni cambios de schema.
+- **Validación**: tests unitarios backend y frontend, integración dirigida contra `demo` (`stock5c2.integration.test.ts`, fixtures `test-5c2-<RUN>`, 0 residuos), revisión visual automatizada en 5 anchos con Chrome headless y datos sintéticos.
+- **Paridad resuelta con el HTML temporal**: Reportes y CSV eran visibles para todos (sin `admin-only` ni `isAdmin()`); CSV, compartir Compras y agrupación por categoría/estado quedaron implementados. Pendiente: aprobación visual humana y commit. Índice por `effective_date` solo si el volumen lo justifica; `production` intacta.
+
 ## Etapa 6 — Integrar Neon Object Storage (fotografías y archivos)
 
 - **Objetivo**: conectar `FileAsset` (ya modelado en la Etapa 2, adaptado a Neon Object Storage en la Etapa 2.2) con el Object Storage real de Neon, gestionado desde el backend.

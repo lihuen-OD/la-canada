@@ -69,6 +69,7 @@ const DEST_INACTIVO = '99999999-9999-4999-8999-999999999999';
 const DEST_INEXISTENTE = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const EMP_JUAN = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const USER_ADMIN = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const EMP_INEXISTENTE_PERSONA = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 const USER_EMPLOYEE = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const USER_NO_LINK = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 
@@ -313,6 +314,26 @@ describe('listStockItems — filtro server-side por stockLevel', () => {
     expect(none.items).toEqual([]);
     expect(none.total).toBe(0);
     expect(none.totalPages).toBe(1);
+  });
+
+  it('sort=name (Compras) ordena por nombre sin agrupar Casa antes que Jardín', async () => {
+    const fake = getFakeStockPrisma();
+    fake.items.get(ITEM_FERTILIZANTE)!.name = 'Abono';
+    const byName = await listStockItems(admin, {
+      status: 'active',
+      stockLevel: 'low',
+      sort: 'name',
+      page: 1,
+      pageSize: 50,
+    });
+    expect(byName.items.map((item) => item.name)).toEqual(['Abono', 'Detergente']);
+    const byArea = await listStockItems(admin, {
+      status: 'active',
+      stockLevel: 'low',
+      page: 1,
+      pageSize: 50,
+    });
+    expect(byArea.items.map((item) => item.name)).toEqual(['Detergente', 'Abono']);
   });
 
   it('un EMPLOYEE puede filtrar por nivel (no es permiso de administración)', async () => {
@@ -937,19 +958,26 @@ describe('createStockMovement — destinos y fechas', () => {
     ).rejects.toThrow(StockDestinationInactiveError);
   });
 
-  it('el servicio también rechaza un destino en ingresos o ajustes', async () => {
-    await expect(
-      createStockMovement(
-        admin,
-        ITEM_DETERGENTE,
-        {
-          type: 'INCOME',
-          quantity: '1',
-          destinationId: DEST_OPERATIVO,
-        } as Parameters<typeof createStockMovement>[2],
-        meta,
-      ),
-    ).rejects.toMatchObject({ statusCode: 400, code: 'VALIDATION_ERROR' });
+  it('destino opcional también en ingresos y ajustes (paridad con el prototipo)', async () => {
+    const income = await createStockMovement(
+      employee,
+      ITEM_DETERGENTE,
+      { type: 'INCOME', quantity: '1', destinationId: DEST_OPERATIVO },
+      meta,
+    );
+    expect(income.movement.destination?.id).toBe(DEST_OPERATIVO);
+    const adjustment = await createStockMovement(
+      admin,
+      ITEM_DETERGENTE,
+      {
+        type: 'ADJUSTMENT_INCREASE',
+        quantity: '1',
+        reason: 'Conteo',
+        destinationId: DEST_OPERATIVO,
+      },
+      meta,
+    );
+    expect(adjustment.movement.destination?.id).toBe(DEST_OPERATIVO);
   });
 
   it('sin fecha efectiva usa el día de negocio de hoy (zona de negocio, no UTC del proceso)', async () => {
@@ -996,24 +1024,24 @@ describe('createStockMovement — destinos y fechas', () => {
     ).rejects.toMatchObject({ statusCode: 400, code: 'VALIDATION_ERROR' });
   });
 
-  it('EMPLOYEE solo registra hoy; la retroactividad queda limitada a ADMIN', async () => {
+  it('todos registran hoy o fechas pasadas (paridad con el prototipo); nunca futuras', async () => {
+    const past = await createStockMovement(
+      employee,
+      ITEM_DETERGENTE,
+      { type: 'CONSUMPTION', quantity: '1', effectiveDate: '2026-09-14' },
+      meta,
+      new Date('2026-09-15T12:00:00Z'),
+    );
+    expect(past.movement.effectiveDate).toBe('2026-09-14');
     await expect(
       createStockMovement(
         employee,
         ITEM_DETERGENTE,
-        { type: 'CONSUMPTION', quantity: '1', effectiveDate: '2026-09-14' },
+        { type: 'INCOME', quantity: '1', effectiveDate: '2026-09-16' },
         meta,
         new Date('2026-09-15T12:00:00Z'),
       ),
-    ).rejects.toMatchObject({ statusCode: 403, code: 'AUTH_FORBIDDEN' });
-    const result = await createStockMovement(
-      admin,
-      ITEM_DETERGENTE,
-      { type: 'INCOME', quantity: '1', effectiveDate: '2026-09-14' },
-      meta,
-      new Date('2026-09-15T12:00:00Z'),
-    );
-    expect(result.movement.effectiveDate).toBe('2026-09-14');
+    ).rejects.toMatchObject({ statusCode: 400, code: 'VALIDATION_ERROR' });
   });
 
   it('fecha de calendario inexistente → 400', async () => {
@@ -1025,6 +1053,98 @@ describe('createStockMovement — destinos y fechas', () => {
         meta,
       ),
     ).rejects.toThrow(ValidationError);
+  });
+});
+
+describe('createStockMovement — persona del movimiento (paridad con el prototipo)', () => {
+  it('ADMIN elige un empleado activo: queda como persona; el actor real queda en la auditoría', async () => {
+    const { movement } = await createStockMovement(
+      admin,
+      ITEM_DETERGENTE,
+      { type: 'INCOME', quantity: '1', employeeId: EMP_JUAN },
+      meta,
+    );
+    expect(movement.employee).toEqual({
+      id: EMP_JUAN,
+      displayName: 'Juan Pérez',
+      colorHex: '#336699',
+    });
+    const audit = getFakeStockPrisma().auditLogs.at(-1)!;
+    expect(audit).toMatchObject({ actorUserId: USER_ADMIN });
+    expect(audit.newState).toMatchObject({ employeeId: EMP_JUAN, actorRole: 'ADMIN' });
+  });
+
+  it('ADMIN con employeeId null registra como "Administrador" (sin persona)', async () => {
+    const { movement } = await createStockMovement(
+      admin,
+      ITEM_DETERGENTE,
+      { type: 'INCOME', quantity: '1', employeeId: null },
+      meta,
+    );
+    expect(movement.employee).toBeNull();
+  });
+
+  it('ADMIN no puede elegir una persona inexistente o inactiva (sin escribir nada)', async () => {
+    const fake = getFakeStockPrisma();
+    fake.employees.get(EMP_JUAN)!.active = false;
+    const before = fake.movements.length;
+    await expect(
+      createStockMovement(
+        admin,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1', employeeId: EMP_JUAN },
+        meta,
+      ),
+    ).rejects.toMatchObject({ statusCode: 400, code: 'VALIDATION_ERROR' });
+    await expect(
+      createStockMovement(
+        admin,
+        ITEM_DETERGENTE,
+        { type: 'INCOME', quantity: '1', employeeId: DEST_INEXISTENTE },
+        meta,
+      ),
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(fake.movements.length).toBe(before);
+    expect(fake.items.get(ITEM_DETERGENTE)!.currentQuantity).toBe('2');
+  });
+
+  it('EMPLOYEE queda fijado a sí mismo: otra persona o "Administrador" → 403', async () => {
+    for (const employeeId of [EMP_INEXISTENTE_PERSONA, null]) {
+      await expect(
+        createStockMovement(
+          employee,
+          ITEM_DETERGENTE,
+          { type: 'INCOME', quantity: '1', employeeId },
+          meta,
+        ),
+      ).rejects.toMatchObject({ statusCode: 403, code: 'AUTH_FORBIDDEN' });
+    }
+    const own = await createStockMovement(
+      employee,
+      ITEM_DETERGENTE,
+      { type: 'INCOME', quantity: '1', employeeId: EMP_JUAN.toUpperCase() },
+      meta,
+    );
+    expect(own.movement.employee?.id).toBe(EMP_JUAN);
+  });
+
+  it('la persona forma parte de la huella idempotente', () => {
+    const endpoint = `POST /stock/items/${ITEM_DETERGENTE}/movements`;
+    const input = { type: 'INCOME' as const, quantity: '1' };
+    expect(
+      computeMovementRequestHash(endpoint, ITEM_DETERGENTE, input, '2026-09-15', EMP_JUAN),
+    ).not.toBe(computeMovementRequestHash(endpoint, ITEM_DETERGENTE, input, '2026-09-15', null));
+    expect(
+      computeMovementRequestHash(endpoint, ITEM_DETERGENTE, input, '2026-09-15', EMP_JUAN),
+    ).toBe(
+      computeMovementRequestHash(
+        endpoint,
+        ITEM_DETERGENTE,
+        input,
+        '2026-09-15',
+        EMP_JUAN.toUpperCase(),
+      ),
+    );
   });
 });
 

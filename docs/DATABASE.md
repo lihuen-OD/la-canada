@@ -479,6 +479,10 @@ Migración `20260924210000_stock_idempotency_balance_check`, generada **offline*
 - **CHECK nuevo `stock_items_current_quantity_non_negative_check`**: `CHECK ("current_quantity" >= 0)` sobre `stock_items`, agregado a mano en la misma migración (Prisma no declara CHECK en `schema.prisma`). Piso de defensa en profundidad de la fila 6 de la matriz; no reemplaza la actualización condicional atómica del servicio. **Precondición verificada antes de aplicarla (5C.1C)**: 0 de 14 `stock_items` con `current_quantity < 0` (mínimo `1.00`).
 - El SQL no contiene ningún `DROP`, `TRUNCATE`, `DELETE` ni `ON DELETE CASCADE`, no recrea ninguna tabla existente y no toca `stock_movements.reference` ni ninguna fila de datos.
 
+### Etapa 5C.2 — consultas de reportes de Stock (sin migración)
+
+Sin cambios de schema ni migración. `GET /api/v1/stock/reports/*` agrega en Postgres con `$queryRaw` parametrizado sobre `stock_movements m JOIN stock_items i` (más `LEFT JOIN employees`/`consumption_destinations` donde corresponde): `GROUP BY type, unit` (totales por unidad), `GROUP BY area, CASE nivel` sobre `stock_items` activos (niveles actuales), un CTE con `ROW_NUMBER()` para los rankings top 10 y `COUNT(*) OVER ()` para el total de productos con movimientos, `GROUP BY destino, unit` y `GROUP BY persona, type`; la lista de movimientos pagina con `ORDER BY effective_date DESC, created_at DESC, id DESC LIMIT/OFFSET`. Índices usados hoy: `stock_movements(stock_item_id|employee_id|destination_id)` para los filtros por producto/persona/destino; el filtro de período es un rango sobre `effective_date` sin índice propio (escaneo secuencial, suficiente con el volumen actual). **Propuesta no aplicada**: índice sobre `stock_movements(effective_date)` cuando el historial crezca; requiere medir con `EXPLAIN ANALYZE` y su propia autorización de migración.
+
 ### Qué queda pendiente para la Etapa 3 (autenticación) en adelante
 
 - Enforcement a nivel de servicio de las filas 2, 6, 9, 11, 14, 15 de la matriz de invariantes.

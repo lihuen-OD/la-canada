@@ -2,18 +2,25 @@ import { apiRequest } from './httpClient';
 import type {
   CreateStockCategoryRequest,
   CreateStockItemRequest,
+  CreateStockDestinationRequest,
   CreateStockMovementRequest,
   ListStockItemsParams,
   ListStockMovementsParams,
   StockCategoriesResponse,
   StockCategoryResponse,
   StockCategoryStatusFilter,
+  StockDestinationResponse,
+  StockDestinationStatusFilter,
   StockDestinationsResponse,
   StockItemResponse,
   StockItemsListResponse,
   StockMovementMutationResponse,
   StockMovementsListResponse,
+  StockReportFilters,
+  StockReportMovementsResponse,
+  StockReportSummary,
   UpdateStockCategoryRequest,
+  UpdateStockDestinationRequest,
   UpdateStockItemRequest,
 } from './stockTypes';
 
@@ -43,8 +50,13 @@ export async function fetchStockCategories(
   });
 }
 
-export async function fetchStockDestinations(): Promise<StockDestinationsResponse> {
-  return apiRequest<StockDestinationsResponse>('/stock/destinations', { authenticated: true });
+/** `active` para movimientos (todos los usuarios); `all` solo lo acepta el backend a un ADMIN. */
+export async function fetchStockDestinations(
+  status: StockDestinationStatusFilter = 'active',
+): Promise<StockDestinationsResponse> {
+  return apiRequest<StockDestinationsResponse>(`/stock/destinations?status=${status}`, {
+    authenticated: true,
+  });
 }
 
 export async function fetchStockItem(itemId: string): Promise<StockItemResponse> {
@@ -114,15 +126,70 @@ export async function setStockItemActive(
   });
 }
 
+export async function createStockDestination(
+  body: CreateStockDestinationRequest,
+): Promise<StockDestinationResponse> {
+  return apiRequest<StockDestinationResponse>('/stock/destinations', {
+    method: 'POST',
+    body,
+    authenticated: true,
+  });
+}
+
+export async function updateStockDestination(
+  destinationId: string,
+  body: UpdateStockDestinationRequest,
+): Promise<StockDestinationResponse> {
+  return apiRequest<StockDestinationResponse>(`/stock/destinations/${destinationId}`, {
+    method: 'PATCH',
+    body,
+    authenticated: true,
+  });
+}
+
 // ── Movimientos (ADMIN y EMPLOYEE para ingreso/consumo; ajustes solo ADMIN) ──
 
+/**
+ * `idempotencyKey` viaja SOLO como header `Idempotency-Key` (nunca en el
+ * body): la misma clave identifica la misma intención de registro, así que
+ * un doble envío o un reintento del mismo request nunca crea dos movimientos
+ * (el backend responde el replay con el mismo `201`).
+ */
 export async function createStockMovement(
   itemId: string,
   body: CreateStockMovementRequest,
+  idempotencyKey: string,
 ): Promise<StockMovementMutationResponse> {
   return apiRequest<StockMovementMutationResponse>(`/stock/items/${itemId}/movements`, {
     method: 'POST',
     body,
     authenticated: true,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+}
+
+// ── Reportes (solo lectura, agregados en el backend) ──────────────────────
+
+export async function fetchStockReportSummary(
+  filters: StockReportFilters,
+): Promise<StockReportSummary> {
+  return apiRequest<StockReportSummary>(`/stock/reports/summary${queryString(filters)}`, {
+    authenticated: true,
+  });
+}
+
+export async function fetchStockReportMovements(
+  filters: StockReportFilters & { page?: number; pageSize?: number },
+): Promise<StockReportMovementsResponse> {
+  return apiRequest<StockReportMovementsResponse>(
+    `/stock/reports/movements${queryString(filters)}`,
+    { authenticated: true },
+  );
+}
+
+export async function fetchStockReportCsv(filters: StockReportFilters): Promise<string> {
+  return apiRequest<string>(`/stock/reports/movements.csv${queryString(filters)}`, {
+    authenticated: true,
+    responseType: 'text',
   });
 }

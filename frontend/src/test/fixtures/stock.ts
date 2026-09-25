@@ -6,6 +6,8 @@ import type {
   StockItemsListResponse,
   StockMovement,
   StockMovementsListResponse,
+  StockReportMovementsResponse,
+  StockReportSummary,
 } from '../../api/stockTypes';
 
 /**
@@ -40,6 +42,8 @@ export function makeItem(overrides: Partial<StockItem> = {}): StockItem {
     unit: 'kg',
     minimumQuantity: '10',
     currentQuantity: '25',
+    // Siempre explícito, como lo manda el backend: el frontend no lo recalcula.
+    stockLevel: 'ok',
     active: true,
     category: { id: CATEGORY_A.id, name: CATEGORY_A.name, area: CATEGORY_A.area },
     ...overrides,
@@ -52,6 +56,7 @@ export function makeLowItem(): StockItem {
     name: 'Producto sintético bajo',
     currentQuantity: '3',
     minimumQuantity: '10',
+    stockLevel: 'low',
   });
 }
 
@@ -61,6 +66,7 @@ export function makeCritItem(): StockItem {
     name: 'Producto sintético crítico',
     currentQuantity: '0',
     minimumQuantity: '5',
+    stockLevel: 'critical',
   });
 }
 
@@ -117,4 +123,57 @@ export const DESTINATION: StockDestination = {
   id: '00000000-0000-4000-8000-00000000d001',
   name: 'Destino sintético',
   type: 'VEHICLE',
+  active: true,
 };
+
+export const INACTIVE_DESTINATION: StockDestination = {
+  id: '00000000-0000-4000-8000-00000000d002',
+  name: 'Destino sintético inactivo',
+  type: 'SECTOR',
+  active: false,
+};
+
+/** Resumen de reporte VACÍO (sin movimientos en el período): la forma real del backend. */
+export function emptyReportSummary(from = '2026-08-27', to = '2026-09-25'): StockReportSummary {
+  return {
+    range: {
+      from,
+      to,
+      timeZone: 'America/Argentina/Buenos_Aires',
+      includesCurrentDay: true,
+      maxDays: 366,
+    },
+    totals: {
+      movements: 0,
+      income: { count: 0, byUnit: [] },
+      consumption: { count: 0, byUnit: [] },
+      adjustments: { count: 0, increase: 0, decrease: 0 },
+      openingBalance: { count: 0 },
+    },
+    currentLevels: {
+      critical: 0,
+      low: 0,
+      ok: 0,
+      byArea: [
+        { area: 'HOUSE', critical: 0, low: 0, ok: 0 },
+        { area: 'GARDEN', critical: 0, low: 0, ok: 0 },
+      ],
+    },
+    products: { withMovements: 0, mostMoved: [], mostConsumed: [] },
+    destinations: [],
+    employees: [],
+  };
+}
+
+export function reportMovementsList(
+  movements: StockReportMovementsResponse['movements'] = [],
+): StockReportMovementsResponse {
+  return {
+    range: emptyReportSummary().range,
+    movements,
+    page: 1,
+    pageSize: 20,
+    total: movements.length,
+    totalPages: 1,
+  };
+}

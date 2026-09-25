@@ -4,6 +4,10 @@
 >
 > **Nota (Etapa 2.3)**: `index.html` fue retirado del repositorio (contenía credenciales reales de Supabase — ver `docs/SECURITY.md`). Las citas de línea de este documento quedan como registro histórico de la auditoría; ya no corresponden a un archivo presente en el repo.
 
+## Regla de paridad funcional (permanente)
+
+La reconstrucción conserva las funciones y permisos del prototipo tal como los documenta este archivo: lo que el prototipo permitía a todo usuario logueado sigue permitido; lo restringido a admin sigue restringido. No se agregan, quitan ni restringen funciones sin autorización expresa del usuario, aunque parezca más seguro o conveniente; la seguridad se mejora por dentro (backend como autoridad, validación, transacciones) sin cambiar la experiencia autorizada. Ante una conducta no determinable con esta documentación, se informa la ambigüedad y se pide el HTML original como referencia temporal. **Única excepción funcional autorizada**: Desempeño (§6/§19) — `ADMIN` ve el desempeño de todos y el detalle de cada empleado; `EMPLOYEE` solo el propio, con el alcance impuesto por el backend (implementado en 4B). Las diferencias deliberadas de Stock ya resueltas están en §8, "Contrato implementado en Etapa 5C.2".
+
 ## 1. Roles y permisos
 
 - Dos roles: `admin` y `user` (equipo de trabajo). `isAdmin()` → `currentRole === 'admin'` (línea 3889).
@@ -141,6 +145,16 @@ Implementado en `backend/src/tasks/tasksService.ts` (detalle técnico en `docs/A
   - Límite conocido y seguro: las validaciones de fecha (no futura; `EMPLOYEE` solo hoy) corren antes de la reserva. Un `EMPLOYEE` que envía explícitamente la fecha de hoy y reintenta después del cambio de día recibe `403` en lugar del replay — nunca una segunda escritura. El frontend actual no envía `effectiveDate` para `EMPLOYEE`, así que ese caso solo aplica a clientes externos.
   - Un error de negocio dentro de la transacción (saldo insuficiente, producto inactivo, etc.) revierte también la reserva: la clave queda libre y un reintento posterior se evalúa de nuevo. Los errores no se almacenan para replay.
   - Sin caché en memoria; la colisión concurrente la resuelve el índice único de Postgres. No se reutiliza `StockMovement.reference` (clave natural reservada al seed).
+
+### Contrato implementado en Etapa 5C.2 (cierre funcional de Stock)
+
+- **Nivel**: la UI muestra solo el `stockLevel` del backend; ya no existe una regla de nivel en el frontend. La barra sigue la fórmula de §7 y se oculta con mínimo `0`.
+- **Compras (derivada, sin persistencia)**: productos activos en `critical` o `low` de ambas áreas, con cantidad actual, mínimo, unidad, prioridad y faltante. Se puede agrupar por estado o categoría y compartir la lista visible mediante Web Share o portapapeles. No hay estado "comprado" ni alertas guardadas. Registrar un ingreso desde Compras es un `INCOME` normal.
+- **Movimientos y destinos**: el modal unificado permite Consumo/Ingreso, fecha de hoy o pasada y destino activo opcional en cualquier tipo. `ADMIN` elige un empleado activo o "Administrador"; `EMPLOYEE` queda fijado a sí mismo. El actor real siempre sale de la sesión y queda en `AuditLog`. Ajustes: separados, motivo obligatorio y solo `ADMIN`. Nadie puede registrar una fecha futura ni consumir más que el saldo.
+- **Reportes**: agregados en el backend por período (fechas de `BUSINESS_TIME_ZONE`, máximo 366 días; el prototipo ofrecía 7/30/90/365), área, categoría, tipo, producto, persona y destino. Los conteos son globales; **las cantidades se informan siempre por unidad** (nunca se suman litros con kilos). Los saldos iniciales (`OPENING_BALANCE`) se cuentan aparte y no son ingresos. "Sin persona asociada" agrupa aperturas del seed y movimientos de un `ADMIN` sin empleado vinculado. Los niveles actuales no dependen del período.
+- **Permisos de Reportes (paridad verificada)**: todo usuario autenticado ve el mismo historial, incluidos productos hoy inactivos, y puede exportarlo. Evidencia del HTML original: `#chip-reportes`, `#p-reportes`, sus fechas y el botón `onclick="exportarCSV()"` no llevan `admin-only`; `swStock('reportes')`, `rndReportes()` y `exportarCSV()` no condicionan por `isAdmin()`.
+- **CSV**: endpoint server-side autenticado con los mismos filtros y rango, límite de 10.000 filas, BOM UTF-8 y columnas Fecha/Ítem/Cantidad/Unidad/Persona/Destino/Motivo. Escapa comas, comillas y saltos y neutraliza fórmulas de planilla.
+- **Idempotencia desde el navegador**: todo movimiento creado por la UI envía `Idempotency-Key`; el mismo envío repetido no duplica, un formulario distinto es una operación nueva.
 
 ## 9. Gallinero
 

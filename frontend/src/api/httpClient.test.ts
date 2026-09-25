@@ -169,6 +169,40 @@ describe('apiRequest', () => {
       },
     );
 
+    it('el reintento técnico tras refresh conserva la MISMA Idempotency-Key', async () => {
+      setAccessToken('token-vencido');
+      requestRefreshMock.mockImplementation(async () => {
+        setAccessToken('token-nuevo');
+        return 'token-nuevo';
+      });
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse(401, {
+            error: { message: 'Token de acceso vencido.', code: 'AUTH_TOKEN_EXPIRED' },
+          }),
+        )
+        .mockResolvedValueOnce(jsonResponse(201, { movement: {}, item: {} }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await apiRequest('/stock/items/x/movements', {
+        method: 'POST',
+        body: { type: 'INCOME', quantity: '1' },
+        authenticated: true,
+        headers: { 'Idempotency-Key': 'clave-sintetica-0001' },
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const keys = fetchMock.mock.calls.map(
+        ([, init]) =>
+          (init as RequestInit & { headers: Record<string, string> }).headers['Idempotency-Key'],
+      );
+      expect(keys).toEqual(['clave-sintetica-0001', 'clave-sintetica-0001']);
+      const bodies = fetchMock.mock.calls.map(([, init]) => (init as RequestInit).body);
+      expect(bodies[0]).toBe(bodies[1]);
+      expect(String(bodies[0])).not.toMatch(/idempotency/i);
+    });
+
     it('un POST que falla por algo distinto de 401 nunca se reenvía', async () => {
       setAccessToken('token-valido');
       const fetchMock = vi.fn().mockResolvedValue(

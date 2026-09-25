@@ -53,6 +53,8 @@ export interface FakeEmployeeSummary {
   id: string;
   displayName: string;
   colorHex: string;
+  /** Solo para validar la persona elegida por un ADMIN (por defecto activa). */
+  active?: boolean;
 }
 
 export interface FakeMovement {
@@ -173,6 +175,10 @@ function decimal(value: unknown): InstanceType<typeof Prisma.Decimal> {
 }
 
 /** Postgres compara UUID sin distinguir mayúsculas; los ids del fake se guardan en minúsculas. */
+function summaryOf(row: FakeEmployeeSummary | undefined) {
+  return row ? { id: row.id, displayName: row.displayName, colorHex: row.colorHex } : null;
+}
+
 function uuidKey(value: unknown): string {
   return String(value).toLowerCase();
 }
@@ -258,9 +264,14 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
     return true;
   }
 
-  function sortItems(rows: FakeStockItem[]): FakeStockItem[] {
-    return [...rows].sort(
-      (a, b) => AREA_ORDER[a.area] - AREA_ORDER[b.area] || a.name.localeCompare(b.name, 'es'),
+  function sortItems(rows: FakeStockItem[], orderBy?: any): FakeStockItem[] {
+    // Mismo orden que pide el servicio: `[{ name }, { area }]` (Compras) o
+    // `[{ area }, { name }]` (inventario, por defecto).
+    const byName = Array.isArray(orderBy) && orderBy[0]?.name !== undefined;
+    return [...rows].sort((a, b) =>
+      byName
+        ? a.name.localeCompare(b.name, 'es') || AREA_ORDER[a.area] - AREA_ORDER[b.area]
+        : AREA_ORDER[a.area] - AREA_ORDER[b.area] || a.name.localeCompare(b.name, 'es'),
     );
   }
 
@@ -280,7 +291,7 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
     const destination = row.destinationId ? destinations.get(row.destinationId) : undefined;
     return {
       ...row,
-      employee: row.employeeId ? (employees.get(row.employeeId) ?? null) : null,
+      employee: row.employeeId ? summaryOf(employees.get(row.employeeId)) : null,
       // Proyecta como el `select` real del service (sin `active`).
       destination: destination
         ? { id: destination.id, name: destination.name, type: destination.type }
@@ -386,8 +397,11 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
         const row = items.get(uuidKey(where.id));
         return row ? withCategory(row) : null;
       },
-      findMany: async ({ where = {}, skip, take }: any = {}) => {
-        const rows = sortItems([...items.values()].filter((row) => itemMatches(row, where)));
+      findMany: async ({ where = {}, orderBy, skip, take }: any = {}) => {
+        const rows = sortItems(
+          [...items.values()].filter((row) => itemMatches(row, where)),
+          orderBy,
+        );
         return paginate(rows, { skip, take }).map(withCategory);
       },
       count: async ({ where = {} }: any = {}) =>
@@ -458,6 +472,12 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
           count += 1;
         }
         return { count };
+      },
+    },
+    employee: {
+      findUnique: async ({ where }: any) => {
+        const row = employees.get(uuidKey(where.id));
+        return row ? { id: row.id, active: row.active ?? true } : null;
       },
     },
     stockMovement: {

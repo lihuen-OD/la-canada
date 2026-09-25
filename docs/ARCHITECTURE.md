@@ -637,11 +637,11 @@ Endpoint propio y liviano. Diarias y semanales: un slot por período con `expect
 | `INCOME` y `CONSUMPTION` | `ADMIN` y `EMPLOYEE` (este último requiere empleado activo vinculado) |
 | `ADJUSTMENT_INCREASE` y `ADJUSTMENT_DECREASE` | solo `ADMIN` |
 
-Los schemas Zod son estrictos: el movimiento no acepta `employeeId`, `stockItemId`, saldo, área ni estado. La identidad se resuelve desde la sesión y la base. Los decimales viajan como strings canónicos y se convierten a `Prisma.Decimal`; el saldo se devuelve y audita como string, sin `number`/`Float`.
+Los schemas Zod son estrictos: el movimiento no acepta `stockItemId`, saldo, área ni estado. `employeeId` es opcional: solo `ADMIN` puede elegir un empleado activo o `null` (Administrador); `EMPLOYEE` queda fijado al empleado de su sesión. El actor real de auditoría siempre se resuelve desde la sesión. Los decimales viajan como strings canónicos y se convierten a `Prisma.Decimal`; el saldo se devuelve y audita como string, sin `number`/`Float`.
 
 Cada movimiento ejecuta en una sola `prisma.$transaction`: actualización condicional del saldo, creación de `StockMovement` y creación de `AuditLog`. Los consumos/ajustes a la baja usan `updateMany` con `currentQuantity >= quantity`; los ingresos/ajustes al alta usan incremento atómico con límite `99999999.99`. Esto evita saldos negativos, incrementos perdidos y overflow de `Decimal(10,2)`. Una falla posterior revierte las escrituras anteriores.
 
-La fecha efectiva se interpreta como fecha de calendario en `BUSINESS_TIME_ZONE`: nunca futura, hoy para `EMPLOYEE`, pasada permitida solo a `ADMIN`. `@db.Date` persiste la fecha sin hora. El destino es opcional durante 5A porque `demo` no tiene destinos reales y el CRUD se difiere; si se informa, el backend exige que exista, esté activo y que el movimiento sea `CONSUMPTION`.
+La fecha efectiva se interpreta como fecha de calendario en `BUSINESS_TIME_ZONE`: hoy o pasada para todo usuario autenticado, nunca futura. `@db.Date` persiste la fecha sin hora. El destino es opcional en cualquier movimiento; si se informa, el backend exige que exista y esté activo.
 
 No hubo cambio de `schema.prisma` ni migración: el modelo creado en Etapa 2 y migrado en 3A ya soporta este contrato. 5A no incluye frontend, reportes, compras ni administración de destinos.
 
@@ -691,3 +691,29 @@ Extiende el contrato de §20 sin romperlo. Los nuevos endpoints siguen detrás d
 **Carrera del refresh concurrente**: reproducida contra `demo` — con 3 refresh simultáneos uno no conseguía iniciar su transacción (`P2028`, "Unable to start a transaction in the given time") y salía como 500. Ahora `P2028`/`P2034` en la rotación releen la sesión fuera de la transacción revertida: si otra solicitud ya la consumió, revocación conservadora + auditoría en una transacción nueva y `401 AUTH_SESSION_INVALID`; si sigue intacta, `503 AUTH_REFRESH_UNAVAILABLE` reintentable (no rota ni revoca nada; la cookie no se toca). Nunca se expone Prisma.
 
 **Presupuesto por módulo** (obligatorio desde 5P, AGENTS.md regla 13): 0 recargas de documento en navegación interna; 0 `refresh`/`me` por navegación; 0 loaders globales después del bootstrap; 0 GET duplicados simultáneos; volver a una pantalla visitada muestra datos al instante si están frescos; mutaciones invalidan solo lo afectado; logout limpia token y caché aunque falle la red.
+
+## 23. Stock completo: subvistas, Compras, Reportes, destinos e idempotencia en el frontend (Etapa 5C.2)
+
+**Navegación**: `/stock/*` es un módulo con rutas descendientes (`features/stock/StockModule.tsx`): 🏠 Casa `/stock`, 🌿 Jardín `/stock/garden`, 🛒 Compras `/stock/purchases`, 📊 Reportes `/stock/reports`, ⚙️ Catálogo `/stock/catalog` (`RequireRole ADMIN`; el backend decide igual). Pestañas `NavLink` con `aria-current`; Casa y Jardín son el mismo `InventoryView` parametrizado por área. Los filtros de cada vista viven en un contexto en memoria (`StockViewStateProvider`) mientras el módulo esté montado — nunca storage.
+
+**`stockLevel`**: el frontend ya no tiene regla de nivel; muestra `item.stockLevel` del backend y solo calcula el ancho de la barra (`stockBarPercent`, sin barra si el mínimo es 0) y la diferencia de referencia de Compras (`máx(mínimo − actual, 0)`, aritmética exacta en centésimos). El filtro "Nivel de stock" del inventario viaja como `stockLevel`.
+
+**Compras**: vista derivada, sin tabla ni endpoint propio. Consulta paginada por nivel, agrupación seleccionable por estado/categoría y compartir solo lo visible/cargado vía `navigator.share` con fallback a `navigator.clipboard`. El texto incluye producto, actual, mínimo, unidad y faltante. Las claves pertenecen a `stock.items`: un ingreso las invalida y un producto que llegó al mínimo desaparece solo.
+
+**Reportes** (`backend/src/stock/stockReports.ts`, todo `GET`, detrás de `requireAuth`):
+
+| Endpoint | Sentencias SQL | Contenido |
+| --- | --- | --- |
+| `GET /stock/reports/summary?from&to[&area&categoryId&type&itemId&employeeId&destinationId]` | 5 en paralelo (4 si `type ≠ CONSUMPTION`) + 1 de `requireAuth` | totales por tipo, cantidades **por unidad**, niveles actuales por área, rankings (más movidos / más consumos, top 10), consumos por destino × unidad, movimientos por persona × tipo |
+| `GET /stock/reports/movements?…&page&pageSize≤50` | 2 en paralelo (página con JOIN + total) + 1 de `requireAuth` | movimientos del período, más recientes primero, con producto/persona/destino (sin N+1) |
+| `GET /stock/reports/movements.csv?…` | 1 con JOIN + 1 de `requireAuth` | las 7 columnas originales, BOM UTF-8, escaping/injection y límite de 10.000 filas |
+
+Schemas Zod `.strict()`; `from`/`to` son fechas de `BUSINESS_TIME_ZONE`, con máximo 366 días. Todo valor viaja como parámetro de `Prisma.sql`; nunca se mezclan unidades. Reportes y CSV tienen paridad de permiso: todo usuario autenticado ve el mismo historial, incluidos productos hoy inactivos. La evidencia del prototipo es que pestaña, sección, controles y `exportarCSV()` carecen de `admin-only` o condición `isAdmin()`.
+
+**Idempotencia en el navegador** (`api/idempotency.ts`, `MovementDialog`): cada intención de movimiento tiene una clave de 128 bits de `crypto.getRandomValues` (32 hex, formato del backend), guardada en un `ref` del diálogo junto con la huella (producto + campos del body). Mismo envío (doble clic, "Reintentar" tras falla de red/5xx, "Consultar estado" de un `IDEMPOTENCY_RECORD_PENDING`, reintento central de `httpClient` tras 401 + refresh — `options.headers` se reenvían idénticos) → misma clave; cualquier cambio de campo, éxito, cancelación, conflicto o rechazo de negocio → la clave se descarta. Viaja solo como header. `httpClient` sigue sin reintentar POST por su cuenta.
+
+**Caché** (claves en `api/queryKeys.ts`): inventario/Compras/catálogo de productos 30 s (familia `stock.items`), historial 30 s por producto y tipo (`stock.movements`), detalle de producto (`stock.item`, arranca con el snapshot fresco del listado), reportes 60 s por combinación de filtros (`stock.reports`), categorías/destinos 5 min. Tras un movimiento: `stock.item(id)`, `stock.items`, `stock.movements(id)` y `stock.reports`; tras catálogo: solo categorías+productos, productos o destinos. El detalle y el catálogo administrativo quedaron migrados a Query (pendiente de 5P). Los catálogos de los filtros avanzados de Reportes se piden recién al abrir "Más filtros".
+
+**Presupuesto medido** (Chrome headless contra el build de producción, `/api` interceptado con datos sintéticos, 360/390/768/1366/1920 px, ambos roles): 1 carga de documento, 1 `refresh` + 1 `/me` en todo el recorrido, 0 GET duplicados, 0 scroll horizontal. Primera visita: Casa 2 requests (productos + categorías), Jardín 1, Compras 2, Reportes 2, Catálogo 2 (destinos `all` + productos `all`; categorías desde caché); revisitas dentro de la frescura: 0. Bundle JS 393,1 → 426,2 KB (gzip 116,8 → 123,3 KB), CSS 44,0 → 48,1 KB; sin dependencias nuevas.
+
+**Índices**: sin migración. Los reportes filtran por `effective_date` y agrupan sobre `stock_movements ⋈ stock_items`; con el volumen actual (decenas de movimientos) Postgres resuelve con escaneo secuencial y los índices existentes (`stock_item_id`, `employee_id`, `destination_id`) cubren los filtros por producto/persona/destino. Propuesta documentada, **no creada**: `@@index([effectiveDate])` en `StockMovement` cuando el historial crezca a decenas de miles de filas (medir con `EXPLAIN ANALYZE` antes).

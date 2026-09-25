@@ -1,4 +1,10 @@
-import type { ListStockItemsParams, StockCategoryStatusFilter } from './stockTypes';
+import type {
+  ListStockItemsParams,
+  StockCategoryStatusFilter,
+  StockDestinationStatusFilter,
+  StockMovementType,
+  StockReportFilters,
+} from './stockTypes';
 
 /**
  * Claves de caché — única fuente de verdad (Etapa 5P). TODAS empiezan con
@@ -27,16 +33,34 @@ export const queryKeys = {
   },
   stock: {
     all: (userId: string) => [...scope(userId), 'stock'] as const,
+    /**
+     * Listados de productos: inventario Casa/Jardín, Compras (`stockLevel` +
+     * `sort=name`) y catálogo comparten esta familia — un movimiento o un
+     * cambio de catálogo invalida `itemsAll` y todas se revalidan.
+     */
     items: (userId: string, filters: Omit<ListStockItemsParams, 'page' | 'pageSize'>) =>
       [...scope(userId), 'stock', 'items', filters] as const,
     itemsAll: (userId: string) => [...scope(userId), 'stock', 'items'] as const,
+    /** Detalle de un producto (fuera de `items` para no confundirlo con un listado). */
+    item: (userId: string, itemId: string) => [...scope(userId), 'stock', 'item', itemId] as const,
+    itemAll: (userId: string) => [...scope(userId), 'stock', 'item'] as const,
     categories: (userId: string, status: StockCategoryStatusFilter) =>
       [...scope(userId), 'stock', 'categories', status] as const,
     categoriesAll: (userId: string) => [...scope(userId), 'stock', 'categories'] as const,
-    destinations: (userId: string) => [...scope(userId), 'stock', 'destinations'] as const,
-    movements: (userId: string, itemId: string) =>
-      [...scope(userId), 'stock', 'movements', itemId] as const,
+    destinations: (userId: string, status: StockDestinationStatusFilter) =>
+      [...scope(userId), 'stock', 'destinations', status] as const,
+    destinationsAll: (userId: string) => [...scope(userId), 'stock', 'destinations'] as const,
+    /** Historial de UN producto; el prefijo sin filtro invalida todos sus filtros. */
+    movements: (userId: string, itemId: string, type?: StockMovementType | '') =>
+      type === undefined
+        ? ([...scope(userId), 'stock', 'movements', itemId] as const)
+        : ([...scope(userId), 'stock', 'movements', itemId, type || 'all'] as const),
     movementsAll: (userId: string) => [...scope(userId), 'stock', 'movements'] as const,
+    reportSummary: (userId: string, filters: StockReportFilters) =>
+      [...scope(userId), 'stock', 'reports', 'summary', filters] as const,
+    reportMovements: (userId: string, filters: StockReportFilters) =>
+      [...scope(userId), 'stock', 'reports', 'movements', filters] as const,
+    reportsAll: (userId: string) => [...scope(userId), 'stock', 'reports'] as const,
   },
   admin: {
     users: (userId: string) => [...scope(userId), 'admin', 'users'] as const,

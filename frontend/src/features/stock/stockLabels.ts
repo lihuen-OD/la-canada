@@ -1,13 +1,14 @@
 import type { BadgeTone } from '../../components/ui/Badge';
 import type {
+  DestinationType,
   OperationalMovementType,
   StockCategoryArea,
   StockCategorySummary,
   StockItem,
   StockItemArea,
+  StockLevel,
   StockMovementType,
 } from '../../api/stockTypes';
-import type { StockLevel } from './stockStatus';
 
 export const AREA_LABEL: Record<StockItemArea | StockCategoryArea, string> = {
   HOUSE: 'Casa',
@@ -45,16 +46,37 @@ export const OPERATIONAL_MOVEMENT_ORDER: readonly OperationalMovementType[] = [
   'ADJUSTMENT_DECREASE',
 ];
 
+/** Etiquetas del `stockLevel` que devuelve el backend (nunca calculado acá). */
 export const LEVEL_LABEL: Record<StockLevel, string> = {
   ok: 'Normal',
   low: 'Stock bajo',
-  crit: 'Crítico',
+  critical: 'Crítico',
 };
 
 export const LEVEL_TONE: Record<StockLevel, BadgeTone> = {
   ok: 'positive',
   low: 'warning',
-  crit: 'danger',
+  critical: 'danger',
+};
+
+/** Compras: prioridad textual derivada del nivel (crítico antes que bajo). */
+export const LEVEL_PRIORITY: Record<Exclude<StockLevel, 'ok'>, string> = {
+  critical: 'Prioridad alta',
+  low: 'Prioridad media',
+};
+
+export const DESTINATION_TYPE_LABEL: Record<DestinationType, string> = {
+  VEHICLE: 'Vehículo',
+  SECTOR: 'Sector',
+};
+
+/** Plural de los tipos para los resúmenes de reportes. */
+export const MOVEMENT_PLURAL: Record<StockMovementType, string> = {
+  OPENING_BALANCE: 'Saldos iniciales',
+  INCOME: 'Ingresos',
+  CONSUMPTION: 'Consumos',
+  ADJUSTMENT_INCREASE: 'Ajustes al alta',
+  ADJUSTMENT_DECREASE: 'Ajustes a la baja',
 };
 
 /** `YYYY-MM-DD` → "lun 22 sep" (la fecha ya es de calendario; se formatea en UTC para no desplazarla). */
@@ -96,3 +118,10 @@ export function groupItemsByCategory(items: readonly StockItem[]): StockItemGrou
   }
   return groups;
 }
+
+/** Aviso tras un movimiento confirmado por el backend (creación o replay). */
+export const MOVEMENT_SUCCESS_TEXT: Record<'income' | 'consumption' | 'adjustment', string> = {
+  income: 'Ingreso registrado.',
+  consumption: 'Consumo registrado.',
+  adjustment: 'Ajuste registrado.',
+};

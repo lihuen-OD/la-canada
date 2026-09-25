@@ -11,6 +11,8 @@ import {
   listStockItemsQuerySchema,
   listStockMovementsQuerySchema,
   stockIdParamSchema,
+  stockReportMovementsQuerySchema,
+  stockReportSummaryQuerySchema,
   stockStatusBodySchema,
   updateStockCategoryBodySchema,
   updateStockDestinationBodySchema,
@@ -34,6 +36,11 @@ import {
   type RequestMeta,
   type StockActor,
 } from '../stock/stockService';
+import {
+  exportStockReportCsv,
+  getStockReportSummary,
+  listStockReportMovements,
+} from '../stock/stockReports';
 
 function requestMeta(req: Request): RequestMeta {
   return { ipAddress: req.ip ?? null, userAgent: req.header('user-agent') ?? null };
@@ -198,4 +205,42 @@ export async function postStockMovement(req: Request, res: Response): Promise<vo
     return;
   }
   send(res, 201, { movement: result.movement, item: result.item });
+}
+
+export async function getStockReportSummaryHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const filters = parseOrThrow(
+    stockReportSummaryQuerySchema,
+    req.query,
+    'Filtros de reporte inválidos.',
+  );
+  send(res, 200, await getStockReportSummary(actor, filters));
+}
+
+export async function getStockReportMovementsHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const filters = parseOrThrow(
+    stockReportMovementsQuerySchema,
+    req.query,
+    'Filtros de reporte inválidos.',
+  );
+  send(res, 200, await listStockReportMovements(actor, filters));
+}
+
+/** CSV de movimientos (paridad con "📥 Exportar" del prototipo, para todo usuario autenticado). */
+export async function getStockReportCsvHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const filters = parseOrThrow(
+    stockReportSummaryQuerySchema,
+    req.query,
+    'Filtros de reporte inválidos.',
+  );
+  const { filename, content } = await exportStockReportCsv(actor, filters);
+  res.set('Cache-Control', 'no-store');
+  res.set('Content-Type', 'text/csv; charset=utf-8');
+  res.set(
+    'Content-Disposition',
+    `attachment; filename="consumos_lacanada.csv"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+  );
+  res.status(200).send(content);
 }

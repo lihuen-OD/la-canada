@@ -8,6 +8,34 @@
   gap: var(--space-4);
 }
 
+.stock__fab {
+  position: fixed;
+  right: 0.875rem;
+  bottom: calc(var(--bottom-nav-height) + 0.75rem + env(safe-area-inset-bottom));
+  z-index: 40;
+  width: 3rem;
+  height: 3rem;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 1.5rem;
+  line-height: 1;
+  box-shadow: var(--shadow-raised);
+}
+
+.stock__desktop-add {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .stock__fab {
+    display: none;
+  }
+
+  .stock__desktop-add {
+    display: inline-flex;
+  }
+}
+
 .stock .page-header {
   margin-bottom: 0;
 }
@@ -16,28 +44,43 @@
   display: none;
 }
 
-/* ── Navegación secundaria (Inventario | Catálogo) ──────────────────────── */
+/* ── Navegación secundaria (🏠 Casa | 🌿 Jardín | 🛒 Compras | 📊 Reportes | ⚙️ Catálogo) ── */
 
+/* Píldoras desplazables en móvil (sin scrollbar invasiva), en fila desde tablet. */
 .stock-subnav {
   display: flex;
-  flex-wrap: wrap;
   gap: var(--space-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: var(--space-1);
 }
 
-.stock-subnav button {
+.stock-subnav::-webkit-scrollbar {
+  display: none;
+}
+
+.stock-subnav a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
   min-height: var(--tap-target);
   padding: var(--space-1) var(--space-4);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-pill);
   background: var(--color-surface);
   color: var(--color-text);
-  font: inherit;
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
-  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
 }
 
-.stock-subnav button.active {
+.stock-subnav a:hover {
+  background: var(--color-surface-hover);
+}
+
+.stock-subnav a.active {
   background: var(--color-action);
   border-color: var(--color-action);
   color: var(--color-on-action);
@@ -213,11 +256,11 @@
   background: var(--color-warning-accent);
 }
 
-.stock-item__bar--crit::-webkit-progress-value {
+.stock-item__bar--critical::-webkit-progress-value {
   background: var(--color-danger);
 }
 
-.stock-item__bar--crit::-moz-progress-bar {
+.stock-item__bar--critical::-moz-progress-bar {
   background: var(--color-danger);
 }
 
@@ -415,10 +458,266 @@
   padding-top: var(--space-3);
 }
 
+/* ── Indicador localizado de revalidación (historial en el diálogo) ──────── */
+
+.stock__refreshing {
+  min-height: 1.25em;
+  margin: 0 0 var(--space-1);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+/* ── 🛒 Compras ──────────────────────────────────────────────────────────── */
+
+.stock-purchases__explain {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--color-info-bg);
+  color: var(--color-info);
+  font-size: var(--font-size-sm);
+}
+
+.stock-purchases__list {
+  margin: calc(var(--space-3) * -1) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stock-purchase {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.stock-purchase + .stock-purchase {
+  border-top: var(--border-width) solid var(--color-border);
+}
+
+.stock-purchase__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.stock-purchase__numbers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.stock-purchase__numbers dt {
+  font-size: var(--font-size-xs);
+  letter-spacing: var(--letter-spacing-label);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.stock-purchase__numbers dd {
+  margin: var(--space-1) 0 0;
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.stock-purchase__shortfall dd {
+  font-family: var(--font-display);
+  color: var(--color-action);
+}
+
+/* ── 📊 Reportes ─────────────────────────────────────────────────────────── */
+
+.stock-reports {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.stock-reports__range,
+.stock-reports__note,
+.stock-reports__muted {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.stock-reports__kpis {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.stock-reports__kpis .stock-reports__note {
+  grid-column: 1 / -1;
+}
+
+.stock-kpi .card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.stock-kpi__label {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+}
+
+.stock-kpi__value {
+  font-family: var(--font-display);
+  font-size: var(--font-size-2xl);
+  color: var(--color-action);
+}
+
+.stock-reports__units {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.stock-reports__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+}
+
+.stock-reports__table {
+  width: 100%;
+  margin-top: var(--space-2);
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.stock-reports__table th,
+.stock-reports__table td {
+  padding: var(--space-2);
+  border-bottom: var(--border-width) solid var(--color-border);
+  text-align: right;
+}
+
+.stock-reports__table th:first-child {
+  text-align: left;
+}
+
+.stock-reports__table thead th {
+  font-size: var(--font-size-xs);
+  letter-spacing: var(--letter-spacing-label);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.stock-reports__link {
+  margin: var(--space-3) 0 0;
+}
+
+.stock-reports__link a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-target);
+  color: var(--color-action);
+  font-weight: var(--font-weight-semibold);
+}
+
+.stock-reports__ranking,
+.stock-reports__rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stock-reports__ranking-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+}
+
+.stock-reports__name {
+  font-weight: var(--font-weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+/* Barra CSS proporcional a un CONTEO (comparable entre productos). */
+.stock-reports__bar {
+  display: block;
+  height: 6px;
+  margin-top: var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-muted);
+  overflow: hidden;
+}
+
+.stock-reports__bar > span {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--color-positive);
+}
+
+.stock-reports__person {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.stock-reports__person p {
+  margin: var(--space-1) 0 0;
+}
+
 /* ── Escritorio ─────────────────────────────────────────────────────────── */
+
+@media (min-width: 560px) {
+  .stock-purchase__main {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+
+  .stock-purchase__numbers {
+    flex-shrink: 0;
+    min-width: 18rem;
+    text-align: right;
+  }
+}
+
+@media (min-width: 768px) {
+  .stock-reports__kpis {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .stock-reports__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 
 @media (min-width: 768px) {
   .stock-item__actions {
     flex-wrap: nowrap;
+  }
+}
+.stock-purchases__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+}
+
+@media (max-width: 520px) {
+  .stock-purchases__toolbar {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

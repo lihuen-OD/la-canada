@@ -5,7 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { clearAccessToken } from '../auth/accessTokenStore';
 import { PERSON_A, PERSON_B, emptyHistory, listResponse, makeTask } from './fixtures/tasks';
-import { categoriesResponse, itemsList, makeItem } from './fixtures/stock';
+import {
+  categoriesResponse,
+  emptyReportSummary,
+  itemsList,
+  makeItem,
+  makeLowItem,
+  reportMovementsList,
+} from './fixtures/stock';
 
 /**
  * Etapa 5P — presupuesto de navegación sobre la APP COMPLETA (`App`: mismos
@@ -46,6 +53,14 @@ function body(path: string): unknown {
   if (path.startsWith('/tasks')) return listResponse([makeTask()]);
   if (path.startsWith('/performance')) return PERF;
   if (path.startsWith('/stock/categories')) return categoriesResponse();
+  if (path.startsWith('/stock/destinations')) return { destinations: [] };
+  if (path.startsWith('/stock/reports/summary')) return emptyReportSummary();
+  if (path.startsWith('/stock/reports/movements')) return reportMovementsList();
+  if (/^\/stock\/items\/[^/?]+\/movements/.test(path)) return { movement: {}, item: makeItem() };
+  if (path.startsWith('/stock/items') && path.includes('stockLevel=low')) {
+    return itemsList([makeLowItem()]);
+  }
+  if (path.startsWith('/stock/items') && path.includes('stockLevel=')) return itemsList([]);
   if (path.startsWith('/stock/items')) return itemsList([makeItem()]);
   if (path.startsWith('/admin/users'))
     return { users: [], pagination: { page: 1, pageSize: 50, total: 0 } };
@@ -53,6 +68,8 @@ function body(path: string): unknown {
 }
 
 let calls: string[] = [];
+/** Headers `Idempotency-Key` recibidos por el `fetch` simulado, en orden. */
+let idempotencyKeys: (string | undefined)[] = [];
 
 function count(prefix: string): number {
   return calls.filter((call) => call.split(' ')[1]?.startsWith(prefix)).length;
@@ -63,14 +80,19 @@ const taskListCalls = () => calls.filter((call) => /^GET \/tasks(\?|$)/.test(cal
 
 beforeEach(() => {
   calls = [];
+  idempotencyKeys = [];
   window.history.replaceState(null, '', '/');
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string, init?: RequestInit) => {
       const path = String(input).replace('/api/v1', '');
-      calls.push(`${init?.method ?? 'GET'} ${path}`);
+      const method = init?.method ?? 'GET';
+      calls.push(`${method} ${path}`);
+      if (method === 'POST' && path.includes('/movements')) {
+        idempotencyKeys.push((init?.headers as Record<string, string>)['Idempotency-Key']);
+      }
       return new Response(JSON.stringify(body(path)), {
-        status: 200,
+        status: method === 'POST' && path.includes('/movements') ? 201 : 200,
         headers: { 'Content-Type': 'application/json' },
       });
     }),
@@ -178,6 +200,123 @@ describe('navegación SPA — la sesión se restaura una sola vez por documento'
     await waitFor(() => expect(count('/tasks/history')).toBe(1));
     expect(taskListCalls()).toBe(1);
     expect(count('/tasks/employees')).toBe(1);
+  });
+});
+
+describe('Stock — subvistas SPA (Etapa 5C.2)', () => {
+  const stockNav = () => screen.getByRole('navigation', { name: 'Secciones de Stock' });
+
+  it('Casa → Jardín → Compras → Reportes → Catálogo: sin recarga, sin refresh ni /me, shell montado', async () => {
+    const user = userEvent.setup();
+    await bootToHome();
+    const shellHeader = document.querySelector('.app-header');
+    await user.click(within(mainNav()).getByRole('link', { name: 'Stock' }));
+    await screen.findByText(makeItem().name);
+
+    const prevented: boolean[] = [];
+    const listener = (event: MouseEvent) => prevented.push(event.defaultPrevented);
+    window.addEventListener('click', listener);
+    await user.click(within(stockNav()).getByRole('link', { name: 'Jardín' }));
+    await screen.findByRole('heading', { level: 2, name: /Jardín/ });
+    await user.click(within(stockNav()).getByRole('link', { name: 'Compras' }));
+    await screen.findByText('1 producto por reponer');
+    await user.click(within(stockNav()).getByRole('link', { name: 'Reportes' }));
+    await screen.findByRole('region', { name: 'Resumen del período' });
+    await user.click(within(stockNav()).getByRole('link', { name: 'Catálogo' }));
+    await screen.findByRole('list', { name: 'Productos de stock' });
+    window.removeEventListener('click', listener);
+
+    expect(prevented).toEqual([true, true, true, true]);
+    expect(screen.queryByText(/Restaurando tu sesión/)).not.toBeInTheDocument();
+    expect(count('/auth/refresh')).toBe(1);
+    expect(count('/auth/me')).toBe(1);
+    expect(document.querySelector('.app-header')).toBe(shellHeader);
+  });
+
+  it('volver a Compras y Reportes dentro de la frescura: 0 requests y sin loader', async () => {
+    const user = userEvent.setup();
+    await bootToHome();
+    await user.click(within(mainNav()).getByRole('link', { name: 'Stock' }));
+    await screen.findByText(makeItem().name);
+    await user.click(within(stockNav()).getByRole('link', { name: 'Compras' }));
+    await screen.findByText('1 producto por reponer');
+    await user.click(within(stockNav()).getByRole('link', { name: 'Reportes' }));
+    await screen.findByRole('region', { name: 'Resumen del período' });
+    const before = calls.length;
+
+    await user.click(within(stockNav()).getByRole('link', { name: 'Compras' }));
+    expect(screen.getByText('1 producto por reponer')).toBeInTheDocument();
+    await user.click(within(stockNav()).getByRole('link', { name: 'Reportes' }));
+    expect(screen.getByRole('region', { name: 'Resumen del período' })).toBeInTheDocument();
+    await user.click(within(stockNav()).getByRole('link', { name: 'Casa' }));
+    expect(screen.getByText(makeItem().name)).toBeInTheDocument();
+    expect(screen.queryByText(/Cargando/)).not.toBeInTheDocument();
+    expect(calls.length).toBe(before);
+  });
+
+  it('primera visita: requests exactos por subvista y sin GET duplicados', async () => {
+    const user = userEvent.setup();
+    await bootToHome();
+    await user.click(within(mainNav()).getByRole('link', { name: 'Stock' }));
+    await screen.findByText(makeItem().name);
+    const gets = () => calls.filter((call) => call.startsWith('GET /stock'));
+    // Casa: inventario + categorías, una vez cada uno.
+    expect(gets().sort()).toEqual([
+      'GET /stock/categories?status=all',
+      'GET /stock/items?area=HOUSE&status=active&page=1&pageSize=50',
+    ]);
+
+    await user.click(within(stockNav()).getByRole('link', { name: 'Compras' }));
+    await screen.findByText('1 producto por reponer');
+    const purchases = gets().filter((call) => call.includes('stockLevel='));
+    expect(purchases).toHaveLength(2);
+    expect(new Set(purchases).size).toBe(2);
+
+    await user.click(within(stockNav()).getByRole('link', { name: 'Reportes' }));
+    await screen.findByRole('region', { name: 'Resumen del período' });
+    await waitFor(() => expect(count('/stock/reports/movements')).toBe(1));
+    expect(count('/stock/reports/summary')).toBe(1);
+  });
+
+  it('un ingreso envía Idempotency-Key e invalida inventario, Compras y reportes (sin tocar categorías)', async () => {
+    const user = userEvent.setup();
+    await bootToHome();
+    await user.click(within(mainNav()).getByRole('link', { name: 'Stock' }));
+    await screen.findByText(makeItem().name);
+    await user.click(within(stockNav()).getByRole('link', { name: 'Reportes' }));
+    await screen.findByRole('region', { name: 'Resumen del período' });
+    await user.click(within(stockNav()).getByRole('link', { name: 'Casa' }));
+    await screen.findByText(makeItem().name);
+    const categoriesBefore = count('/stock/categories');
+    const itemsBefore = calls.filter((call) =>
+      call.startsWith('GET /stock/items?area=HOUSE'),
+    ).length;
+
+    await user.click(
+      screen.getByRole('button', { name: `Registrar movimiento: ${makeItem().name}` }),
+    );
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /ingreso \/ entrada/i }));
+    await user.type(within(dialog).getByLabelText('Cantidad'), '3');
+    const submit = within(dialog).getByRole('button', { name: /registrar movimiento/i });
+    // Doble clic real: un solo POST.
+    await user.dblClick(submit);
+    expect(await screen.findByText('Ingreso registrado.')).toBeInTheDocument();
+
+    expect(calls.filter((call) => call.startsWith('POST /stock/items/'))).toHaveLength(1);
+    expect(idempotencyKeys).toHaveLength(1);
+    expect(idempotencyKeys[0]).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
+    // Inventario visible revalidado; reportes/compras quedan marcados viejos
+    // y se piden al volver (no se revalida en segundo plano lo que no se ve).
+    await waitFor(() =>
+      expect(calls.filter((call) => call.startsWith('GET /stock/items?area=HOUSE')).length).toBe(
+        itemsBefore + 1,
+      ),
+    );
+    expect(count('/stock/categories')).toBe(categoriesBefore);
+    const summaryBefore = count('/stock/reports/summary');
+    await user.click(within(stockNav()).getByRole('link', { name: 'Reportes' }));
+    await waitFor(() => expect(count('/stock/reports/summary')).toBe(summaryBefore + 1));
   });
 });
 

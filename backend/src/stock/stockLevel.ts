@@ -54,6 +54,17 @@ export const STOCK_LEVEL_IDS_SQL_PREFIX = 'SELECT "id" FROM "stock_items" WHERE 
  * parametrizado: la única entrada es el nivel, elegido por las ramas del
  * `CASE` — sin interpolación de valores.
  */
+/**
+ * Misma regla que `computeStockLevel`, como expresión SQL sobre el alias
+ * `i` de `stock_items` — la usan las agregaciones de reportes (Etapa 5C.2)
+ * para contar niveles en Postgres. Sin parámetros: es texto fijo.
+ */
+export const STOCK_LEVEL_CASE_SQL = Prisma.sql`CASE
+      WHEN i."current_quantity" <= 0 THEN 'critical'
+      WHEN i."current_quantity" < i."minimum_quantity" THEN 'low'
+      ELSE 'ok'
+    END`;
+
 export function buildStockLevelIdsSql(level: StockLevel): Prisma.Sql {
   return Prisma.sql`SELECT "id" FROM "stock_items" WHERE CASE ${level}
       WHEN 'critical' THEN "current_quantity" <= 0

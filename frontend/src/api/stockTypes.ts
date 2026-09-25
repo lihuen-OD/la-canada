@@ -20,6 +20,15 @@ export type OperationalMovementType = Exclude<StockMovementType, 'OPENING_BALANC
 
 export type DestinationType = 'VEHICLE' | 'SECTOR';
 
+/**
+ * Nivel calculado por el BACKEND (Etapa 5C.1, `stock/stockLevel.ts`):
+ * `critical` saldo ≤ 0; `low` 0 < saldo < mínimo; `ok` saldo > 0 y ≥ mínimo.
+ * El frontend nunca lo recalcula: solo lo muestra (y dibuja su barra).
+ */
+export type StockLevel = 'ok' | 'low' | 'critical';
+export type StockListSort = 'area' | 'name';
+export type StockDestinationStatusFilter = 'active' | 'all';
+
 export interface StockCategory {
   id: string;
   name: string;
@@ -41,6 +50,7 @@ export interface StockItem {
   unit: string;
   minimumQuantity: string;
   currentQuantity: string;
+  stockLevel: StockLevel;
   active: boolean;
   category: StockCategorySummary;
 }
@@ -49,6 +59,7 @@ export interface StockDestination {
   id: string;
   name: string;
   type: DestinationType;
+  active: boolean;
 }
 
 export interface StockEmployeeSummary {
@@ -92,6 +103,10 @@ export interface StockDestinationsResponse {
   destinations: StockDestination[];
 }
 
+export interface StockDestinationResponse {
+  destination: StockDestination;
+}
+
 export interface StockItemResponse {
   item: StockItem;
 }
@@ -110,6 +125,8 @@ export interface ListStockItemsParams {
   categoryId?: string;
   status?: StockStatusFilter;
   q?: string;
+  stockLevel?: StockLevel;
+  sort?: StockListSort;
   page?: number;
   pageSize?: number;
 }
@@ -148,14 +165,112 @@ export interface UpdateStockItemRequest {
 }
 
 /**
- * `employeeId` y `stockItemId` NUNCA viajan en el body: el responsable sale
- * de la sesión y el producto de la ruta. `effectiveDate` solo lo envía un
- * ADMIN (ausente = hoy en `BUSINESS_TIME_ZONE`, decides el backend).
+ * `stockItemId` nunca viaja en el body (sale de la ruta). `employeeId` solo
+ * lo envía un ADMIN (empleado activo, o `null` = "Administrador"); un
+ * EMPLOYEE lo omite y el backend lo fija a su sesión. `effectiveDate`: hoy o
+ * pasada, para todos (el backend rechaza futuras en `BUSINESS_TIME_ZONE`).
+ * `destinationId` es opcional en cualquier tipo (paridad con el prototipo).
  */
 export interface CreateStockMovementRequest {
   type: OperationalMovementType;
   quantity: string;
   effectiveDate?: string;
   destinationId?: string;
+  employeeId?: string | null;
   reason?: string;
+}
+
+export interface CreateStockDestinationRequest {
+  name: string;
+  type: DestinationType;
+}
+
+/** `type` es inmutable en el backend: nunca viaja en el PATCH. */
+export interface UpdateStockDestinationRequest {
+  name?: string;
+  active?: boolean;
+}
+
+// ── Reportes (`/stock/reports/*`, Etapa 5C.2) ────────────────────────────
+
+export interface StockReportFilters {
+  from: string;
+  to: string;
+  area?: StockItemArea;
+  categoryId?: string;
+  type?: StockMovementType;
+  itemId?: string;
+  employeeId?: string;
+  destinationId?: string;
+}
+
+export interface StockReportRange {
+  from: string;
+  to: string;
+  timeZone: string;
+  includesCurrentDay: boolean;
+  maxDays: number;
+}
+
+/** Cantidad total de UNA unidad del catálogo: nunca se suman unidades distintas. */
+export interface StockQuantityByUnit {
+  unit: string;
+  quantity: string;
+}
+
+export interface StockReportProduct {
+  item: { id: string; name: string; area: StockItemArea; unit: string; active: boolean };
+  movementCount: number;
+  consumptionCount: number;
+  consumed: string;
+  income: string;
+}
+
+export interface StockReportSummary {
+  range: StockReportRange;
+  totals: {
+    movements: number;
+    income: { count: number; byUnit: StockQuantityByUnit[] };
+    consumption: { count: number; byUnit: StockQuantityByUnit[] };
+    adjustments: { count: number; increase: number; decrease: number };
+    openingBalance: { count: number };
+  };
+  currentLevels: {
+    critical: number;
+    low: number;
+    ok: number;
+    byArea: { area: StockItemArea; critical: number; low: number; ok: number }[];
+  };
+  products: {
+    withMovements: number;
+    mostMoved: StockReportProduct[];
+    mostConsumed: StockReportProduct[];
+  };
+  destinations: {
+    destination: StockDestination | null;
+    count: number;
+    byUnit: StockQuantityByUnit[];
+  }[];
+  employees: {
+    employee: StockEmployeeSummary | null;
+    total: number;
+    byType: Record<StockMovementType, number>;
+  }[];
+}
+
+export interface StockReportMovement {
+  id: string;
+  type: StockMovementType;
+  quantity: string;
+  effectiveDate: string;
+  reason: string | null;
+  createdAt: string;
+  item: { id: string; name: string; area: StockItemArea; unit: string; active: boolean };
+  employee: StockEmployeeSummary | null;
+  destination: { id: string; name: string; type: DestinationType } | null;
+}
+
+export interface StockReportMovementsResponse extends StockPageMeta {
+  range: StockReportRange;
+  movements: StockReportMovement[];
 }
