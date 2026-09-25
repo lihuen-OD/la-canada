@@ -1,4 +1,5 @@
 import type { ChickenCoopPeriodDays } from './chickenCoopTypes';
+import type { MedicalRecordType } from './petTypes';
 import type {
   ListStockItemsParams,
   StockCategoryStatusFilter,
@@ -71,6 +72,27 @@ export const queryKeys = {
       [...scope(userId), 'chickenCoop', 'summary', days] as const,
     /** Historial paginado por días (`useInfiniteQuery`). */
     history: (userId: string) => [...scope(userId), 'chickenCoop', 'history'] as const,
+  },
+  pets: {
+    /** Toda la familia de Mascotas (listados, fichas, historiales y tipos). */
+    all: (userId: string) => [...scope(userId), 'pets'] as const,
+    /** Catálogo de tipos (5 min): `active` para formularios/chips, `all` para el ADMIN. */
+    types: (userId: string, status: 'active' | 'all') =>
+      [...scope(userId), 'pets', 'types', status] as const,
+    typesAll: (userId: string) => [...scope(userId), 'pets', 'types'] as const,
+    /** Listado paginado (`useInfiniteQuery`) por filtro de tipo. */
+    list: (userId: string, typeId: string | null) =>
+      [...scope(userId), 'pets', 'list', typeId ?? 'all'] as const,
+    listAll: (userId: string) => [...scope(userId), 'pets', 'list'] as const,
+    /** Ficha + KPIs de UNA mascota. */
+    detail: (userId: string, petId: string) => [...scope(userId), 'pets', 'detail', petId] as const,
+    /** Historial clínico de UNA mascota; el prefijo sin tipo invalida todos sus filtros. */
+    records: (userId: string, petId: string, type?: MedicalRecordType | 'all') =>
+      type === undefined
+        ? ([...scope(userId), 'pets', 'records', petId] as const)
+        : ([...scope(userId), 'pets', 'records', petId, type] as const),
+    /** Imagen por id de archivo: inmutable (una foto nueva es otro id). */
+    photo: (userId: string, fileId: string) => [...scope(userId), 'pets', 'photo', fileId] as const,
   },
   admin: {
     users: (userId: string) => [...scope(userId), 'admin', 'users'] as const,

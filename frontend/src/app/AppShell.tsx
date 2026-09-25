@@ -36,11 +36,21 @@ function ChickenCoopNavEmoji() {
   );
 }
 
+/** 🐾 Mascotas — emoji del prototipo, decorativo. */
+function PetsNavEmoji() {
+  return (
+    <span className="nav-emoji" aria-hidden="true">
+      🐾
+    </span>
+  );
+}
+
 const NAV_ICONS: Record<NavIconName, ComponentType<{ size?: 'lg' }>> = {
   home: HomeIcon,
   tasks: TasksNavEmoji,
   stock: StockNavEmoji,
   chickenCoop: ChickenCoopNavEmoji,
+  pets: PetsNavEmoji,
   users: UsersIcon,
 };
 

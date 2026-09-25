@@ -368,3 +368,80 @@ export class EggCollectorInvalidError extends AppError {
     });
   }
 }
+
+// ── Mascotas (Etapa 5M) ───────────────────────────────────────────────────
+
+export class PetNotFoundError extends AppError {
+  constructor() {
+    super('La mascota no existe.', 404, { code: 'PET_NOT_FOUND' });
+  }
+}
+
+export class PetTypeNotFoundError extends AppError {
+  constructor() {
+    super('El tipo de mascota no existe o está inactivo.', 400, { code: 'PET_TYPE_INVALID' });
+  }
+}
+
+/** "Este tipo ya existe." del prototipo (comparación sin distinguir mayúsculas). */
+export class PetTypeDuplicateError extends AppError {
+  constructor() {
+    super('Este tipo ya existe.', 409, { code: 'PET_TYPE_DUPLICATE' });
+  }
+}
+
+/** Los 9 tipos precargados no se eliminan (el prototipo tampoco lo permitía). */
+export class PetTypeBuiltinError extends AppError {
+  constructor() {
+    super('Los tipos precargados no se pueden eliminar.', 409, { code: 'PET_TYPE_BUILTIN' });
+  }
+}
+
+export class PetMedicalRecordNotFoundError extends AppError {
+  constructor() {
+    super('El registro no existe.', 404, { code: 'PET_RECORD_NOT_FOUND' });
+  }
+}
+
+export class PetMedicalRecordAlreadyVoidedError extends AppError {
+  constructor() {
+    super('El registro ya fue eliminado.', 409, { code: 'PET_RECORD_ALREADY_VOIDED' });
+  }
+}
+
+export class PetPhotoNotFoundError extends AppError {
+  constructor() {
+    super('La foto no existe.', 404, { code: 'PET_PHOTO_NOT_FOUND' });
+  }
+}
+
+/** MIME real (bytes) no admitido o distinto del declarado. */
+export class PetPhotoInvalidError extends AppError {
+  constructor(message = 'La foto debe ser una imagen JPG, PNG o WebP.') {
+    super(message, 415, { code: 'PET_PHOTO_INVALID' });
+  }
+}
+
+export class PetPhotoTooLargeError extends AppError {
+  constructor(maxMegabytes: number) {
+    super(`La foto no puede superar ${maxMegabytes} MB.`, 413, { code: 'PET_PHOTO_TOO_LARGE' });
+  }
+}
+
+/** Faltan las variables `OBJECT_STORAGE_*`: las fotos quedan deshabilitadas, el resto funciona. */
+export class ObjectStorageNotConfiguredError extends AppError {
+  constructor() {
+    super('Las fotos no están disponibles: falta configurar el almacenamiento.', 503, {
+      code: 'OBJECT_STORAGE_NOT_CONFIGURED',
+    });
+  }
+}
+
+/** El proveedor no respondió o rechazó la operación. Reintentable; nunca expone detalles. */
+export class ObjectStorageUnavailableError extends AppError {
+  constructor() {
+    super('No pudimos acceder al almacenamiento de fotos. Volvé a intentar.', 502, {
+      code: 'OBJECT_STORAGE_UNAVAILABLE',
+    });
+  }
+}

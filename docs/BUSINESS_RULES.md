@@ -195,6 +195,16 @@ Ver sección 9 — está integrada al módulo Gallinero, no es un módulo separa
 - KPIs por mascota: cantidad de vacunas, último peso registrado, cantidad de desparasitaciones, días al próximo cumpleaños.
 - Alta disponible para cualquier usuario logueado; **eliminación restringida a admin** (`delRegistro`, botón condicionado a `isAdmin()` en línea 2547).
 
+### Contrato implementado en Etapa 5M (Mascotas, §11–§12)
+
+- **Permisos (paridad)**: todo usuario autenticado ve listado, ficha, KPIs e historial y registra datos clínicos; solo `ADMIN` crea/edita la ficha, cambia o quita la foto, agrega/da de baja tipos y elimina registros (backend como autoridad).
+- **Tipos**: los 9 precargados no se eliminan. "Eliminar" un tipo agregado es una baja lógica ("Las mascotas de este tipo no se borran"): conservan su tipo, pero no se ofrece para mascotas nuevas. Duplicado sin distinguir mayúsculas → "Este tipo ya existe."; volver a agregar uno dado de baja lo reactiva. El símbolo (25 opciones de `ANIMAL_EMOJIS`) ahora se persiste — el prototipo lo perdía al recargar.
+- **Listado**: mascotas activas en orden de alta, chips "Todas" + tipos con mascotas, paginado. Aviso de cumpleaños hoy o dentro de 30 días; último peso. Estado vacío real "Sin mascotas registradas".
+- **Ficha**: KPIs del prototipo (vacunas, último peso, desparasitaciones, días al próximo cumpleaños); edad y cumpleaños calculados en el backend con `BUSINESS_TIME_ZONE` (meses ajustados por día; un 29/02 se festeja el 01/03 en años no bisiestos).
+- **Registros clínicos**: 5 tipos del prototipo; fecha hoy o pasada (todos son hechos ocurridos: el prototipo no tiene "próximo control"); ⚖️ Peso exige kg positivo (hasta 9999,99) y ningún otro tipo lo acepta; descripción opcional. Persona = la de la sesión (sin persona para un `ADMIN` sin empleado, como `currentUser` del prototipo); actor real en `recordedByUserId` + `AuditLog`. `Idempotency-Key` en el alta. "✕" = anulación lógica auditada; deja de contar en KPIs e historial.
+- **Foto**: el prototipo pedía una URL externa; ahora es un archivo (JPG/PNG/WebP, tipo real por bytes, máx. 5 MB) en Neon Object Storage privado vía el backend (`FileAsset`). Reemplazar o quitar = baja lógica y luego borrado físico. Sin `OBJECT_STORAGE_*` configurado, las fotos se deshabilitan con un aviso claro y el resto funciona.
+- **Pendiente fuera de alcance**: el prototipo creaba un evento "🎂 Cumpleaños de <mascota>" al guardar la fecha de nacimiento; el módulo Eventos no existe todavía — los cumpleaños se calcularán desde `Animal.birthDate` (§14), sin duplicar filas.
+
 ## 13. Eventos
 
 - Tipos: `visita`, `cumple` (cumpleaños), `mant` (mantenimiento), `otro`.

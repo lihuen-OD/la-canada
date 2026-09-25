@@ -116,6 +116,10 @@ enum MedicalRecordType {
 enum PhotoCategory {
   TASK_EVIDENCE
   MEMORY
+  /// Etapa 5M — foto de la ficha de una mascota (`Animal`). El prototipo la
+  /// cargaba como URL externa en `mascotas.foto`; ahora es un archivo del
+  /// bucket privado, subido y servido solo por el backend.
+  ANIMAL_PROFILE
 }
 
 /// Proveedor de almacenamiento de un archivo. Un único valor hoy porque Neon
@@ -227,6 +231,10 @@ model User {
   /// Etapa 5G — actor real que registró / anuló una recolección de huevos.
   recordedEggCollections EggCollection[] @relation("EggCollectionRecordedBy")
   voidedEggCollections   EggCollection[] @relation("EggCollectionVoidedBy")
+
+  /// Etapa 5M — actor real que registró / anuló un registro clínico.
+  recordedMedicalRecords AnimalMedicalRecord[] @relation("AnimalMedicalRecordRecordedBy")
+  voidedMedicalRecords   AnimalMedicalRecord[] @relation("AnimalMedicalRecordVoidedBy")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -994,13 +1002,29 @@ model AnimalMedicalRecord {
   /// Solo poblado para type=WEIGHT (kg).
   value       Decimal?          @db.Decimal(6, 2)
 
+  /// Persona asociada (en el prototipo, `currentUser` — null para el
+  /// administrador sin persona). Sale siempre de la sesión.
   employeeId String?   @map("employee_id") @db.Uuid
   employee   Employee? @relation(fields: [employeeId], references: [id])
+
+  /// Etapa 5M — actor real (User de la sesión) que registró el dato.
+  /// Nullable solo por compatibilidad con filas anteriores a la columna.
+  recordedByUserId String? @map("recorded_by_user_id") @db.Uuid
+  recordedBy       User?   @relation("AnimalMedicalRecordRecordedBy", fields: [recordedByUserId], references: [id])
+
+  /// Etapa 5M — anulación lógica (el "✕" del prototipo borraba la fila):
+  /// deja de contar en KPIs e historial, pero la historia médica se conserva
+  /// junto con su auditoría. Nunca borrado físico.
+  voidedAt       DateTime? @map("voided_at")
+  voidedByUserId String?   @map("voided_by_user_id") @db.Uuid
+  voidedBy       User?     @relation("AnimalMedicalRecordVoidedBy", fields: [voidedByUserId], references: [id])
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([animalId])
+  /// Etapa 5M — historial paginado por fecha dentro de cada mascota.
+  @@index([animalId, recordDate])
   @@map("animal_medical_records")
 }
 

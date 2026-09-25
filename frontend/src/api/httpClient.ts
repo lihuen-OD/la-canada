@@ -50,8 +50,14 @@ export interface RequestOptions {
    * refresh: es la misma request técnica, no una operación nueva.
    */
   headers?: Readonly<Record<string, string>>;
-  /** Respuestas no JSON, actualmente solo el CSV server-side de Stock. */
-  responseType?: 'json' | 'text';
+  /** Respuestas no JSON: el CSV server-side de Stock (`text`) y las fotos de Mascotas (`blob`). */
+  responseType?: 'json' | 'text' | 'blob';
+  /**
+   * Cuerpo binario (la foto de una mascota) en lugar de `body` JSON, con su
+   * propio `Content-Type`. Se reenvía idéntico en el reintento tras 401.
+   */
+  rawBody?: Blob;
+  contentType?: string;
 }
 
 /**
@@ -68,8 +74,10 @@ async function rawRequest<T>(path: string, options: RequestOptions): Promise<T> 
     authenticated,
     headers: extraHeaders,
     responseType = 'json',
+    rawBody,
+    contentType = 'application/json',
   } = options;
-  const headers: Record<string, string> = { ...extraHeaders, 'Content-Type': 'application/json' };
+  const headers: Record<string, string> = { ...extraHeaders, 'Content-Type': contentType };
 
   if (authenticated) {
     const token = getAccessToken();
@@ -82,7 +90,7 @@ async function rawRequest<T>(path: string, options: RequestOptions): Promise<T> 
     method,
     credentials: 'include',
     headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: rawBody ?? (body !== undefined ? JSON.stringify(body) : undefined),
   });
 
   if (!response.ok) {
@@ -91,6 +99,7 @@ async function rawRequest<T>(path: string, options: RequestOptions): Promise<T> 
   if (response.status === 204) {
     return undefined as T;
   }
+  if (responseType === 'blob') return (await response.blob()) as T;
   return (responseType === 'text' ? await response.text() : await response.json()) as T;
 }
 

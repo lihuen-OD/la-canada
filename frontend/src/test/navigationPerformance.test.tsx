@@ -14,6 +14,13 @@ import {
   reportMovementsList,
 } from './fixtures/stock';
 import { historyResponse, makeCollection, makeSummary } from './fixtures/chickenCoop';
+import {
+  detailResponse,
+  listResponse as petsListResponse,
+  makePet,
+  recordsResponse,
+  typesResponse,
+} from './fixtures/pets';
 
 /**
  * Etapa 5P — presupuesto de navegación sobre la APP COMPLETA (`App`: mismos
@@ -67,6 +74,10 @@ function body(path: string): unknown {
   if (path.startsWith('/chicken-coop/collections')) {
     return path.includes('?') ? historyResponse() : { collection: makeCollection() };
   }
+  if (path.startsWith('/pets/types')) return typesResponse();
+  if (/^\/pets\/[^/?]+\/records/.test(path)) return recordsResponse();
+  if (/^\/pets\/[^/?]+$/.test(path)) return detailResponse();
+  if (path.startsWith('/pets')) return petsListResponse();
   if (path.startsWith('/admin/users'))
     return { users: [], pagination: { page: 1, pageSize: 50, total: 0 } };
   return {};
@@ -387,6 +398,45 @@ describe('🐔 Gallinero (Etapa 5G)', () => {
     expect(count('/stock')).toBe(stockBefore);
     expect(count('/tasks')).toBe(tasksBefore);
     expect(count('/auth/refresh')).toBe(1);
+  });
+});
+
+describe('🐾 Mascotas (Etapa 5M)', () => {
+  it('listado → ficha → volver → revisita: sin recarga ni refresh/me, datos desde caché', async () => {
+    const user = userEvent.setup();
+    await bootToHome();
+    const shellHeader = document.querySelector('.app-header');
+    const prevented: boolean[] = [];
+    const listener = (event: MouseEvent) => prevented.push(event.defaultPrevented);
+    window.addEventListener('click', listener);
+
+    await user.click(within(mainNav()).getByRole('link', { name: 'Mascotas' }));
+    const card = await screen.findByRole('link', { name: new RegExp(makePet().name) });
+    expect(count('/pets?')).toBe(1);
+    expect(count('/pets/types')).toBe(1);
+
+    await user.click(card);
+    await screen.findByRole('list', { name: 'Registros clínicos' });
+    expect(count(`/pets/${makePet().id}`)).toBe(2); // ficha + historial, una vez cada uno
+    // "Mascotas" sigue marcado como destino activo dentro de la ficha.
+    expect(within(mainNav()).getByRole('link', { name: 'Mascotas' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+
+    const before = calls.length;
+    await user.click(screen.getByRole('link', { name: /Volver/ }));
+    expect(screen.getByRole('link', { name: new RegExp(makePet().name) })).toBeInTheDocument();
+    await user.click(screen.getByRole('link', { name: new RegExp(makePet().name) }));
+    expect(screen.getByRole('list', { name: 'Registros clínicos' })).toBeInTheDocument();
+    expect(screen.queryByText(/Cargando/)).not.toBeInTheDocument();
+    window.removeEventListener('click', listener);
+
+    expect(calls.length).toBe(before);
+    expect(prevented.every(Boolean)).toBe(true);
+    expect(count('/auth/refresh')).toBe(1);
+    expect(count('/auth/me')).toBe(1);
+    expect(document.querySelector('.app-header')).toBe(shellHeader);
   });
 });
 

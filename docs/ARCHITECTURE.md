@@ -736,3 +736,27 @@ Sin `PUT/PATCH/DELETE`. Auditorías: `chicken_coop.collection_created`, `chicken
 **Frontend**: ruta `/chicken-coop`, en la navegación con 🐔 entre Stock y Usuarios (orden del prototipo). Caché (`queryKeys.chickenCoop`): resumen por período 30 s con `keepPreviousData` (cambiar de chip deja la vista anterior atenuada), historial `useInfiniteQuery` 30 s, personas elegibles = `tasks.employees` (5 min, solo ADMIN). Toda escritura invalida solo `chickenCoop.*`. Sin actualizaciones optimistas ni storage.
 
 **Presupuesto medido** (Chrome headless contra el build de producción, `/api` interceptado con datos sintéticos, 360/390/768/1366/1920 px, ADMIN y EMPLOYEE, gallinero configurado y pendiente): 1 carga de documento, 1 `refresh` + 1 `/me`, 0 loaders globales, 0 GET duplicados, 0 scroll horizontal, 0 controles bajo 44 px. Primera visita: 2 requests (+ personas para ADMIN); cambio de período: 1; revisita dentro de la frescura: 0. Bundle JS 430,8 → 450,0 KB (gzip 124,8 → 129,7 KB), CSS 48,7 → 53,9 KB; sin dependencias nuevas. Impacto en Render/Neon: 3–6 sentencias por pantalla, agregadas en Postgres.
+
+## 25. 🐾 Mascotas y primer uso de Object Storage (Etapa 5M)
+
+`backend/src/pets/` (catálogo, schemas `.strict()`, fechas, servicio y fotos), `controllers/petsController.ts`, `routes/petsRoutes.ts`, `lib/objectStorage.ts`; frontend `features/pets/` + `api/petsApi.ts`. Reglas en `docs/BUSINESS_RULES.md`, "Contrato implementado en Etapa 5M"; modelo en `docs/DATABASE.md`, "Etapa 5M".
+
+| Endpoint (`/api/v1/pets`, todo detrás de `requireAuth`) | Quién |
+| --- | --- |
+| `GET /types?status=active\|all` (+ conteo de mascotas activas y opciones de símbolo) | todos (`all` solo ADMIN) |
+| `POST /types`, `PATCH /types/:id/status {active:false}` | ADMIN |
+| `GET /?typeId&page&pageSize≤50` | todos |
+| `POST /`, `PATCH /:id` | ADMIN |
+| `GET /:id` (ficha + KPIs) | todos |
+| `GET /:id/records?type&page&pageSize≤50`, `POST /:id/records` (+ `Idempotency-Key`) | todos |
+| `POST /:id/records/:recordId/void` | ADMIN |
+| `POST /:id/photo` (cuerpo binario `image/jpeg\|png\|webp`, ≤ 5 MB), `POST /:id/photo/remove` | ADMIN |
+| `GET /photos/:fileId` (proxy de la imagen) | todos |
+
+Sin `DELETE`/`PUT`. Auditorías: `pet.created`, `pet.updated`, `pet.type.created\|reactivated\|deactivated`, `pet.record_created`, `pet.record_voided`, `pet.photo_updated`, `pet.photo_removed`. Consultas en número fijo (sin N+1): listado = conteo + página (Prisma trae tipo, foto vigente y último peso con una sentencia por relación para toda la página); ficha = fila + `GROUP BY type`; historial = existencia + conteo + página.
+
+**Object Storage** (implementa §9.4–§9.6): cliente propio con AWS Signature V4 (sin SDK; firma verificada contra los vectores oficiales de AWS), URLs path-style, solo en el backend. Subida: validación de permiso, tamaño (`express.raw` acotado → 413 propio) y tipo real por firma de bytes (el `Content-Type` declarado debe coincidir) → `FileAsset PENDING_UPLOAD` con `objectKey = animals/<petId>/<uuid>.<ext>` → PUT → transacción que bloquea la fila de la mascota (`FOR UPDATE`), pasa la foto anterior a `PENDING_DELETION` y la nueva a `AVAILABLE` → borrado físico del objeto anterior (`DELETED`; si falla, queda pendiente). Falla del proveedor → `UPLOAD_FAILED` + 502 reintentable. Lectura por **proxy** autenticado (`Cache-Control: private, max-age=86400, immutable`, `nosniff`, CSP `default-src 'none'`): el frontend nunca ve el bucket ni una URL firmada y no requiere cambiar CSP. Sin las 5 `OBJECT_STORAGE_*` → 503 `OBJECT_STORAGE_NOT_CONFIGURED` solo para fotos.
+
+**Frontend**: `/pets` (listado) y `/pets/:petId` (ficha) como rutas descendientes; 🐾 en la navegación entre Gallinero y Usuarios (activo también dentro de la ficha). Caché (`queryKeys.pets`): tipos 5 min; listado (infinito, `keepPreviousData`), ficha e historial por mascota y tipo 30 s; imagen por id de archivo sin vencimiento (object URL revocada al salir de la caché, nunca storage). Invalidación: registro → ficha, historial y listado de esa mascota; ficha/foto → ficha, listado y tipos; tipos → tipos y listado. `httpClient` suma `rawBody`/`contentType` y `responseType: 'blob'`.
+
+**Presupuesto medido** (Chrome headless, build de producción, `/api` interceptado con datos sintéticos, 360/390/768/1366/1920 px, ADMIN y EMPLOYEE): 1 documento, 1 `refresh` + 1 `/me`, 0 GET duplicados, 0 scroll horizontal, 0 controles < 44 px; primera visita al listado 2 requests (+1 por foto visible), ficha 2; revisitas 0. Bundle JS 450,0 → 475,4 KB (gzip 129,7 → 135,4), CSS 53,9 → 59,9 KB; sin dependencias nuevas.

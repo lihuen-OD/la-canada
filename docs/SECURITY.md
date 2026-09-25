@@ -218,3 +218,10 @@ Endpoints autenticados y rango Zod de hasta 90 días. El backend fuerza sesión 
 - **`Idempotency-Key` en el navegador**: generada con `crypto.getRandomValues` (nunca `Math.random`), vive solo en memoria del diálogo, viaja solo como header, nunca en el body, en storage ni en pantalla (tests). `httpClient` reenvía los mismos headers únicamente en su reintento central tras 401 + refresh; ningún POST se reintenta automáticamente fuera de eso.
 - **Sin storage nuevo**: los filtros de las subvistas viven en un contexto de React; la caché sigue solo en memoria y se vacía en logout (`noSensitiveStorage.test.ts`, `styles.test.ts`).
 - **Sin datos mock en runtime**: los fixtures sintéticos siguen siendo solo de tests (guarda estática). La integración `demo` usa `test-5c2-<RUN>` y verifica 0 residuos y conteos globales intactos. `production` no se tocó.
+
+## Actualización — Mascotas y Object Storage (Etapa 5M)
+
+- Credenciales `OBJECT_STORAGE_*` solo en el backend (nunca `VITE_*`, nunca en respuestas ni logs); la firma SigV4 se calcula en el proceso y el secreto nunca viaja.
+- La imagen se valida por su firma de bytes (JPG/PNG/WebP; SVG y otros formatos rechazados) y por tamaño antes de tocar la base; la clave del objeto la genera el backend (UUID), el nombre original es solo metadato saneado.
+- Lectura solo por el proxy autenticado, con `nosniff` y `Content-Security-Policy: default-src 'none'`; no hay URLs públicas ni firmadas persistidas. Cambiar o quitar una foto es solo de `ADMIN`, con baja lógica antes del borrado físico y auditoría.
+- Registros clínicos: persona y actor salen de la sesión; anular es solo `ADMIN` y nunca borra la fila.
