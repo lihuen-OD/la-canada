@@ -303,6 +303,42 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
     return sliced;
   }
 
+  /**
+   * Una transacción interactiva real usa UNA sola conexión: `pg` depreca (y
+   * `pg@9` elimina) consultas concurrentes sobre el mismo cliente. Dentro de
+   * `$transaction` el fake rechaza cualquier consulta que se solape con otra
+   * todavía en curso — p. ej. un `Promise.all` sobre `tx`.
+   */
+  function singleConnection(client: any): any {
+    let inFlight = 0;
+    const wrapModel = (model: any) =>
+      new Proxy(model, {
+        get(target, prop) {
+          const value = target[prop];
+          if (typeof value !== 'function') return value;
+          return async (...args: unknown[]) => {
+            if (inFlight > 0) {
+              throw new Error(
+                'fakeStockPrisma: consultas concurrentes dentro de la misma transacción',
+              );
+            }
+            inFlight += 1;
+            try {
+              return await value.apply(target, args);
+            } finally {
+              inFlight -= 1;
+            }
+          };
+        },
+      });
+    return new Proxy(client, {
+      get(target, prop) {
+        const value = target[prop];
+        return value && typeof value === 'object' ? wrapModel(value) : value;
+      },
+    });
+  }
+
   const api: any = {
     stockCategory: {
       findUnique: async ({ where }: any) => categories.get(where.id) ?? null,
@@ -598,7 +634,7 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
       const auditSnapshot = auditLogs.map((row) => ({ ...row }));
       const idempotencySnapshot = idempotencyRecords.map((row) => ({ ...row }));
       try {
-        return await fn(api);
+        return await fn(singleConnection(api));
       } catch (error) {
         categories.clear();
         for (const [id, row] of categorySnapshot) categories.set(id, row);

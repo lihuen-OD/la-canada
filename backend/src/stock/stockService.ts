@@ -996,11 +996,18 @@ export async function createStockMovement(
         });
         // 2-4) saldo + movimiento + auditoría (mismo camino que sin clave)
         const movementId = await writeMovement(tx, ctx);
-        // 5) respuesta armada DENTRO de la transacción para poder almacenarla
-        const [movementRow, itemRow] = await Promise.all([
-          tx.stockMovement.findUnique({ where: { id: movementId }, select: movementSelect }),
-          tx.stockItem.findUnique({ where: { id: itemId }, select: itemSelect }),
-        ]);
+        // 5) respuesta armada DENTRO de la transacción para poder almacenarla.
+        // Secuencial a propósito: una transacción interactiva usa UNA sola
+        // conexión y `pg` depreca (y `pg@9` elimina) consultas concurrentes
+        // sobre el mismo cliente — detectado en la integración real de 5C.1C.
+        const movementRow = await tx.stockMovement.findUnique({
+          where: { id: movementId },
+          select: movementSelect,
+        });
+        const itemRow = await tx.stockItem.findUnique({
+          where: { id: itemId },
+          select: itemSelect,
+        });
         if (!movementRow || !itemRow) throw new StockItemNotFoundError();
         const body = { movement: serializeMovement(movementRow), item: serializeItem(itemRow) };
         // 6) completa el registro en la MISMA transacción: al confirmar, la
