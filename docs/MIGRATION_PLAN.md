@@ -252,6 +252,13 @@ Con el código de esta etapa ya validado (ver checklist más abajo), crear el pr
 - **Validación**: tests unitarios backend y frontend, integración dirigida contra `demo` (`stock5c2.integration.test.ts`, fixtures `test-5c2-<RUN>`, 0 residuos), revisión visual automatizada en 5 anchos con Chrome headless y datos sintéticos.
 - **Paridad resuelta con el HTML temporal**: Reportes y CSV eran visibles para todos (sin `admin-only` ni `isAdmin()`); CSV, compartir Compras y agrupación por categoría/estado quedaron implementados. Pendiente: aprobación visual humana y commit. Índice por `effective_date` solo si el volumen lo justifica; `production` intacta.
 
+### Etapa 5G — Gallinero 🟡 implementada y validada, sin commit — pendiente de revisión humana
+
+- **Alcance**: módulo 🐔 Gallinero full stack con paridad del prototipo (KPIs, gallinas activas, registro de recolección, análisis por período, historial), permisos en el backend, auditoría, idempotencia, anulación lógica y configuración inicial real por el ADMIN (sin inventar cantidades). Detalle en `docs/BUSINESS_RULES.md` §9 y `docs/ARCHITECTURE.md` §24.
+- **Migración**: `20260925150000_chicken_coop_voiding_checks` (actor real, anulación, índice por fecha, 3 CHECK), precondición verificada y aplicada **solo a `demo`**. Sin `db push`, reset ni seed; `production` intacta.
+- **Validación**: tests unitarios backend/frontend, integración real `chickenCoop.integration.test.ts` (fixtures `test-5g-<RUN>`, concurrencia de configuración/altas/anulación, idempotencia, CHECK con rollback, conteo de sentencias, 0 residuos; si el gallinero real `main` ya existe, no se modifica), test de navegación de la app completa y revisión visual en 5 anchos.
+- **Fuera de alcance**: Mascotas, dashboard (el KPI "🥚 Huevos hoy" de Inicio llegará con el dashboard) y cualquier otro módulo.
+
 ## Etapa 6 — Integrar Neon Object Storage (fotografías y archivos)
 
 - **Objetivo**: conectar `FileAsset` (ya modelado en la Etapa 2, adaptado a Neon Object Storage en la Etapa 2.2) con el Object Storage real de Neon, gestionado desde el backend.

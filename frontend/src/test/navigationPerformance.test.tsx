@@ -13,6 +13,7 @@ import {
   makeLowItem,
   reportMovementsList,
 } from './fixtures/stock';
+import { historyResponse, makeCollection, makeSummary } from './fixtures/chickenCoop';
 
 /**
  * Etapa 5P — presupuesto de navegación sobre la APP COMPLETA (`App`: mismos
@@ -62,6 +63,10 @@ function body(path: string): unknown {
   }
   if (path.startsWith('/stock/items') && path.includes('stockLevel=')) return itemsList([]);
   if (path.startsWith('/stock/items')) return itemsList([makeItem()]);
+  if (path.startsWith('/chicken-coop/summary')) return makeSummary();
+  if (path.startsWith('/chicken-coop/collections')) {
+    return path.includes('?') ? historyResponse() : { collection: makeCollection() };
+  }
   if (path.startsWith('/admin/users'))
     return { users: [], pagination: { page: 1, pageSize: 50, total: 0 } };
   return {};
@@ -88,11 +93,13 @@ beforeEach(() => {
       const path = String(input).replace('/api/v1', '');
       const method = init?.method ?? 'GET';
       calls.push(`${method} ${path}`);
-      if (method === 'POST' && path.includes('/movements')) {
+      const idempotent =
+        method === 'POST' && (path.includes('/movements') || path === '/chicken-coop/collections');
+      if (idempotent) {
         idempotencyKeys.push((init?.headers as Record<string, string>)['Idempotency-Key']);
       }
       return new Response(JSON.stringify(body(path)), {
-        status: method === 'POST' && path.includes('/movements') ? 201 : 200,
+        status: idempotent ? 201 : 200,
         headers: { 'Content-Type': 'application/json' },
       });
     }),
@@ -317,6 +324,69 @@ describe('Stock — subvistas SPA (Etapa 5C.2)', () => {
     const summaryBefore = count('/stock/reports/summary');
     await user.click(within(stockNav()).getByRole('link', { name: 'Reportes' }));
     await waitFor(() => expect(count('/stock/reports/summary')).toBe(summaryBefore + 1));
+  });
+});
+
+describe('🐔 Gallinero (Etapa 5G)', () => {
+  const kpis = () => screen.getByRole('list', { name: 'Indicadores del gallinero' });
+
+  it('Stock → Gallinero → Tareas → Gallinero: sin recarga, sin refresh ni /me, revisita con 0 requests', async () => {
+    const user = userEvent.setup();
+    await bootToHome();
+    const shellHeader = document.querySelector('.app-header');
+    const prevented: boolean[] = [];
+    const listener = (event: MouseEvent) => prevented.push(event.defaultPrevented);
+    window.addEventListener('click', listener);
+
+    await user.click(within(mainNav()).getByRole('link', { name: 'Stock' }));
+    await screen.findByText(makeItem().name);
+    await user.click(within(mainNav()).getByRole('link', { name: 'Gallinero' }));
+    await screen.findByRole('heading', { level: 1, name: 'Gallinero' });
+    await screen.findByRole('list', { name: 'Recolecciones por día' });
+    // Primera visita: exactamente 1 resumen + 1 página de historial (el
+    // ADMIN además pide las personas elegibles, catálogo compartido).
+    expect(count('/chicken-coop/summary')).toBe(1);
+    expect(count('/chicken-coop/collections')).toBe(1);
+    expect(count('/tasks/employees')).toBe(1);
+
+    await user.click(within(mainNav()).getByRole('link', { name: 'Tareas' }));
+    await screen.findByRole('list', { name: 'Tareas del período' });
+    const before = calls.length;
+    await user.click(within(mainNav()).getByRole('link', { name: 'Gallinero' }));
+    // Sincrónico: datos cacheados, sin loader global ni local.
+    expect(kpis()).toBeInTheDocument();
+    expect(screen.queryByText(/Cargando/)).not.toBeInTheDocument();
+    window.removeEventListener('click', listener);
+
+    expect(calls.length).toBe(before);
+    expect(prevented).toEqual([true, true, true, true]);
+    expect(screen.queryByText(/Restaurando tu sesión/)).not.toBeInTheDocument();
+    expect(count('/auth/refresh')).toBe(1);
+    expect(count('/auth/me')).toBe(1);
+    expect(document.querySelector('.app-header')).toBe(shellHeader);
+  });
+
+  it('registrar: doble clic = un POST con Idempotency-Key; invalida solo el gallinero', async () => {
+    const user = userEvent.setup();
+    await bootToHome();
+    await user.click(within(mainNav()).getByRole('link', { name: 'Gallinero' }));
+    await screen.findByRole('list', { name: 'Recolecciones por día' });
+    const stockBefore = count('/stock');
+    const tasksBefore = count('/tasks');
+
+    const form = screen.getByRole('form', { name: 'Registrar recolección' });
+    await user.type(within(form).getByLabelText('Huevos buenos'), '4');
+    await user.dblClick(within(form).getByRole('button', { name: 'Registrar recolección' }));
+    expect(await within(form).findByText(/Recolección registrada/)).toBeInTheDocument();
+
+    expect(calls.filter((call) => call === 'POST /chicken-coop/collections')).toHaveLength(1);
+    expect(idempotencyKeys).toHaveLength(1);
+    expect(idempotencyKeys[0]).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
+    await waitFor(() => expect(count('/chicken-coop/summary')).toBe(2));
+    await waitFor(() => expect(count('/chicken-coop/collections?')).toBe(2));
+    expect(count('/stock')).toBe(stockBefore);
+    expect(count('/tasks')).toBe(tasksBefore);
+    expect(count('/auth/refresh')).toBe(1);
   });
 });
 

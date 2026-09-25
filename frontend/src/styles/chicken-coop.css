@@ -1,0 +1,366 @@
+/* 🐔 Gallinero (features/chickenCoop/*) — docs/UI_CONTEXT.md, "Gallinero":
+   cantidad destacada en Fraunces, registro simple de huevos buenos y rotos,
+   análisis por período con chips e historial legible. Solo tokens. */
+
+.coop {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.coop .page-header {
+  margin-bottom: 0;
+}
+
+.coop-section-title {
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-display);
+  font-size: var(--font-size-lg);
+}
+
+/* ── KPIs (2 columnas en móvil, 4 en escritorio, como el prototipo) ── */
+
+.coop-kpis {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coop-kpis > li {
+  display: flex;
+  min-width: 0;
+}
+
+.coop-kpi {
+  flex: 1;
+}
+
+.coop-kpi .card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.coop-kpi__value {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+  font-variant-numeric: tabular-nums;
+}
+
+.coop-kpi__label {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+}
+
+.coop-kpi--positive .coop-kpi__value {
+  color: var(--color-positive);
+}
+
+.coop-kpi--warning .coop-kpi__value {
+  color: var(--color-warning);
+}
+
+.coop-kpi--danger .coop-kpi__value {
+  color: var(--color-danger);
+}
+
+.coop-kpi--info .coop-kpi__value {
+  color: var(--color-info);
+}
+
+.coop-kpi--neutral .coop-kpi__value {
+  color: var(--color-text-muted);
+}
+
+/* ── Gallinas activas ─────────────────────────────────────────────────── */
+
+.coop-hens {
+  padding: var(--space-2) 0;
+  text-align: center;
+}
+
+.coop-hens__count {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 3.25rem;
+  font-weight: var(--font-weight-bold);
+  line-height: 1;
+  color: var(--color-action);
+  font-variant-numeric: tabular-nums;
+}
+
+.coop-hens__caption {
+  margin: var(--space-1) 0 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.coop-hens-card .card__header {
+  flex-wrap: wrap;
+}
+
+.coop-hens__actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.coop-hens__pending {
+  margin: 0;
+}
+
+.coop-configure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.coop-configure .notice {
+  margin: 0;
+}
+
+/* ── Formulario de recolección ────────────────────────────────────────── */
+
+.coop-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.coop-form__row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.coop-form__row .field,
+.coop-form > .field {
+  margin: 0;
+  min-width: 0;
+}
+
+.coop-form__count {
+  font-size: var(--font-size-xl);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.coop-form__fixed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1);
+  min-height: var(--tap-target);
+  margin: 0;
+  font-weight: var(--font-weight-semibold);
+}
+
+.coop-form__success {
+  color: var(--color-positive);
+}
+
+/* ── Análisis por período ─────────────────────────────────────────────── */
+
+.coop-chart {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 7.5rem;
+  margin: var(--space-3) 0 var(--space-1);
+  padding: 0;
+  list-style: none;
+}
+
+.coop-chart__day {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.coop-chart__value {
+  min-height: 1em;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+  color: var(--color-action);
+}
+
+.coop-chart__track {
+  display: flex;
+  flex: 1;
+  align-items: flex-end;
+  width: 100%;
+}
+
+.coop-chart__bar {
+  width: 100%;
+  border-radius: 4px 4px 0 0;
+  background: var(--forest-600);
+}
+
+.coop-chart__day.is-today .coop-chart__bar {
+  background: var(--color-action);
+}
+
+.coop-chart__label {
+  overflow: hidden;
+  max-width: 100%;
+  font-size: 0.5625rem;
+  line-height: 1.1;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  text-overflow: clip;
+}
+
+.coop-chart__day.is-today .coop-chart__label {
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text);
+}
+
+.coop-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+}
+
+.coop-stats__item {
+  display: flex;
+  flex-direction: column-reverse; /* valor arriba, etiqueta abajo (como el prototipo) */
+  gap: 2px;
+  padding: var(--space-2);
+  border-radius: var(--radius-control);
+  background: var(--color-bg);
+  text-align: center;
+}
+
+.coop-stats__item dt {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.coop-stats__item dd {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-action);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Historial ────────────────────────────────────────────────────────── */
+
+.coop-history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coop-history__day {
+  padding: var(--space-3) 0;
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.coop-history__day:first-child {
+  padding-top: 0;
+}
+
+.coop-history__day:last-child {
+  border-bottom: none;
+}
+
+.coop-history__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.coop-history__date {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.coop-history__totals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.coop-history__good {
+  font-weight: var(--font-weight-bold);
+  color: var(--color-action);
+}
+
+.coop-history__broken {
+  color: var(--color-danger);
+}
+
+.coop-history__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coop-history__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap-target);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.coop-history__text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.coop-history__void {
+  flex-shrink: 0;
+  min-width: var(--tap-target);
+}
+
+.coop-history__notes {
+  margin: 0 0 var(--space-1) calc(var(--avatar-sm) + var(--space-2));
+  font-size: var(--font-size-xs);
+  font-style: italic;
+  color: var(--color-earth);
+  overflow-wrap: anywhere;
+}
+
+.coop-history-section .card .button--full {
+  margin-top: var(--space-3);
+}
+
+@media (min-width: 768px) {
+  .coop-kpis {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .coop-chart__label {
+    font-size: var(--font-size-xs);
+  }
+}

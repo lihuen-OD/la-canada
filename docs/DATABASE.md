@@ -483,6 +483,17 @@ Migración `20260924210000_stock_idempotency_balance_check`, generada **offline*
 
 Sin cambios de schema ni migración. `GET /api/v1/stock/reports/*` agrega en Postgres con `$queryRaw` parametrizado sobre `stock_movements m JOIN stock_items i` (más `LEFT JOIN employees`/`consumption_destinations` donde corresponde): `GROUP BY type, unit` (totales por unidad), `GROUP BY area, CASE nivel` sobre `stock_items` activos (niveles actuales), un CTE con `ROW_NUMBER()` para los rankings top 10 y `COUNT(*) OVER ()` para el total de productos con movimientos, `GROUP BY destino, unit` y `GROUP BY persona, type`; la lista de movimientos pagina con `ORDER BY effective_date DESC, created_at DESC, id DESC LIMIT/OFFSET`. Índices usados hoy: `stock_movements(stock_item_id|employee_id|destination_id)` para los filtros por producto/persona/destino; el filtro de período es un rango sobre `effective_date` sin índice propio (escaneo secuencial, suficiente con el volumen actual). **Propuesta no aplicada**: índice sobre `stock_movements(effective_date)` cuando el historial crezca; requiere medir con `EXPLAIN ANALYZE` y su propia autorización de migración.
 
+### Etapa 5G — Gallinero: actor real, anulación lógica e índice por fecha (aplicada a `demo`)
+
+Migración incremental `20260925150000_chicken_coop_voiding_checks`, generada offline con `prisma migrate diff --from-schema/--to-schema` y revisada a mano (7 sentencias, solo agrega):
+
+- `egg_collections.recorded_by_user_id` (FK `users`, nullable solo por compatibilidad; el servicio siempre la completa): **actor real** de la sesión, separado de `employee_id` (la persona que juntó, que un ADMIN puede elegir).
+- `egg_collections.voided_at` / `voided_by_user_id` (FK `users`): el "✕ Eliminar" del prototipo borraba la fila; ahora es una **anulación lógica** auditada. Las recolecciones anuladas no cuentan en KPIs, análisis ni historial, pero la fila se conserva. Sin `DELETE` físico.
+- Índice `egg_collections_collection_date_idx` para el `GROUP BY collection_date` del resumen y del historial paginado por días.
+- `CHECK` manuales: `chicken_coops.active_hens_count >= 0`, `egg_collections` conteos `>= 0` y `good + broken > 0` (el prototipo rechazaba 0 + 0).
+- Precondición verificada en transacción `READ ONLY` (0 filas en ambas tablas, ninguna violación); aplicada a `demo` el 2026-09-25 con `db:migrate:deploy` (exactamente 1 pendiente, 0 fallidas); objetos verificados en `pg_constraint`/`pg_indexes`/`information_schema`. `production` no se tocó.
+- `ChickenCoop "main"` sigue **sin sembrarse**: lo crea el ADMIN desde la pantalla con la cantidad real (configuración inicial única). Hoy `demo` tiene 0 filas.
+
 ### Qué queda pendiente para la Etapa 3 (autenticación) en adelante
 
 - Enforcement a nivel de servicio de las filas 2, 6, 9, 11, 14, 15 de la matriz de invariantes.

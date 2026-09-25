@@ -1,3 +1,4 @@
+import type { ChickenCoopPeriodDays } from './chickenCoopTypes';
 import type {
   ListStockItemsParams,
   StockCategoryStatusFilter,
@@ -61,6 +62,15 @@ export const queryKeys = {
     reportMovements: (userId: string, filters: StockReportFilters) =>
       [...scope(userId), 'stock', 'reports', 'movements', filters] as const,
     reportsAll: (userId: string) => [...scope(userId), 'stock', 'reports'] as const,
+  },
+  chickenCoop: {
+    /** Todo el gallinero: una recolección, anulación o cambio de gallinas invalida la familia entera. */
+    all: (userId: string) => [...scope(userId), 'chickenCoop'] as const,
+    /** KPIs + análisis del período (los KPIs de promedio/postura dependen del período). */
+    summary: (userId: string, days: ChickenCoopPeriodDays) =>
+      [...scope(userId), 'chickenCoop', 'summary', days] as const,
+    /** Historial paginado por días (`useInfiniteQuery`). */
+    history: (userId: string) => [...scope(userId), 'chickenCoop', 'history'] as const,
   },
   admin: {
     users: (userId: string) => [...scope(userId), 'admin', 'users'] as const,

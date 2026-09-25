@@ -224,6 +224,10 @@ model User {
   recordedTaskExecutions TaskExecution[] @relation("TaskExecutionRecordedBy")
   revertedTaskExecutions TaskExecution[] @relation("TaskExecutionRevertedBy")
 
+  /// Etapa 5G — actor real que registró / anuló una recolección de huevos.
+  recordedEggCollections EggCollection[] @relation("EggCollectionRecordedBy")
+  voidedEggCollections   EggCollection[] @relation("EggCollectionVoidedBy")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -902,16 +906,33 @@ model EggCollection {
   goodEggsCount   Int      @map("good_eggs_count")
   brokenEggsCount Int      @map("broken_eggs_count")
 
+  /// Persona que juntó los huevos ("¿Quién juntó?" del prototipo). Distinta
+  /// del actor real: un ADMIN puede registrar a nombre de un empleado.
   employeeId String?   @map("employee_id") @db.Uuid
   employee   Employee? @relation(fields: [employeeId], references: [id])
 
   notes String?
+
+  /// Etapa 5G — actor real (User de la sesión) que registró la recolección.
+  /// Nullable solo por compatibilidad con filas anteriores a esta columna;
+  /// el servicio siempre lo completa.
+  recordedByUserId String? @map("recorded_by_user_id") @db.Uuid
+  recordedBy       User?   @relation("EggCollectionRecordedBy", fields: [recordedByUserId], references: [id])
+
+  /// Etapa 5G — anulación lógica (el "✕ Eliminar" del prototipo borraba la
+  /// fila): la recolección deja de contar en métricas e historial, pero la
+  /// fila se conserva junto con su auditoría. Nunca borrado físico.
+  voidedAt       DateTime? @map("voided_at")
+  voidedByUserId String?   @map("voided_by_user_id") @db.Uuid
+  voidedBy       User?     @relation("EggCollectionVoidedBy", fields: [voidedByUserId], references: [id])
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([chickenCoopId])
   @@index([employeeId])
+  /// Etapa 5G — métricas por período e historial paginado por fecha.
+  @@index([collectionDate])
   @@map("egg_collections")
 }
 

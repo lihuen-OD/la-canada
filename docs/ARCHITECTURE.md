@@ -717,3 +717,22 @@ Schemas Zod `.strict()`; `from`/`to` son fechas de `BUSINESS_TIME_ZONE`, con má
 **Presupuesto medido** (Chrome headless contra el build de producción, `/api` interceptado con datos sintéticos, 360/390/768/1366/1920 px, ambos roles): 1 carga de documento, 1 `refresh` + 1 `/me` en todo el recorrido, 0 GET duplicados, 0 scroll horizontal. Primera visita: Casa 2 requests (productos + categorías), Jardín 1, Compras 2, Reportes 2, Catálogo 2 (destinos `all` + productos `all`; categorías desde caché); revisitas dentro de la frescura: 0. Bundle JS 393,1 → 426,2 KB (gzip 116,8 → 123,3 KB), CSS 44,0 → 48,1 KB; sin dependencias nuevas.
 
 **Índices**: sin migración. Los reportes filtran por `effective_date` y agrupan sobre `stock_movements ⋈ stock_items`; con el volumen actual (decenas de movimientos) Postgres resuelve con escaneo secuencial y los índices existentes (`stock_item_id`, `employee_id`, `destination_id`) cubren los filtros por producto/persona/destino. Propuesta documentada, **no creada**: `@@index([effectiveDate])` en `StockMovement` cuando el historial crezca a decenas de miles de filas (medir con `EXPLAIN ANALYZE` antes).
+
+## 24. 🐔 Gallinero (Etapa 5G)
+
+`backend/src/chickenCoop/` (schemas Zod `.strict()`, métricas puras en `chickenCoopMetrics.ts`, servicio), `controllers/chickenCoopController.ts`, `routes/chickenCoopRoutes.ts`; frontend `features/chickenCoop/` + `api/chickenCoopApi.ts`. Reglas en `docs/BUSINESS_RULES.md` §9, "Contrato implementado en Etapa 5G"; modelo/migración en `docs/DATABASE.md`, "Etapa 5G".
+
+| Endpoint (`/api/v1/chicken-coop`, todo detrás de `requireAuth`) | Quién | Sentencias SQL |
+| --- | --- | --- |
+| `GET /summary?days=7\|30\|90\|365` | todos | auth + 2 en paralelo (singleton `main` + `GROUP BY collection_date` sin anuladas) |
+| `GET /collections?page&pageSize≤31` | todos | auth + 5 fijas (singleton, página de fechas, total de fechas, recolecciones + personas); sin N+1 |
+| `POST /collections` (+ `Idempotency-Key` opcional) | todos (persona según rol) | transacción: reserva → validación de persona → alta → auditoría → respuesta |
+| `POST /collections/:id/void` | ADMIN | `updateMany … WHERE voided_at IS NULL` + auditoría |
+| `POST /configuration` | ADMIN | alta única del singleton (unique `code`) + auditoría |
+| `POST /hens-adjustments` `{ delta: ±1, expectedCount }` | ADMIN | `updateMany … WHERE active_hens_count = expected` + auditoría |
+
+Sin `PUT/PATCH/DELETE`. Auditorías: `chicken_coop.collection_created`, `chicken_coop.collection_voided`, `chicken_coop.configured`, `chicken_coop.hens_adjusted`. Idempotencia genérica en `lib/idempotency.ts` sobre `idempotency_records` (Stock conserva su implementación). Consultas secuenciales dentro de las transacciones interactivas (§21).
+
+**Frontend**: ruta `/chicken-coop`, en la navegación con 🐔 entre Stock y Usuarios (orden del prototipo). Caché (`queryKeys.chickenCoop`): resumen por período 30 s con `keepPreviousData` (cambiar de chip deja la vista anterior atenuada), historial `useInfiniteQuery` 30 s, personas elegibles = `tasks.employees` (5 min, solo ADMIN). Toda escritura invalida solo `chickenCoop.*`. Sin actualizaciones optimistas ni storage.
+
+**Presupuesto medido** (Chrome headless contra el build de producción, `/api` interceptado con datos sintéticos, 360/390/768/1366/1920 px, ADMIN y EMPLOYEE, gallinero configurado y pendiente): 1 carga de documento, 1 `refresh` + 1 `/me`, 0 loaders globales, 0 GET duplicados, 0 scroll horizontal, 0 controles bajo 44 px. Primera visita: 2 requests (+ personas para ADMIN); cambio de período: 1; revisita dentro de la frescura: 0. Bundle JS 430,8 → 450,0 KB (gzip 124,8 → 129,7 KB), CSS 48,7 → 53,9 KB; sin dependencias nuevas. Impacto en Render/Neon: 3–6 sentencias por pantalla, agregadas en Postgres.

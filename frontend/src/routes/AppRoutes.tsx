@@ -10,6 +10,7 @@ import { AdminUsersScreen } from '../features/admin/AdminUsersScreen';
 import { TasksScreen } from '../features/tasks/TasksScreen';
 import { PerformanceScreen } from '../features/tasks/PerformanceScreen';
 import { StockModule } from '../features/stock/StockModule';
+import { ChickenCoopScreen } from '../features/chickenCoop/ChickenCoopScreen';
 import { APP_ROUTES } from './navigation';
 import { ProtectedRoute } from './ProtectedRoute';
 import { RequireRole } from './RequireRole';
@@ -21,7 +22,7 @@ import { RequireRole } from './RequireRole';
  *
  * `AppShell` es una ruta de layout DENTRO de `ProtectedRoute`: solo existe
  * para usuarios autenticados. Cualquier ruta no declarada (incluidos
- * módulos futuros como /gallinero) cae en el catch-all y redirige.
+ * módulos futuros como /pets) cae en el catch-all y redirige.
  */
 export function AppRoutes() {
   const { status, retryBootstrap } = useAuth();
@@ -46,6 +47,7 @@ export function AppRoutes() {
           <Route path="/tasks/performance" element={<PerformanceScreen />} />
           {/* Subvistas de Stock (Casa, Jardín, Compras, Reportes, Catálogo) como rutas descendientes. */}
           <Route path={`${APP_ROUTES.stock.path}/*`} element={<StockModule />} />
+          <Route path={APP_ROUTES.chickenCoop.path} element={<ChickenCoopScreen />} />
           <Route
             path={APP_ROUTES.adminUsers.path}
             element={

@@ -165,6 +165,18 @@ Implementado en `backend/src/tasks/tasksService.ts` (detalle técnico en `docs/A
 - Historial agrupado por fecha, con total de buenos/rotos y % de postura por día.
 - **⚠️ BUG VERIFICADO** — `rndGallHistorial()` (línea 2270) referencia `DIAS_ES[d.getDay()]`, una variable que **no está declarada en ningún lugar del archivo** (el archivo define `DIAS`, `DIAS2`, `DIAS3`, pero no `DIAS_ES`). Esto debería producir un `ReferenceError` en tiempo de ejecución cada vez que se intenta renderizar el historial del gallinero con al menos un registro. No se ejecutó el archivo en navegador para confirmar el efecto exacto (p. ej. si rompe solo esa función o interrumpe el render de toda la pantalla); se deja como hallazgo a verificar en la etapa de reconstrucción, no como comportamiento asumido.
 
+### Contrato implementado en Etapa 5G (Gallinero)
+
+- **Permisos (paridad)**: ver KPIs, análisis e historial y registrar recolecciones = todo usuario autenticado; configurar, "+ Alta"/"− Baja" y eliminar recolecciones = solo `ADMIN` (backend como autoridad).
+- **"¿Quién juntó?"**: `EMPLOYEE` queda fijado a su empleado (la identidad sale de la sesión); `ADMIN` elige un empleado activo (por defecto el suyo si lo tiene; sin empleado vinculado debe elegir). El actor real se guarda aparte (`recordedByUserId` + `AuditLog`).
+- **Fecha**: hoy o pasada para todos, nunca futura, según `BUSINESS_TIME_ZONE` (el prototipo no validaba).
+- **Configuración pendiente**: sin `ChickenCoop "main"` el `ADMIN` carga la cantidad real una sola vez; el resto ve "Configuración pendiente". Se puede registrar igual; la postura se muestra "—".
+- **Alta/Baja**: de a una, con la confirmación "¿Cambiar gallinas activas de X a Y?". El backend aplica solo si la cantidad sigue siendo X (si no, `409 CHICKEN_COOP_COUNT_CHANGED`); nunca negativa. Corrige la ⚠️ DUDA de §9: ya no se pierde un ajuste por falta de fila.
+- **Cálculos (backend)**: fórmulas de §9 sin cambios. Diferencias deliberadas: el período son los últimos N días de calendario incluido hoy (7/30/90/365); sin gallinas configuradas (o con 0) la postura es `null` ("—") y no un 0% falso. Se conserva la limitación documentada: la postura histórica usa la cantidad **actual** de gallinas.
+- **Historial**: agrupado por fecha, paginado por días completos (10 por página, "Cargar más días"). Corrige el `DIAS_ES` no declarado: el día de la semana se muestra completo.
+- **Eliminar**: confirmación "¿Eliminar este registro?" → anulación lógica auditada (`chicken_coop.collection_voided`), nunca borrado físico.
+- **Idempotencia**: el alta de recolección acepta `Idempotency-Key` (mismo contrato que Stock); el frontend lo envía siempre.
+
 ## 10. Producción de huevos
 
 Ver sección 9 — está integrada al módulo Gallinero, no es un módulo separado en el código.

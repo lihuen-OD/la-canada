@@ -8,7 +8,7 @@ vi.mock('../auth/useAuth', () => ({ useAuth: useAuthMock }));
 
 import { AppShell } from './AppShell';
 
-const IMPLEMENTED_PATHS = ['/', '/tasks', '/stock', '/admin/users'];
+const IMPLEMENTED_PATHS = ['/', '/tasks', '/stock', '/chicken-coop', '/admin/users'];
 
 function mockUser(role: SystemRole, employee: AuthenticatedUser['employee'] = null) {
   useAuthMock.mockReturnValue({
@@ -49,7 +49,7 @@ describe('AppShell', () => {
     );
   });
 
-  it('ADMIN: ve Inicio, Tareas, Stock y Usuarios, y nada más', () => {
+  it('ADMIN: ve Inicio, Tareas, Stock, Gallinero y Usuarios, y nada más', () => {
     mockUser('ADMIN');
     renderShell();
 
@@ -58,6 +58,7 @@ describe('AppShell', () => {
       '/',
       '/tasks',
       '/stock',
+      '/chicken-coop',
       '/admin/users',
     ]);
     expect(within(getNav()).getByRole('link', { name: 'Tareas' })).toBeInTheDocument();
@@ -71,6 +72,15 @@ describe('AppShell', () => {
     const link = within(getNav()).getByRole('link', { name: 'Stock' });
     expect(link).toHaveTextContent('📦');
     expect(within(link).getByText('📦')).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('🐔 Gallinero: el emoji del prototipo es decorativo y el nombre accesible es el texto', () => {
+    mockUser('EMPLOYEE', { id: 'e1', displayName: 'Coke', colorHex: '#4a7c59' });
+    renderShell();
+
+    const link = within(getNav()).getByRole('link', { name: 'Gallinero' });
+    expect(link).toHaveAttribute('href', '/chicken-coop');
+    expect(within(link).getByText('🐔')).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('✅ Tareas: el emoji del prototipo es decorativo y el nombre accesible es el texto', () => {
@@ -102,7 +112,7 @@ describe('AppShell', () => {
       expect(IMPLEMENTED_PATHS).toContain(href);
     }
     const text = document.body.textContent ?? '';
-    expect(text).not.toMatch(/novedades|eventos|clima|fotos|mascotas|gallinero|desempeño/i);
+    expect(text).not.toMatch(/novedades|eventos|clima|fotos|mascotas|desempeño/i);
     expect(screen.queryByRole('link', { name: /próximamente/i })).not.toBeInTheDocument();
   });
 

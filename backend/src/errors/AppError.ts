@@ -306,3 +306,65 @@ export class IdempotencyRecordPendingError extends AppError {
     );
   }
 }
+
+// ── Gallinero (Etapa 5G) ──────────────────────────────────────────────────
+
+/** El gallinero principal (`ChickenCoop.code = "main"`) todavía no tiene su cantidad inicial real. */
+export class ChickenCoopNotConfiguredError extends AppError {
+  constructor() {
+    super('El gallinero todavía no está configurado.', 409, {
+      code: 'CHICKEN_COOP_NOT_CONFIGURED',
+    });
+  }
+}
+
+/** La configuración inicial solo se hace una vez; después, altas y bajas de a una. */
+export class ChickenCoopAlreadyConfiguredError extends AppError {
+  constructor() {
+    super('El gallinero ya está configurado.', 409, {
+      code: 'CHICKEN_COOP_ALREADY_CONFIGURED',
+    });
+  }
+}
+
+/**
+ * La cantidad de gallinas cambió entre que se mostró la confirmación
+ * ("¿Cambiar gallinas activas de X a Y?") y se aplicó — nunca se aplica
+ * un cambio distinto del confirmado.
+ */
+export class ChickenCoopCountChangedError extends AppError {
+  constructor() {
+    super('La cantidad de gallinas cambió mientras tanto. Revisá el valor actual.', 409, {
+      code: 'CHICKEN_COOP_COUNT_CHANGED',
+    });
+  }
+}
+
+/** Baja con 0 gallinas: el conteo nunca es negativo. */
+export class ChickenCoopCountLimitError extends AppError {
+  constructor(message = 'La cantidad de gallinas no puede ser negativa.') {
+    super(message, 409, { code: 'CHICKEN_COOP_COUNT_LIMIT' });
+  }
+}
+
+export class EggCollectionNotFoundError extends AppError {
+  constructor() {
+    super('La recolección no existe.', 404, { code: 'EGG_COLLECTION_NOT_FOUND' });
+  }
+}
+
+/** Ya estaba anulada (dos anulaciones simultáneas nunca se aplican ambas). */
+export class EggCollectionAlreadyVoidedError extends AppError {
+  constructor() {
+    super('La recolección ya fue eliminada.', 409, { code: 'EGG_COLLECTION_ALREADY_VOIDED' });
+  }
+}
+
+/** Persona elegida por un ADMIN inexistente o inactiva. */
+export class EggCollectorInvalidError extends AppError {
+  constructor() {
+    super('La persona elegida no existe o no está activa.', 400, {
+      code: 'EGG_COLLECTOR_INVALID',
+    });
+  }
+}
