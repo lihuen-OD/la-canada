@@ -1,7 +1,8 @@
-/* ✅ Tareas (features/tasks/*) — docs/UI_CONTEXT.md, "Tareas": filtro
-   horizontal por persona con avatar y pendientes, chips de frecuencia,
-   lista dentro de tarjeta, check redondeado, frecuencia y responsable como
-   metadatos secundarios, historial semanal separado. Solo tokens. */
+/* 📋 Tareas (features/tasks/*) — docs/UI_CONTEXT.md, "Tareas", con la
+   presentación del prototipo: pestañas de persona con avatar y pendientes
+   (`.ptab`), chips de frecuencia, lista dentro de tarjeta, check cuadrado
+   (`.tck`), etiqueta de frecuencia y responsable como metadatos, ✏️/✕ a la
+   derecha para el ADMIN e historial semanal separado. Solo tokens. */
 
 .tasks {
   display: flex;
@@ -95,6 +96,76 @@
   color: var(--color-action);
 }
 
+/* ── Pestañas de persona (`.ptab`) ─────────────────────────────────────── */
+
+.person-tabs {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  padding: var(--space-1) var(--space-1) var(--space-1);
+  margin-inline: calc(var(--space-1) * -1);
+}
+
+.person-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.person-tab {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.1875rem;
+  min-width: var(--tap-target);
+  min-height: var(--tap-target);
+  padding: var(--space-1);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.person-tab__avatar {
+  display: inline-flex;
+  opacity: 0.4;
+  transition: opacity var(--duration-base) var(--ease-standard);
+}
+
+.person-tab__name {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+}
+
+.person-tab__count {
+  padding: 0.0625rem 0.375rem;
+  border-radius: var(--radius-pill);
+  background: var(--color-positive-bg);
+  color: var(--color-positive);
+  font-size: 0.625rem;
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-base);
+}
+
+.person-tab:hover .person-tab__avatar {
+  opacity: 0.7;
+}
+
+.person-tab--selected {
+  color: var(--color-text);
+}
+
+.person-tab--selected .person-tab__avatar {
+  opacity: 1;
+}
+
+.person-tab__all {
+  background: var(--color-progress);
+}
+
 .tasks__admin-toggle {
   display: inline-flex;
   align-items: center;
@@ -122,12 +193,13 @@
 .task-item {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3) var(--space-1) var(--space-1);
 }
 
+/* Separadores `--crd` del prototipo, más suaves que el borde de la tarjeta. */
 .task-item + .task-item {
-  border-top: var(--border-width) solid var(--color-border);
+  border-top: var(--border-width) solid var(--color-surface-muted);
 }
 
 .task-check {
@@ -145,20 +217,20 @@
   cursor: pointer;
 }
 
-/* Círculo visual de 26px dentro de un objetivo táctil de 44px. */
+/* Casilla cuadrada del prototipo (`.tck`, 21px) dentro de un objetivo táctil de 44px. */
 .task-check > span:first-child {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: var(--avatar-sm);
-  height: var(--avatar-sm);
-  border: var(--border-width-control) solid var(--color-border-control);
-  border-radius: 50%;
-  font-size: var(--font-size-sm);
+  width: 1.375rem;
+  height: 1.375rem;
+  border: 2px solid var(--color-border-control);
+  border-radius: 6px;
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-bold);
   transition:
-    background-color var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-base) var(--ease-standard),
+    border-color var(--duration-base) var(--ease-standard),
     transform var(--duration-fast) var(--ease-standard);
 }
 
@@ -171,8 +243,8 @@
 }
 
 .task-check--done > span:first-child {
-  background: var(--color-action);
-  border-color: var(--color-action);
+  background: var(--color-progress);
+  border-color: var(--color-progress);
 }
 
 .task-check--static {
@@ -188,13 +260,15 @@
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 0.1875rem;
   min-width: 0;
-  padding-top: var(--space-2);
+  padding-block: 0.6875rem var(--space-2);
 }
 
 .task-item__description {
+  font-size: 0.875rem;
   font-weight: var(--font-weight-semibold);
+  line-height: 1.3;
   overflow-wrap: anywhere;
 }
 
@@ -208,29 +282,36 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-1) var(--space-3);
-  font-size: var(--font-size-sm);
+  gap: var(--space-1) 0.3125rem;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
 
 .task-item__assignee {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
 .task-item__completion {
-  font-size: var(--font-size-sm);
-  color: var(--color-positive);
+  color: var(--color-progress);
+  font-weight: var(--font-weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.task-item__completion strong {
+  font-weight: var(--font-weight-bold);
+}
+
+/* "✓ por …" del prototipo: otra persona completó la tarea asignada. */
+.task-item__completion--covered {
+  color: var(--color-info);
 }
 
 .task-item__actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-  margin-left: calc(var(--space-3) * -1);
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.1875rem;
 }
 
 /* ── Diálogos ──────────────────────────────────────────────────────────── */
@@ -293,29 +374,24 @@
 }
 
 .history__week {
-  flex-shrink: 0;
+  margin-bottom: var(--space-3);
 }
 
 .history__week .field__input {
-  min-width: 11rem;
+  font-size: var(--font-size-sm);
+}
+
+.history__count {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-progress);
 }
 
 .history {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-}
-
-.history__summary {
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-control);
-  background: var(--color-positive-bg);
-  color: var(--color-positive);
-}
-
-.history__summary strong {
-  font-family: var(--font-display);
-  font-size: var(--font-size-lg);
 }
 
 .history__subtitle {
@@ -430,10 +506,4 @@
   gap: var(--space-1) var(--space-2);
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
-}
-
-@media (min-width: 900px) {
-  .tasks__filters {
-    gap: var(--space-1);
-  }
 }

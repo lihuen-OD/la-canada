@@ -97,7 +97,7 @@ export function TaskFormDialog({
 
   return (
     <Modal titleId={titleId} onRequestClose={handleCancel} closeDisabled={isSubmitting}>
-      <form className="dialog" onSubmit={handleSubmit} noValidate>
+      <form className="dialog dialog--prototype" onSubmit={handleSubmit} noValidate>
         <h2 id={titleId} className="dialog__title">
           {isEdit ? 'Editar tarea' : 'Nueva tarea'}
         </h2>

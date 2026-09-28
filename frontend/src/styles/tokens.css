@@ -84,11 +84,15 @@
 
   --color-positive: var(--forest-700);
   --color-positive-bg: var(--forest-100);
+  /* Progreso/completado del prototipo (`--vm`): check hecho, barras OK. */
+  --color-progress: var(--forest-600);
   --color-warning: var(--amber-800);
   --color-warning-accent: var(--amber-600);
   --color-warning-bg: var(--amber-100);
   --color-danger: var(--red-600);
   --color-danger-bg: var(--red-100);
+  /* Borde de la barra de alerta de stock (`.alert-bar` del prototipo). */
+  --color-danger-border: var(--red-200);
   --color-info: var(--blue-600);
   --color-info-bg: var(--blue-100);
   --color-earth: var(--earth-600);

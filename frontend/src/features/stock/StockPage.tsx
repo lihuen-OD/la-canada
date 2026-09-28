@@ -12,13 +12,13 @@ export function StockSubnav() {
   const { user } = useAuth();
   const tabs = [
     { to: '/stock', end: true, emoji: '🏠', label: 'Casa' },
-    { to: '/stock/garden', emoji: '🌿', label: 'Jardín' },
+    { to: '/stock/garden', emoji: '🌱', label: 'Jardín' },
     { to: '/stock/purchases', emoji: '🛒', label: 'Compras' },
     { to: '/stock/reports', emoji: '📊', label: 'Reportes' },
     ...(user?.role === 'ADMIN' ? [{ to: '/stock/catalog', emoji: '⚙️', label: 'Catálogo' }] : []),
   ];
   return (
-    <nav className="stock-subnav" aria-label="Secciones de Stock">
+    <nav className="stock-subnav pill-nav" aria-label="Secciones de Stock">
       {tabs.map((tab) => (
         <NavLink key={tab.to} to={tab.to} end={tab.end}>
           <span aria-hidden="true">{tab.emoji} </span>
@@ -30,7 +30,7 @@ export function StockSubnav() {
 }
 
 interface StockPageProps extends PropsWithChildren {
-  description: ReactNode;
+  description?: ReactNode;
   /** Revalidación en segundo plano de la vista (datos visibles + "Actualizando…"). */
   refreshing?: boolean;
   actions?: ReactNode;

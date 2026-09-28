@@ -12,7 +12,7 @@ export const FREQUENCY_ORDER: readonly TaskFrequency[] = [
 
 export const FREQUENCY_LABEL: Record<TaskFrequency, string> = {
   URGENT: 'Urgente',
-  ONE_TIME: 'Única',
+  ONE_TIME: 'Una vez',
   DAILY: 'Diaria',
   WEEKLY: 'Semanal',
   MONTHLY: 'Mensual',
@@ -20,23 +20,28 @@ export const FREQUENCY_LABEL: Record<TaskFrequency, string> = {
 
 export const FREQUENCY_FILTER_LABEL: Record<TaskFrequency, string> = {
   URGENT: 'Urgentes',
-  ONE_TIME: 'Únicas',
+  ONE_TIME: 'Una vez',
   DAILY: 'Diarias',
   WEEKLY: 'Semanales',
   MONTHLY: 'Mensuales',
 };
 
-/** Señal visual del prototipo: 🚨 para urgente. Siempre junto a su texto, nunca sola. */
-export const FREQUENCY_EMOJI: Partial<Record<TaskFrequency, string>> = {
-  URGENT: '🚨',
-};
+/** Orden de los chips de frecuencia del prototipo: Diarias, Semanales, Mensuales, Urgentes, Una vez. */
+export const FREQUENCY_FILTER_ORDER: readonly TaskFrequency[] = [
+  'DAILY',
+  'WEEKLY',
+  'MONTHLY',
+  'URGENT',
+  'ONE_TIME',
+];
 
+/** Colores de etiqueta del prototipo (`td`/`ts`/`tm`/`tu`); "Una vez" usaba el verde por defecto. */
 export const FREQUENCY_TONE: Record<TaskFrequency, BadgeTone> = {
   URGENT: 'danger',
-  ONE_TIME: 'earth',
+  ONE_TIME: 'positive',
   DAILY: 'positive',
-  WEEKLY: 'info',
-  MONTHLY: 'neutral',
+  WEEKLY: 'earth',
+  MONTHLY: 'warning',
 };
 
 /**

@@ -74,10 +74,10 @@ beforeEach(() => {
 });
 
 describe('TasksScreen — carga y estados', () => {
-  it('carga tareas y empleados reales del contrato, con ✅ Tareas como título', async () => {
+  it('carga tareas y empleados reales del contrato, con 📋 Tareas como título', async () => {
     await renderLoaded();
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Tareas' })).toHaveTextContent('✅');
+    expect(screen.getByRole('heading', { level: 1, name: 'Tareas' })).toHaveTextContent('📋');
     expect(api.fetchTasks).toHaveBeenCalledWith('active');
     expect(api.fetchTaskEmployees).toHaveBeenCalledTimes(1);
     expect(screen.getByText('Tarea sintética diaria')).toBeInTheDocument();
@@ -130,6 +130,26 @@ describe('TasksScreen — filtros', () => {
     expect(screen.getByRole('group', { name: 'Filtrar por frecuencia' })).toBeInTheDocument();
   });
 
+  it('pestañas de persona del prototipo: pendientes visibles solo si hay, siempre anunciados', async () => {
+    // Solo la diaria de A: B queda sin pendientes.
+    await renderLoaded([DAILY_A]);
+    const people = screen.getByRole('group', { name: 'Filtrar por persona' });
+    const tabA = within(people).getByRole('button', { name: 'Persona sintética A, 1 pendientes' });
+    expect(tabA).toHaveClass('person-tab');
+    expect(tabA.querySelector('.person-tab__count')).toHaveTextContent('1');
+    // Sin pendientes: la burbuja no se dibuja, pero el nombre accesible conserva el 0.
+    const tabB = within(people).getByRole('button', { name: 'Persona sintética B, 0 pendientes' });
+    expect(tabB.querySelector('.person-tab__count')).toBeNull();
+  });
+
+  it('con una persona elegida, el responsable deja de repetirse en cada fila (como el prototipo)', async () => {
+    await renderLoaded();
+    const list = () => screen.getByRole('list', { name: 'Tareas del período' });
+    expect(within(list()).getAllByText(/^Persona sintética/).length).toBeGreaterThan(0);
+    await userEvent.setup().click(screen.getByRole('button', { name: /persona sintética b/i }));
+    expect(within(list()).queryByText(/^Persona sintética/)).not.toBeInTheDocument();
+  });
+
   it('filtra por persona', async () => {
     await renderLoaded();
     await userEvent.setup().click(screen.getByRole('button', { name: /persona sintética b/i }));
@@ -143,13 +163,13 @@ describe('TasksScreen — filtros', () => {
     );
   });
 
-  it('filtra por frecuencia (🚨 Urgentes lleva texto, no solo emoji) y avisa si no hay resultados', async () => {
+  it('filtra por frecuencia (etiqueta textual, como en el prototipo) y avisa si no hay resultados', async () => {
     await renderLoaded();
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /urgentes/i }));
     const list = screen.getByRole('list', { name: 'Tareas del período' });
     expect(within(list).getAllByRole('listitem')).toHaveLength(1);
-    expect(within(list).getByText(/🚨 urgente/i)).toBeInTheDocument();
+    expect(within(list).getByText('Urgente', { selector: '.badge' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Mensuales' }));
     expect(screen.getByText('No hay tareas con estos filtros.')).toBeInTheDocument();
@@ -168,6 +188,7 @@ describe('TasksScreen — permisos visibles', () => {
   it('EMPLOYEE no ve crear, editar, desactivar ni la vista administrativa', async () => {
     await renderLoaded();
     expect(screen.queryByRole('button', { name: /nueva tarea/i })).not.toBeInTheDocument();
+    expect(document.querySelector('.app-fab')).toBeNull();
     expect(screen.queryByRole('button', { name: /^editar/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^desactivar/i })).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/incluir desactivadas/i)).not.toBeInTheDocument();
@@ -176,7 +197,9 @@ describe('TasksScreen — permisos visibles', () => {
   it('ADMIN ve crear, editar, desactivar y la vista administrativa', async () => {
     asAdmin();
     await renderLoaded();
-    expect(screen.getByRole('button', { name: /nueva tarea/i })).toBeInTheDocument();
+    // Acción de escritorio en el encabezado + FAB móvil del prototipo (CSS elige cuál se ve).
+    expect(screen.getByRole('button', { name: '+ Nueva tarea' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Nueva tarea' })).toHaveClass('app-fab');
     expect(
       screen.getByRole('button', { name: 'Editar: Tarea sintética diaria' }),
     ).toBeInTheDocument();
@@ -413,7 +436,7 @@ describe('TasksScreen — historial semanal', () => {
     expect(await within(history).findByText('Única sintética completada')).toBeInTheDocument();
     expect(within(history).getAllByText('Diaria sintética desactivada').length).toBeGreaterThan(0);
     expect(within(history).getAllByText('Desactivada').length).toBeGreaterThan(0);
-    expect(within(history).getByRole('status')).toHaveTextContent('3 de 7');
+    expect(within(history).getByRole('status')).toHaveTextContent('3/7 hechas');
     // La única completada no está en el listado operativo.
     expect(
       within(screen.getByRole('list', { name: 'Tareas del período' })).queryByText(

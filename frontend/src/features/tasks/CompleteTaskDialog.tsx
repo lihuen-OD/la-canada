@@ -60,7 +60,7 @@ export function CompleteTaskDialog({
       onRequestClose={handleCancel}
       closeDisabled={isSubmitting}
     >
-      <form className="dialog" onSubmit={handleSubmit}>
+      <form className="dialog dialog--prototype" onSubmit={handleSubmit}>
         <h2 id={titleId} className="dialog__title">
           ✅ Registrar tarea completada
         </h2>

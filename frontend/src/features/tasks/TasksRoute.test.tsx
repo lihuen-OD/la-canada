@@ -1,5 +1,5 @@
 import { MemoryRouter } from 'react-router-dom';
-import { render, screen } from '../../test/render';
+import { render, screen, within } from '../../test/render';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SystemRole } from '../../api/types';
 
@@ -44,7 +44,11 @@ describe('/tasks — ruta protegida', () => {
     (role) => {
       renderAt('authenticated', role);
       expect(screen.getByRole('heading', { level: 1, name: 'Tareas' })).toBeInTheDocument();
-      expect(screen.getByRole('link', { name: 'Tareas' })).toHaveAttribute('aria-current', 'page');
+      const mainNav = screen.getByRole('navigation', { name: 'Navegación principal' });
+      expect(within(mainNav).getByRole('link', { name: 'Tareas' })).toHaveAttribute(
+        'aria-current',
+        'page',
+      );
     },
   );
 });

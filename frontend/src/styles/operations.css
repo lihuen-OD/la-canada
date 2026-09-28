@@ -1,0 +1,247 @@
+/* Piezas compartidas por ✅/📋 Tareas, 🏆 Desempeño y 📦 Stock, con la
+   densidad del prototipo (encabezado de tarjeta `.ch`, KPI `.kpi`, FAB,
+   etiquetas `.tag`/`.bdg`, labels `.fl` de los modales). El alcance se
+   limita a esos módulos: el resto de la app no cambia. Solo tokens. */
+
+:is(.tasks, .performance, .stock) .card__header {
+  padding: var(--space-3) var(--space-4);
+}
+
+/* `.ch b` del prototipo: Karla 14px en negrita, con el emoji a 17px. */
+:is(.tasks, .performance, .stock) .card__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--space-2);
+  font-family: var(--font-body);
+  font-size: 0.875rem;
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+}
+
+:is(.tasks, .performance, .stock) .card__title > [aria-hidden='true']:first-child {
+  font-size: var(--font-size-lg);
+}
+
+/* Etiquetas de frecuencia y estado: píldora suave sin mayúsculas, como `.tag`/`.bdg`. */
+:is(.tasks, .performance, .stock, .dialog--prototype) .badge {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ── KPI (`.kpi`): tarjeta blanca, cifra Fraunces en el color del estado ── */
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.kpi__value {
+  font-family: var(--font-display);
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+  overflow-wrap: anywhere;
+}
+
+.kpi__label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+}
+
+.kpi__hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.kpi--positive .kpi__value {
+  color: var(--color-progress);
+}
+
+.kpi--warning .kpi__value {
+  color: var(--color-warning);
+}
+
+.kpi--danger .kpi__value {
+  color: var(--color-danger);
+}
+
+.kpi--info .kpi__value {
+  color: var(--color-info);
+}
+
+.kpi--earth .kpi__value {
+  color: var(--color-earth);
+}
+
+.kpi--neutral .kpi__value {
+  color: var(--color-text-muted);
+}
+
+@media (min-width: 768px) {
+  .kpi-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* ── FAB móvil (`.fab`) y acción equivalente de escritorio ──────────────── */
+
+.app-fab {
+  position: fixed;
+  right: 0.875rem;
+  bottom: calc(var(--bottom-nav-height) + 0.75rem + env(safe-area-inset-bottom));
+  z-index: 40;
+  width: 3rem;
+  height: 3rem;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 1.5rem;
+  line-height: 1;
+  box-shadow: var(--shadow-raised);
+}
+
+.desktop-add {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .app-fab {
+    display: none;
+  }
+
+  .desktop-add {
+    display: inline-flex;
+  }
+}
+
+/* ── Botón de icono (`.btn-ico`), con objetivo táctil de 44px ───────────── */
+
+/* Círculo visual de 32px (`.btn-ico`) centrado en un objetivo táctil de 44px:
+   el fondo se recorta al contenido y el borde transparente amplía el área. */
+.icon-button {
+  width: var(--tap-target);
+  padding: 0;
+  border: 6px solid transparent;
+  border-radius: 50%;
+  background-clip: padding-box;
+  font-size: 0.875rem;
+}
+
+.icon-button.button--secondary {
+  border-color: transparent;
+  box-shadow: inset 0 0 0 var(--border-width) var(--color-border);
+}
+
+.icon-button.button--danger:hover:not(:disabled),
+.icon-button.button--secondary:hover:not(:disabled) {
+  border-color: transparent;
+}
+
+/* ── Subnavegación en chips (`📋 Tareas | 🏆 Desempeño`, `🏠 Casa | …`) ── */
+
+.pill-nav {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  padding-bottom: var(--space-1);
+}
+
+.pill-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.pill-nav a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  min-height: var(--tap-target);
+  padding: var(--space-1) var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.pill-nav a:hover {
+  border-color: var(--color-border-control);
+}
+
+.pill-nav a.active {
+  background: var(--color-action);
+  border-color: var(--color-action);
+  color: var(--color-on-action);
+}
+
+/* Chips de filtro con el texto secundario del prototipo cuando no están elegidos. */
+:is(.tasks, .performance, .stock) .chip:not(.chip--selected) {
+  color: var(--color-text-muted);
+}
+
+/* ── Modales de Tareas y Stock: labels `.fl` en versalitas pequeñas ─────── */
+
+.dialog--prototype .field__label,
+.dialog--prototype .choice-list legend {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.dialog--prototype .dialog__title {
+  font-size: 1.1875rem;
+}
+
+.dialog--prototype .field__hint {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+/* Pie `.mfoot`: Cancelar y la acción principal en una fila, mismo ancho. */
+.dialog--prototype .dialog__actions {
+  flex-direction: row;
+}
+
+.dialog--prototype .dialog__actions > .button {
+  flex: 1 1 0;
+}
+
+@media (min-width: 600px) {
+  .dialog--prototype .dialog__actions > .button {
+    flex: 0 1 auto;
+  }
+}
+
+/* `.fr` del prototipo: dos campos por fila (cantidad + fecha, etc.). */
+.dialog--prototype .field-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  align-items: start;
+}

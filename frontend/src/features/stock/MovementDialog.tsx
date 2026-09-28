@@ -265,7 +265,7 @@ export function MovementDialog({
       onRequestClose={handleCancel}
       closeDisabled={submitting}
     >
-      <form className="dialog" onSubmit={handleSubmit} noValidate>
+      <form className="dialog dialog--prototype" onSubmit={handleSubmit} noValidate>
         <h2 id={titleId} className="dialog__title">
           {isAdjustment ? (
             <>
@@ -275,12 +275,16 @@ export function MovementDialog({
             'Registrar movimiento'
           )}
         </h2>
-        <p id={descriptionId} className="dialog__description">
-          Ítem: <strong>{item.name}</strong> · Stock actual: {item.currentQuantity} {item.unit}
-          {isAdjustment
-            ? '. Corrección de inventario exclusiva de administradores; queda en el historial con su motivo.'
-            : ''}
-        </p>
+        <div id={descriptionId} className="stock-dialog__item">
+          <span className="stock-dialog__item-label">Ítem</span>
+          <strong className="stock-dialog__item-name">{item.name}</strong>
+          <span className="stock-dialog__item-meta">
+            Stock actual: {item.currentQuantity} {item.unit}
+            {isAdjustment
+              ? '. Corrección de inventario exclusiva de administradores; queda en el historial con su motivo.'
+              : ''}
+          </span>
+        </div>
 
         {!isAdjustment && !confirmStep ? (
           <div className="stock-movetype" role="group" aria-label="Tipo de movimiento">
@@ -321,24 +325,45 @@ export function MovementDialog({
 
         {!confirmStep ? (
           <>
-            <div className="field">
-              <label className="field__label" htmlFor={`${titleId}-quantity`}>
-                Cantidad
-              </label>
-              <input
-                id={`${titleId}-quantity`}
-                className="field__input"
-                type="text"
-                inputMode="decimal"
-                autoComplete="off"
-                placeholder={`En ${item.unit}`}
-                value={quantity}
-                disabled={fieldsDisabled}
-                onChange={(event) => {
-                  const next = event.target.value;
-                  changeField(() => setQuantity(next));
-                }}
-              />
+            <div className="field-row">
+              <div className="field">
+                <label className="field__label" htmlFor={`${titleId}-quantity`}>
+                  Cantidad
+                </label>
+                <input
+                  id={`${titleId}-quantity`}
+                  className="field__input"
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  placeholder={`En ${item.unit}`}
+                  value={quantity}
+                  disabled={fieldsDisabled}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    changeField(() => setQuantity(next));
+                  }}
+                />
+              </div>
+
+              <div className="field">
+                <label className="field__label" htmlFor={`${titleId}-date`}>
+                  Fecha
+                </label>
+                <input
+                  id={`${titleId}-date`}
+                  className="field__input"
+                  type="date"
+                  max={today}
+                  value={effectiveDate}
+                  disabled={fieldsDisabled}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    changeField(() => setEffectiveDate(next));
+                  }}
+                />
+                <p className="field__hint">Hoy o una fecha pasada; nunca futura.</p>
+              </div>
             </div>
 
             {isAdjustment ? (
@@ -372,25 +397,6 @@ export function MovementDialog({
                 </label>
               </fieldset>
             ) : null}
-
-            <div className="field">
-              <label className="field__label" htmlFor={`${titleId}-date`}>
-                Fecha
-              </label>
-              <input
-                id={`${titleId}-date`}
-                className="field__input"
-                type="date"
-                max={today}
-                value={effectiveDate}
-                disabled={fieldsDisabled}
-                onChange={(event) => {
-                  const next = event.target.value;
-                  changeField(() => setEffectiveDate(next));
-                }}
-              />
-              <p className="field__hint">Hoy o una fecha pasada; nunca futura.</p>
-            </div>
 
             <div className="field">
               {isAdmin ? (

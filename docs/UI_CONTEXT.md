@@ -240,12 +240,12 @@ La implementación React actual debe reconciliarse visualmente con esta referenc
 
 ### Tareas
 
-Desempeño se integra mediante navegación secundaria `✅ Tareas | 📊 Desempeño`, sin destino principal nuevo. Reutiliza tarjetas blancas, cifras Fraunces, avatares, chips desplazables y barras; apila a 360 px y usa grilla desde 768 px.
+Desempeño se integra mediante navegación secundaria en chips `📋 Tareas | 🏆 Desempeño` (emojis exactos del prototipo; el destino principal también usa 📋), sin destino principal nuevo. Reutiliza tarjetas blancas, cifras Fraunces, avatares, chips desplazables y barras; apila a 360 px y usa grilla desde 768 px.
 
 - Filtro horizontal por persona con avatar y cantidad pendiente.
 - Filtros por frecuencia mediante chips.
 - Lista de tareas dentro de tarjetas.
-- Check visual redondeado.
+- Casilla cuadrada del prototipo (`.tck`, 22 px visibles dentro de 44 px táctiles); ✏️/✕ del ADMIN como botones de icono a la derecha.
 - Frecuencia y responsable como metadatos secundarios.
 - Historial semanal separado de la operación actual.
 - Acciones administrativas claras y no disponibles para empleados sin permiso.
@@ -254,7 +254,8 @@ Desempeño se integra mediante navegación secundaria `✅ Tareas | 📊 Desempe
 
 - Separación entre Casa y Jardín.
 - Estado de cantidad mediante barra de progreso, valor numérico y etiqueta textual.
-- Estados: normal, bajo y crítico.
+- Estados con las etiquetas del prototipo: OK, Bajo y Crítico (siempre texto, nunca solo color).
+- Fila compacta (`.si`): nombre, barra + «actual / mínimo unidad», etiqueta de nivel y acciones de icono (📤 movimiento, ⚙️ ajuste ADMIN, 📋 historial); barra ⚠️ «N ítems bajo mínimo» cuando el filtro está completo.
 - Agrupación por categoría.
 - Movimientos y saldos deben provenir del backend transaccional.
 

@@ -1,39 +1,13 @@
-/* 📦 Stock (features/stock/*) — docs/UI_CONTEXT.md, "Stock": separación
-   Casa/Jardín, barra de progreso + valor numérico + etiqueta textual,
-   estados normal/bajo/crítico, agrupación por categoría. Solo tokens. */
+/* 📦 Stock (features/stock/*) — docs/UI_CONTEXT.md, "Stock", con la
+   presentación del prototipo: chips 🏠 Casa | 🌱 Jardín | 🛒 Compras |
+   📊 Reportes (+ ⚙️ Catálogo ADMIN), barra de alerta, tarjeta 🧹/🌿 con
+   rótulos de categoría y filas compactas (`.si`: barra, actual/mínimo y
+   OK/Bajo/Crítico), Compras (`.cp-i`) y Reportes con KPI. Solo tokens. */
 
 .stock {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-}
-
-.stock__fab {
-  position: fixed;
-  right: 0.875rem;
-  bottom: calc(var(--bottom-nav-height) + 0.75rem + env(safe-area-inset-bottom));
-  z-index: 40;
-  width: 3rem;
-  height: 3rem;
-  padding: 0;
-  border-radius: 50%;
-  font-size: 1.5rem;
-  line-height: 1;
-  box-shadow: var(--shadow-raised);
-}
-
-.stock__desktop-add {
-  display: none;
-}
-
-@media (min-width: 768px) {
-  .stock__fab {
-    display: none;
-  }
-
-  .stock__desktop-add {
-    display: inline-flex;
-  }
 }
 
 .stock .page-header {
@@ -42,48 +16,6 @@
 
 .stock__notice:empty {
   display: none;
-}
-
-/* ── Navegación secundaria (🏠 Casa | 🌿 Jardín | 🛒 Compras | 📊 Reportes | ⚙️ Catálogo) ── */
-
-/* Píldoras desplazables en móvil (sin scrollbar invasiva), en fila desde tablet. */
-.stock-subnav {
-  display: flex;
-  gap: var(--space-2);
-  overflow-x: auto;
-  scrollbar-width: none;
-  padding-bottom: var(--space-1);
-}
-
-.stock-subnav::-webkit-scrollbar {
-  display: none;
-}
-
-.stock-subnav a {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  flex-shrink: 0;
-  min-height: var(--tap-target);
-  padding: var(--space-1) var(--space-4);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-pill);
-  background: var(--color-surface);
-  color: var(--color-text);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.stock-subnav a:hover {
-  background: var(--color-surface-hover);
-}
-
-.stock-subnav a.active {
-  background: var(--color-action);
-  border-color: var(--color-action);
-  color: var(--color-on-action);
 }
 
 /* ── Filtros ────────────────────────────────────────────────────────────── */
@@ -97,130 +29,142 @@
 
 .stock-filters__row {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: var(--space-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-3);
 }
 
-@media (min-width: 560px) {
+/* La búsqueda ocupa la fila completa en móvil; el resto va de a dos. */
+.stock-filters__row > .stock-filters__field:first-child:has(input[type='search']) {
+  grid-column: 1 / -1;
+}
+
+.stock-filters .field__label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.stock-filters .field__input {
+  font-size: var(--font-size-sm);
+}
+
+@media (min-width: 768px) {
   .stock-filters__row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  }
+
+  .stock-filters__row > .stock-filters__field:first-child:has(input[type='search']) {
+    grid-column: auto;
   }
 }
 
-@media (min-width: 860px) {
-  .stock-filters__row {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
+/* ── Barra de alerta (`.alert-bar`) ─────────────────────────────────────── */
 
-.stock__area-heading {
+.stock-alert {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: flex-start;
   gap: var(--space-2);
-}
-
-.stock__area-label {
   margin: 0;
-  font-family: var(--font-display);
-  font-size: var(--font-size-lg);
+  padding: 0.625rem 0.8125rem;
+  border: var(--border-width) solid var(--color-danger-border);
+  border-radius: var(--radius-control);
+  background: var(--color-danger-bg);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
 }
 
 .stock__count {
   margin: 0;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text-muted);
+  white-space: nowrap;
 }
 
-/* ── Grupos por categoría ───────────────────────────────────────────────── */
+/* ── Grupos por categoría (`.cat-lbl`) ──────────────────────────────────── */
 
 .stock__groups {
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  margin-top: calc(var(--space-2) * -1);
 }
 
 .stock-group__title {
-  margin: 0 0 var(--space-2);
-  font-family: var(--font-display);
-  font-size: var(--font-size-lg);
+  margin: 0;
+  padding: 0.5625rem 0 0.1875rem;
+  font-family: var(--font-body);
+  font-size: 0.625rem;
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.stock-group + .stock-group .stock-group__title {
+  margin-top: var(--space-1);
+  border-top: var(--border-width) solid var(--color-surface-muted);
 }
 
 .stock-group__list {
-  margin: calc(var(--space-3) * -1) 0;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
 
-/* ── Tarjeta de producto ────────────────────────────────────────────────── */
+/* ── Fila de producto (`.si`) ───────────────────────────────────────────── */
 
 .stock-item {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: var(--space-2);
-  padding: var(--space-3);
+  padding: var(--space-1) 0;
 }
 
 .stock-item + .stock-item {
-  border-top: var(--border-width) solid var(--color-border);
+  border-top: var(--border-width) solid var(--color-surface-muted);
 }
 
-.stock-item__main {
+.stock-item__info {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-3);
-  min-width: 0;
-}
-
-.stock-item__text {
-  display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 0.1875rem;
   min-width: 0;
 }
 
 .stock-item__name {
-  margin: 0;
-  font-weight: var(--font-weight-semibold);
-  overflow-wrap: anywhere;
-}
-
-.stock-item__meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1) var(--space-2);
   margin: 0;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  font-weight: var(--font-weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.stock-item__level {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) 0.4375rem;
 }
 
 .stock-item__quantity {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-1);
-  margin: 0;
-  text-align: right;
-  flex-shrink: 0;
-}
-
-.stock-item__value {
-  font-family: var(--font-display);
-  font-size: var(--font-size-xl);
-  font-weight: var(--font-weight-semibold);
-}
-
-.stock-item__unit {
-  font-size: var(--font-size-sm);
+  font-size: 0.75rem;
   color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* La barra es complementaria: con mínimo 0 no se renderiza (ver stockStatus). */
 .stock-item__bar {
-  width: 100%;
-  height: 8px;
+  flex: 1 1 4rem;
+  min-width: 3rem;
+  height: 5px;
   border: 0;
   border-radius: var(--radius-pill);
   background: var(--color-surface-muted);
@@ -241,11 +185,11 @@
 }
 
 .stock-item__bar--ok::-webkit-progress-value {
-  background: var(--color-positive);
+  background: var(--color-progress);
 }
 
 .stock-item__bar--ok::-moz-progress-bar {
-  background: var(--color-positive);
+  background: var(--color-progress);
 }
 
 .stock-item__bar--low::-webkit-progress-value {
@@ -266,8 +210,9 @@
 
 .stock-item__actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-1);
 }
 
 .stock__more {
@@ -351,6 +296,77 @@
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
   overflow-wrap: anywhere;
+}
+
+/* ── Modal de movimiento: resumen del ítem y Consumo/Ingreso ─────────────── */
+
+/* Recuadro crema del prototipo con el ítem y su saldo actual. */
+.stock-dialog__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.625rem 0.8125rem;
+  border-radius: var(--radius-control);
+  background: var(--color-surface-muted);
+}
+
+.stock-dialog__item-label,
+.stock-dialog__item-meta {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.stock-dialog__item-name {
+  font-size: 0.875rem;
+  font-weight: var(--font-weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+/* 📤 Consumo / Salida (rojo al elegirlo) | 📥 Ingreso / Entrada (verde). */
+.stock-movetype {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.stock-movetype__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  justify-content: center;
+  min-height: var(--tap-target);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width-control) solid transparent;
+  border-radius: var(--radius-control);
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  text-align: center;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.stock-movetype__btn:hover:not(:disabled) {
+  border-color: var(--color-border-control);
+}
+
+.stock-movetype__btn.is-consumption {
+  background: var(--color-danger);
+  color: var(--color-on-action);
+}
+
+.stock-movetype__btn.is-income {
+  background: var(--color-action);
+  color: var(--color-on-action);
+}
+
+.stock-movetype__btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 /* ── Confirmación de ajuste ─────────────────────────────────────────────── */
@@ -467,65 +483,85 @@
   color: var(--color-text-muted);
 }
 
-/* ── 🛒 Compras ──────────────────────────────────────────────────────────── */
+/* ── 🛒 Compras (`.cp-i`) ───────────────────────────────────────────────── */
+
+.stock-purchases__toolbar > .button {
+  flex-shrink: 0;
+}
+
+.stock-purchases__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
 
 .stock-purchases__explain {
   margin: 0;
-  padding: var(--space-3);
-  border-radius: var(--radius-control);
-  background: var(--color-info-bg);
-  color: var(--color-info);
+  flex: 1 1 auto;
   font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
 }
 
 .stock-purchases__list {
-  margin: calc(var(--space-3) * -1) 0;
+  margin: calc(var(--space-2) * -1) 0;
   padding: 0;
   list-style: none;
 }
 
 .stock-purchase {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: var(--space-2);
-  padding: var(--space-3);
+  padding: var(--space-1) 0;
 }
 
 .stock-purchase + .stock-purchase {
-  border-top: var(--border-width) solid var(--color-border);
+  border-top: var(--border-width) solid var(--color-surface-muted);
 }
 
-.stock-purchase__main {
+.stock-purchase__info {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: 0.1875rem;
   min-width: 0;
+  padding-block: var(--space-1);
 }
 
+.stock-purchase__meta,
 .stock-purchase__numbers {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-2);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
   margin: 0;
-}
-
-.stock-purchase__numbers dt {
-  font-size: var(--font-size-xs);
-  letter-spacing: var(--letter-spacing-label);
-  text-transform: uppercase;
+  font-size: 0.75rem;
   color: var(--color-text-muted);
-}
-
-.stock-purchase__numbers dd {
-  margin: var(--space-1) 0 0;
-  font-weight: var(--font-weight-semibold);
   font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
 }
 
-.stock-purchase__shortfall dd {
-  font-family: var(--font-display);
+.stock-purchase__shortfall {
+  font-weight: var(--font-weight-bold);
   color: var(--color-action);
+}
+
+/* Etiqueta de área del prototipo: Casa en verde suave, Jardín en tierra. */
+.area-tag {
+  padding: 0.125rem 0.4375rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.625rem;
+  font-weight: var(--font-weight-bold);
+}
+
+.area-tag--house {
+  background: var(--color-positive-bg);
+  color: var(--color-positive);
+}
+
+.area-tag--garden {
+  background: var(--color-earth-bg);
+  color: var(--color-earth);
 }
 
 /* ── 📊 Reportes ─────────────────────────────────────────────────────────── */
@@ -554,23 +590,16 @@
   grid-column: 1 / -1;
 }
 
-.stock-kpi .card__body {
+/* Acciones del filtro (Más filtros / 📥 Exportar CSV). */
+.stock-reports__actions {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
-.stock-kpi__label {
-  margin: 0;
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
+.kpi .stock-reports__units {
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
-}
-
-.stock-kpi__value {
-  font-family: var(--font-display);
-  font-size: var(--font-size-2xl);
-  color: var(--color-action);
 }
 
 .stock-reports__units {
@@ -678,20 +707,6 @@
 
 /* ── Escritorio ─────────────────────────────────────────────────────────── */
 
-@media (min-width: 560px) {
-  .stock-purchase__main {
-    flex-direction: row;
-    align-items: flex-start;
-    justify-content: space-between;
-  }
-
-  .stock-purchase__numbers {
-    flex-shrink: 0;
-    min-width: 18rem;
-    text-align: right;
-  }
-}
-
 @media (min-width: 768px) {
   .stock-reports__kpis {
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -702,22 +717,8 @@
   }
 }
 
-@media (min-width: 768px) {
-  .stock-item__actions {
-    flex-wrap: nowrap;
-  }
-}
-.stock-purchases__toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin: var(--space-3) 0;
-}
-
 @media (max-width: 520px) {
   .stock-purchases__toolbar {
-    align-items: stretch;
-    flex-direction: column;
+    align-items: flex-start;
   }
 }

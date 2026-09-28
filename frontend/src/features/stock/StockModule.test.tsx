@@ -253,13 +253,13 @@ describe('Stock — tarjetas y reglas de estado', () => {
     };
     await renderInventory([OK_ITEM, zeroMin]);
 
-    expect(screen.getAllByText('Normal').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('OK').length).toBeGreaterThan(0);
     const bars = document.querySelectorAll('progress.stock-item__bar');
     // Solo el item con mínimo > 0 tiene barra.
     expect(bars).toHaveLength(1);
   });
 
-  it('mínimo 0: sin barra y estado Normal (nunca 100% falso)', async () => {
+  it('mínimo 0: sin barra y estado OK (nunca 100% falso)', async () => {
     api.fetchStockItems.mockResolvedValue(
       itemsList([
         {
@@ -274,7 +274,7 @@ describe('Stock — tarjetas y reglas de estado', () => {
     renderStock();
     await screen.findByText('Producto sintético sin mínimo');
     expect(document.querySelectorAll('progress.stock-item__bar')).toHaveLength(0);
-    expect(screen.getByText('Normal', { selector: '.badge' })).toBeInTheDocument();
+    expect(screen.getByText('OK', { selector: '.badge' })).toBeInTheDocument();
   });
 });
 
@@ -301,6 +301,31 @@ describe('Stock — paginación', () => {
     expect(await screen.findByText(LOW_ITEM.name)).toBeInTheDocument();
     expect(screen.getAllByText(OK_ITEM.name)).toHaveLength(1);
     expect(api.fetchStockItems).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }));
+  });
+
+  it('barra ⚠️ bajo mínimo: solo con todas las páginas cargadas y con el nivel del backend', async () => {
+    api.fetchStockItems.mockResolvedValueOnce({
+      ...itemsList([OK_ITEM, LOW_ITEM]),
+      page: 1,
+      totalPages: 2,
+      total: 3,
+    });
+    api.fetchStockCategories.mockResolvedValue(categoriesResponse());
+    renderStock();
+    await screen.findByText(LOW_ITEM.name);
+    // Con una página pendiente el conteo sería parcial: no se muestra.
+    expect(screen.queryByText(/bajo mínimo/)).not.toBeInTheDocument();
+
+    api.fetchStockItems.mockResolvedValueOnce({
+      ...itemsList([CRIT_ITEM]),
+      page: 2,
+      totalPages: 2,
+      total: 3,
+    });
+    await userEvent.setup().click(screen.getByRole('button', { name: /cargar más/i }));
+    const alert = (await screen.findByText('2 ítems bajo mínimo')).closest('p') as HTMLElement;
+    expect(alert).toHaveTextContent(`${LOW_ITEM.name}, ${CRIT_ITEM.name}`);
+    expect(alert).not.toHaveTextContent(OK_ITEM.name);
   });
 
   it('un Cargar más viejo no mezcla resultados después de cambiar de filtro', async () => {
@@ -752,12 +777,12 @@ describe('Stock — catálogo ADMIN', () => {
 });
 
 describe('Stock — navegación SPA entre subvistas', () => {
-  it('EMPLOYEE ve 🏠 Casa, 🌿 Jardín, 🛒 Compras y 📊 Reportes (sin Catálogo), con activo accesible', async () => {
+  it('EMPLOYEE ve 🏠 Casa, 🌱 Jardín, 🛒 Compras y 📊 Reportes (sin Catálogo), con activo accesible', async () => {
     await renderInventory();
     const links = within(stockNav()).getAllByRole('link');
     expect(links.map((link) => link.textContent)).toEqual([
       '🏠 Casa',
-      '🌿 Jardín',
+      '🌱 Jardín',
       '🛒 Compras',
       '📊 Reportes',
     ]);
@@ -818,7 +843,7 @@ describe('Stock — stockLevel y filtro de nivel server-side', () => {
     });
     await renderInventory([OK_ITEM, trusted]);
     const row = screen.getByText(trusted.name).closest('li') as HTMLElement;
-    expect(within(row).getByText('Stock bajo')).toBeInTheDocument();
+    expect(within(row).getByText('Bajo')).toBeInTheDocument();
     expect(row.querySelector('progress')).toHaveClass('stock-item__bar--low');
   });
 
@@ -852,7 +877,7 @@ describe('Stock — 🛒 Compras (vista derivada)', () => {
     expect(itemCalls({ stockLevel: 'low', status: 'active', sort: 'name' })).toHaveLength(1);
     const sections = screen.getAllByRole('region');
     expect(sections[0]).toHaveTextContent('Críticos (1)');
-    expect(sections[1]).toHaveTextContent('Stock bajo (1)');
+    expect(sections[1]).toHaveTextContent('Bajos (1)');
     expect(screen.getByText(/no es una orden de compra/i)).toBeInTheDocument();
   });
 
@@ -860,13 +885,13 @@ describe('Stock — 🛒 Compras (vista derivada)', () => {
     mockPurchases();
     renderStock('/stock/purchases');
     const row = (await screen.findByText(LOW_ITEM.name)).closest('li') as HTMLElement;
-    expect(within(row).getByText('Stock bajo')).toBeInTheDocument();
+    expect(within(row).getByText('Bajo', { selector: '.badge' })).toBeInTheDocument();
     expect(within(row).getByText('Prioridad media')).toBeInTheDocument();
-    expect(within(row).getByText('3 kg')).toBeInTheDocument();
-    expect(within(row).getByText('10 kg')).toBeInTheDocument();
+    // "3 / 10 kg" del prototipo, con actual y mínimo nombrados para lectores de pantalla.
+    expect(row).toHaveTextContent('Actual: 3 / , mínimo: 10 kg');
     // máximo(10 − 3, 0) = 7
-    expect(within(row).getByText('Para llegar al mínimo').nextSibling).toHaveTextContent('7 kg');
-    expect(row).toHaveTextContent('🏠 Casa');
+    expect(within(row).getByText(/^Falta:/)).toHaveTextContent('Falta: 7 kg');
+    expect(within(row).getByText('Casa', { selector: '.area-tag' })).toBeInTheDocument();
     const critical = screen.getByText(CRIT_ITEM.name).closest('li') as HTMLElement;
     expect(within(critical).getByText('Prioridad alta')).toBeInTheDocument();
   });

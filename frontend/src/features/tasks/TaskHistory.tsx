@@ -9,13 +9,7 @@ import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
 import { isSessionExpired } from './dialogErrors';
-import {
-  FREQUENCY_EMOJI,
-  FREQUENCY_LABEL,
-  FREQUENCY_TONE,
-  formatCompletedAt,
-  formatLocalDay,
-} from './taskLabels';
+import { FREQUENCY_LABEL, FREQUENCY_TONE, formatCompletedAt, formatLocalDay } from './taskLabels';
 
 const WEEKS_TO_OFFER = 8; // mismas "últimas 8 semanas" que el prototipo
 
@@ -98,7 +92,6 @@ export function TaskHistory({
     const timeZone = data.week.timeZone;
     // Filtro por persona y conteo realizadas/esperadas: los resuelve el backend.
     const { recurring } = data;
-    const { expected, completed } = data.summary;
     const lines: CompletionLine[] = [
       ...recurring.flatMap((row) =>
         row.slots.flatMap((slot) =>
@@ -116,13 +109,6 @@ export function TaskHistory({
         />
       ) : (
         <div className="history">
-          {expected > 0 ? (
-            <p className="history__summary" role="status">
-              <strong>{completed}</strong> de <strong>{expected}</strong> diarias y semanales
-              realizadas
-            </p>
-          ) : null}
-
           {recurring.length > 0 ? (
             <ul className="history-grid" role="list" aria-label="Diarias y semanales de la semana">
               {recurring.map((row) => (
@@ -179,7 +165,6 @@ export function TaskHistory({
               </h3>
               <ul className="history-lines" role="list">
                 {lines.map(({ task, execution }) => {
-                  const emoji = FREQUENCY_EMOJI[task.frequency];
                   const differs =
                     execution.completedByEmployee !== null &&
                     execution.completedByEmployee.id !== execution.assignedEmployee.id;
@@ -189,9 +174,7 @@ export function TaskHistory({
                         <span className="history-line__description">{task.description}</span>
                         <span className="history-line__meta">
                           <Badge tone={FREQUENCY_TONE[task.frequency]}>
-                            {emoji
-                              ? `${emoji} ${FREQUENCY_LABEL[task.frequency]}`
-                              : FREQUENCY_LABEL[task.frequency]}
+                            {FREQUENCY_LABEL[task.frequency]}
                           </Badge>
                           {!task.active ? <Badge tone="neutral">Desactivada</Badge> : null}
                           <span>
@@ -220,8 +203,11 @@ export function TaskHistory({
       );
   }
 
+  const summary = state.status === 'loaded' ? state.data.summary : null;
+
   return (
     <Card
+      className="history-card"
       title={
         <>
           <span aria-hidden="true">📅 </span>Historial semanal
@@ -229,27 +215,32 @@ export function TaskHistory({
         </>
       }
       actions={
-        <div className="field history__week">
-          <label className="visually-hidden" htmlFor={selectId}>
-            Semana
-          </label>
-          <select
-            id={selectId}
-            className="field__input"
-            value={week}
-            onChange={(event) => setWeek(event.target.value)}
-          >
-            {weeks.map((monday, index) => (
-              <option key={monday} value={monday}>
-                {index === 0
-                  ? 'Esta semana'
-                  : `Semana del ${formatLocalDay(monday, { weekday: undefined })}`}
-              </option>
-            ))}
-          </select>
-        </div>
+        summary && summary.expected > 0 ? (
+          <span className="history__count" role="status">
+            {summary.completed}/{summary.expected} hechas
+          </span>
+        ) : null
       }
     >
+      <div className="field history__week">
+        <label className="visually-hidden" htmlFor={selectId}>
+          Semana
+        </label>
+        <select
+          id={selectId}
+          className="field__input"
+          value={week}
+          onChange={(event) => setWeek(event.target.value)}
+        >
+          {weeks.map((monday, index) => (
+            <option key={monday} value={monday}>
+              {index === 0
+                ? 'Esta semana'
+                : `Semana del ${formatLocalDay(monday, { weekday: undefined })}`}
+            </option>
+          ))}
+        </select>
+      </div>
       <div
         className={query.isPlaceholderData ? 'is-stale' : undefined}
         aria-busy={query.isFetching || undefined}

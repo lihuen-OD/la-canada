@@ -24,7 +24,12 @@ import { StockNotice, type Notice } from './StockNotice';
 import { StockPage } from './StockPage';
 import { errorMessageOf, isSessionExpired } from './stockErrors';
 import { useDebouncedSearch, useSessionExpiry } from './stockHooks';
-import { AREA_EMOJI, AREA_LABEL, MOVEMENT_SUCCESS_TEXT, groupItemsByCategory } from './stockLabels';
+import {
+  AREA_CARD_EMOJI,
+  AREA_LABEL,
+  MOVEMENT_SUCCESS_TEXT,
+  groupItemsByCategory,
+} from './stockLabels';
 import { useInventoryFilters } from './stockViewState';
 import { useStockCache } from './useStockCache';
 
@@ -37,7 +42,7 @@ type DialogState =
 const PAGE_SIZE = 50;
 
 /**
- * 🏠 Casa / 🌿 Jardín — el MISMO inventario parametrizado por área. TODA la
+ * 🏠 Casa / 🌱 Jardín — el MISMO inventario parametrizado por área. TODA la
  * consulta es server-side: `area`, `q`, `categoryId`, `stockLevel` y
  * `status` viajan como query de `GET /stock/items`; nada se filtra sobre una
  * página ya cargada. Paginación con «Cargar más» (acumula páginas). El
@@ -96,6 +101,16 @@ export function InventoryView({ area }: { area: StockItemArea }) {
   );
   const groups = useMemo(() => groupItemsByCategory(items), [items]);
   const last = pages?.[pages.length - 1];
+  // Barra de alerta del prototipo (`⚠️ N ítems bajo mínimo`): solo con TODAS
+  // las páginas del filtro cargadas, para que el conteo nunca sea parcial. El
+  // nivel es el `stockLevel` del backend; no se agregan requests.
+  const belowMinimum = useMemo(
+    () =>
+      last && last.page >= last.totalPages
+        ? items.filter((item) => item.active && item.stockLevel !== 'ok')
+        : [],
+    [items, last],
+  );
   const loaded = Boolean(pages && categoriesQuery.data);
   const loadingMore = itemsQuery.isFetchingNextPage;
   const refreshing =
@@ -152,19 +167,35 @@ export function InventoryView({ area }: { area: StockItemArea }) {
           onSearchInputChange={setSearchInput}
         />
 
-        <div className="stock__area-heading">
-          <h2 className="stock__area-label">
-            <span aria-hidden="true">{AREA_EMOJI[area]} </span>
-            {AREA_LABEL[area]}
-          </h2>
-          <p className="stock__count" role="status">
-            {last?.total ?? 0} {last?.total === 1 ? 'producto' : 'productos'}
+        {belowMinimum.length > 0 ? (
+          <p className="stock-alert">
+            <span aria-hidden="true">⚠️</span>
+            <span>
+              <strong>
+                {belowMinimum.length} {belowMinimum.length === 1 ? 'ítem' : 'ítems'} bajo mínimo
+              </strong>
+              {`: ${belowMinimum.map((item) => item.name).join(', ')}`}
+            </span>
           </p>
-        </div>
+        ) : null}
 
-        <Card className={itemsQuery.isPlaceholderData ? 'is-stale' : undefined}>
+        <Card
+          className={itemsQuery.isPlaceholderData ? 'is-stale' : undefined}
+          title={
+            <>
+              <span aria-hidden="true">{AREA_CARD_EMOJI[area]}</span>
+              {AREA_LABEL[area]}
+            </>
+          }
+          actions={
+            <p className="stock__count" role="status">
+              {last?.total ?? 0} {last?.total === 1 ? 'producto' : 'productos'}
+            </p>
+          }
+        >
           {items.length === 0 ? (
             <EmptyState
+              icon={<span aria-hidden="true">📦</span>}
               title="No hay productos con estos filtros."
               description="Probá con otra categoría, nivel o búsqueda."
             />
@@ -210,11 +241,10 @@ export function InventoryView({ area }: { area: StockItemArea }) {
 
   return (
     <StockPage
-      description={`Inventario de ${AREA_LABEL[area]}: cantidades, mínimos y movimientos.`}
       refreshing={refreshing}
       actions={
         isAdmin ? (
-          <Button className="stock__desktop-add" onClick={() => setDialog({ type: 'item-form' })}>
+          <Button className="desktop-add" onClick={() => setDialog({ type: 'item-form' })}>
             + Nuevo producto
           </Button>
         ) : null
@@ -233,7 +263,7 @@ export function InventoryView({ area }: { area: StockItemArea }) {
 
       {isAdmin ? (
         <Button
-          className="stock__fab"
+          className="app-fab"
           aria-label="Nuevo producto"
           title="Nuevo producto"
           onClick={() => setDialog({ type: 'item-form' })}

@@ -221,7 +221,7 @@
   }
 }
 
-/* Emoji de navegación (✅ Tareas) — mismo tamaño óptico que los iconos SVG. */
+/* Emoji de navegación (📋 Tareas) — mismo tamaño óptico que los iconos SVG. */
 .nav-emoji {
   display: inline-flex;
   align-items: center;

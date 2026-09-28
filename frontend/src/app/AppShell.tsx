@@ -13,7 +13,7 @@ import type { NavIconName } from '../routes/navigation';
 function TasksNavEmoji() {
   return (
     <span className="nav-emoji" aria-hidden="true">
-      ✅
+      📋
     </span>
   );
 }

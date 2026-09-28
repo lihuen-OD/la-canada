@@ -102,13 +102,13 @@ describe('AppShell', () => {
     expect(within(link).getByText('🐾')).toHaveAttribute('aria-hidden', 'true');
   });
 
-  it('✅ Tareas: el emoji del prototipo es decorativo y el nombre accesible es el texto', () => {
+  it('📋 Tareas: el emoji del prototipo es decorativo y el nombre accesible es el texto', () => {
     mockUser('EMPLOYEE', { id: 'e1', displayName: 'Coke', colorHex: '#4a7c59' });
     renderShell();
 
     const link = within(getNav()).getByRole('link', { name: 'Tareas' });
-    expect(link).toHaveTextContent('✅');
-    expect(within(link).getByText('✅')).toHaveAttribute('aria-hidden', 'true');
+    expect(link).toHaveTextContent('📋');
+    expect(within(link).getByText('📋')).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('EMPLOYEE: nunca ve la navegación administrativa', () => {

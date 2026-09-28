@@ -19,6 +19,12 @@ export const AREA_LABEL: Record<StockItemArea | StockCategoryArea, string> = {
 /** Emojis del prototipo — siempre decorativos (`aria-hidden`), el texto accesible es la etiqueta. */
 export const AREA_EMOJI: Record<StockItemArea, string> = {
   HOUSE: '🏠',
+  GARDEN: '🌱',
+};
+
+/** Encabezado de la tarjeta de inventario del prototipo: 🧹 Casa / 🌿 Jardín. */
+export const AREA_CARD_EMOJI: Record<StockItemArea, string> = {
+  HOUSE: '🧹',
   GARDEN: '🌿',
 };
 
@@ -46,10 +52,10 @@ export const OPERATIONAL_MOVEMENT_ORDER: readonly OperationalMovementType[] = [
   'ADJUSTMENT_DECREASE',
 ];
 
-/** Etiquetas del `stockLevel` que devuelve el backend (nunca calculado acá). */
+/** Etiquetas del prototipo (`OK`/`Bajo`/`Crítico`) para el `stockLevel` que devuelve el backend. */
 export const LEVEL_LABEL: Record<StockLevel, string> = {
-  ok: 'Normal',
-  low: 'Stock bajo',
+  ok: 'OK',
+  low: 'Bajo',
   critical: 'Crítico',
 };
 

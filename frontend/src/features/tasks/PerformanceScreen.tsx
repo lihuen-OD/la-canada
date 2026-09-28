@@ -13,6 +13,22 @@ import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateM
 import { TasksSubnav } from './TasksSubnav';
 
 type Preset = 7 | 30 | 90;
+/** Etiquetas de período del prototipo ("7 días", …); los rangos son los aprobados. */
+const PRESET_LABEL: Record<Preset, string> = { 7: '7 días', 30: '30 días', 90: '3 meses' };
+type Tone = 'positive' | 'earth' | 'danger' | 'info' | 'neutral';
+/** Color del prototipo según cumplimiento: ≥80% verde, ≥50% tierra, resto rojo. Siempre con el número. */
+const scoreTone = (value: number | null): Tone =>
+  value === null ? 'neutral' : value >= 80 ? 'positive' : value >= 50 ? 'earth' : 'danger';
+
+/** KPI del prototipo (`.kpi`): tarjeta blanca, cifra Fraunces con el color del estado. */
+function Kpi({ tone, value, label }: { tone: Tone; value: string | number; label: string }) {
+  return (
+    <div className={`kpi kpi--${tone}`}>
+      <strong className="kpi__value">{value}</strong>
+      <span className="kpi__label">{label}</span>
+    </div>
+  );
+}
 const localDate = (date: Date) => {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -32,7 +48,7 @@ const isUnauthorized = (reason: unknown) =>
   Boolean(reason && typeof reason === 'object' && 'status' in reason && reason.status === 401);
 
 /**
- * 📊 Desempeño (Etapa 4B). Datos (Etapa 5P): resumen cacheado por rango y
+ * 🏆 Desempeño (Etapa 4B). Datos (Etapa 5P): resumen cacheado por rango y
  * detalle por persona+rango (`queryKeys.performance`), con frescura de
  * métricas. Cambiar de período conserva el resumen anterior visible hasta
  * que llega el nuevo; completar o revertir tareas lo invalida.
@@ -73,14 +89,13 @@ export function PerformanceScreen() {
       <PageHeader
         title={
           <>
-            <span aria-hidden="true">📊 </span>Desempeño
+            <span aria-hidden="true">🏆 </span>Desempeño
           </>
         }
-        description="Cumplimiento de las tareas recurrentes y trabajo realizado, con cada número verificable."
         refreshing={Boolean(data) && summary.isFetching}
       />
       <TasksSubnav />
-      <div className="filter-scroller" aria-label="Período">
+      <div className="filter-scroller" role="group" aria-label="Período">
         {([7, 30, 90] as const).map((days) => (
           <Chip
             key={days}
@@ -90,7 +105,7 @@ export function PerformanceScreen() {
               setPreset(days);
             }}
           >
-            {days === 7 ? 'Esta semana' : `Últimos ${days} días`}
+            {PRESET_LABEL[days]}
           </Chip>
         ))}
       </div>
@@ -114,31 +129,30 @@ export function PerformanceScreen() {
             aria-label="Resumen"
             aria-busy={summary.isFetching || undefined}
           >
-            <Card>
-              <span>Cumplimiento</span>
-              <strong>{percentageLabel(data.team.percentage)}</strong>
-            </Card>
-            <Card>
-              <span>📅 Esperadas</span>
-              <strong>{data.team.expected}</strong>
-            </Card>
-            <Card>
-              <span>✅ Completadas</span>
-              <strong>{data.team.completed}</strong>
-            </Card>
-            <Card>
-              <span>🤝 Coberturas</span>
-              <strong>{data.team.coveredOthers}</strong>
-            </Card>
+            <Kpi
+              tone={scoreTone(data.team.percentage)}
+              value={percentageLabel(data.team.percentage)}
+              label="Cumplimiento"
+            />
+            <Kpi tone="info" value={data.team.expected} label="📅 Esperadas" />
+            <Kpi tone="positive" value={data.team.completed} label="✅ Completadas" />
+            <Kpi tone="info" value={data.team.coveredOthers} label="🤝 Coberturas" />
             {data.special.urgentPending !== null ? (
-              <Card>
-                <span>🚨 Urgentes pendientes</span>
-                <strong>{data.special.urgentPending}</strong>
-              </Card>
+              <Kpi
+                tone={data.special.urgentPending > 0 ? 'danger' : 'positive'}
+                value={data.special.urgentPending}
+                label="🚨 Urgentes pendientes"
+              />
             ) : null}
           </section>
-          <Card>
-            <h2>{user?.role === 'ADMIN' ? 'Equipo' : 'Mi desempeño'}</h2>
+          <Card
+            title={
+              <>
+                <span aria-hidden="true">📊 </span>
+                {user?.role === 'ADMIN' ? 'Cumplimiento por persona' : 'Mi cumplimiento'}
+              </>
+            }
+          >
             {data.employees.length === 0 ? (
               <EmptyState title="Sin información para este período." />
             ) : (
@@ -150,18 +164,25 @@ export function PerformanceScreen() {
                       className="performance-person"
                       onClick={() => setSelected(row.employee.id)}
                     >
-                      <Avatar name={row.employee.displayName} colorHex={row.employee.colorHex} />
+                      <Avatar
+                        name={row.employee.displayName}
+                        colorHex={row.employee.colorHex}
+                        size="sm"
+                      />
                       <span className="performance-person__identity">
                         <strong>{row.employee.displayName}</strong>
                         <small>{row.employee.role}</small>
                       </span>
-                      <span className="performance-person__score">
+                      <span
+                        className={`performance-person__score performance-person__score--${scoreTone(row.percentage)}`}
+                      >
                         <strong>{percentageLabel(row.percentage)}</strong>
                         <small>
                           {row.completed}/{row.expected}
                         </small>
                       </span>
                       <progress
+                        className={`performance-person__bar performance-person__bar--${scoreTone(row.percentage)}`}
                         max="100"
                         value={row.percentage ?? 0}
                         aria-label={`Cumplimiento de ${row.employee.displayName}: ${percentageLabel(row.percentage)}`}
@@ -178,17 +199,22 @@ export function PerformanceScreen() {
             )}
           </Card>
           {selected && detail ? (
-            <Card>
-              <div className="performance-detail__header">
-                <h2>Detalle</h2>
+            <Card
+              title={
+                <>
+                  <span aria-hidden="true">📋 </span>Detalle
+                </>
+              }
+              actions={
                 <button
                   type="button"
-                  className="button button--ghost"
+                  className="button button--ghost button--sm"
                   onClick={() => setSelected(null)}
                 >
                   Cerrar
                 </button>
-              </div>
+              }
+            >
               <ul className="performance-detail">
                 {detail.occurrences?.map((item) => (
                   <li key={`${item.taskId}-${item.periodKey}`}>

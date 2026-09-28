@@ -185,87 +185,86 @@ export function ReportsView() {
   };
 
   return (
-    <StockPage
-      description="Reportes de movimientos y estado del inventario, calculados en el servidor."
-      refreshing={refreshing}
-    >
-      <div className="stock-filters">
-        <div className="filter-scroller" role="group" aria-label="Período">
-          {PERIODS.map((option) => (
-            <Chip
-              key={option.value}
-              selected={filters.period === option.value}
-              onSelect={() => selectPeriod(option.value)}
-            >
-              {option.label}
-            </Chip>
-          ))}
-        </div>
-        {filters.period === 'custom' ? (
-          <div className="stock-filters__row">
-            <div className="field stock-filters__field">
-              <label className="field__label" htmlFor={fromId}>
-                Desde
-              </label>
-              <input
-                id={fromId}
-                className="field__input"
-                type="date"
-                value={filters.from}
-                max={filters.to || undefined}
-                onChange={(event) => updateFilters({ from: event.target.value })}
-              />
-            </div>
-            <div className="field stock-filters__field">
-              <label className="field__label" htmlFor={toId}>
-                Hasta
-              </label>
-              <input
-                id={toId}
-                className="field__input"
-                type="date"
-                value={filters.to}
-                min={filters.from || undefined}
-                onChange={(event) => updateFilters({ to: event.target.value })}
-              />
-            </div>
+    <StockPage refreshing={refreshing}>
+      <Card className="stock-reports__filters">
+        <div className="stock-filters">
+          <div className="filter-scroller" role="group" aria-label="Período">
+            {PERIODS.map((option) => (
+              <Chip
+                key={option.value}
+                selected={filters.period === option.value}
+                onSelect={() => selectPeriod(option.value)}
+              >
+                {option.label}
+              </Chip>
+            ))}
           </div>
-        ) : null}
-        <div className="filter-scroller" role="group" aria-label="Filtrar por área">
-          {AREA_FILTERS.map((option) => (
-            <Chip
-              key={option.value}
-              selected={filters.area === option.value}
-              onSelect={() => updateFilters({ area: option.value, categoryId: '', itemId: '' })}
-              leading={option.emoji ? <span aria-hidden="true">{option.emoji}</span> : undefined}
+          {filters.period === 'custom' ? (
+            <div className="stock-filters__row">
+              <div className="field stock-filters__field">
+                <label className="field__label" htmlFor={fromId}>
+                  Desde
+                </label>
+                <input
+                  id={fromId}
+                  className="field__input"
+                  type="date"
+                  value={filters.from}
+                  max={filters.to || undefined}
+                  onChange={(event) => updateFilters({ from: event.target.value })}
+                />
+              </div>
+              <div className="field stock-filters__field">
+                <label className="field__label" htmlFor={toId}>
+                  Hasta
+                </label>
+                <input
+                  id={toId}
+                  className="field__input"
+                  type="date"
+                  value={filters.to}
+                  min={filters.from || undefined}
+                  onChange={(event) => updateFilters({ to: event.target.value })}
+                />
+              </div>
+            </div>
+          ) : null}
+          <div className="filter-scroller" role="group" aria-label="Filtrar por área">
+            {AREA_FILTERS.map((option) => (
+              <Chip
+                key={option.value}
+                selected={filters.area === option.value}
+                onSelect={() => updateFilters({ area: option.value, categoryId: '', itemId: '' })}
+                leading={option.emoji ? <span aria-hidden="true">{option.emoji}</span> : undefined}
+              >
+                {option.label}
+              </Chip>
+            ))}
+          </div>
+          <div className="stock-reports__actions">
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-expanded={showMore}
+              onClick={() => setShowMore((open) => !open)}
             >
-              {option.label}
-            </Chip>
-          ))}
+              {showMore ? 'Ocultar filtros' : 'Más filtros'}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={!reportEnabled || exporting}
+              onClick={() => void exportCsv()}
+            >
+              <span aria-hidden="true">📥 </span>
+              {exporting ? 'Exportando…' : 'Exportar CSV'}
+            </Button>
+          </div>
+          {showMore ? (
+            <AdvancedReportFilters filters={filters} onChange={updateFilters} isAdmin={isAdmin} />
+          ) : null}
         </div>
-        <div>
-          <Button
-            size="sm"
-            variant="ghost"
-            aria-expanded={showMore}
-            onClick={() => setShowMore((open) => !open)}
-          >
-            {showMore ? 'Ocultar filtros' : 'Más filtros'}
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={!reportEnabled || exporting}
-            onClick={() => void exportCsv()}
-          >
-            <span aria-hidden="true">📥 </span>
-            {exporting ? 'Exportando…' : 'Exportar CSV'}
-          </Button>
-        </div>
-        {showMore ? (
-          <AdvancedReportFilters filters={filters} onChange={updateFilters} isAdmin={isAdmin} />
-        ) : null}
-      </div>
+      </Card>
 
       <div aria-live="polite" className="stock__notice">
         {exportNotice ? <p role="status">{exportNotice}</p> : null}
@@ -307,6 +306,7 @@ export function ReportsView() {
             <CurrentLevelsCard summary={summary} />
             <ProductsCard
               title="Productos con más movimientos"
+              emoji="📦"
               products={summary.products.mostMoved}
               metric={(product) => product.movementCount}
               describe={(product) =>
@@ -316,6 +316,7 @@ export function ReportsView() {
             />
             <ProductsCard
               title="Consumos por producto"
+              emoji="📦"
               products={summary.products.mostConsumed}
               metric={(product) => product.consumptionCount}
               describe={(product) =>
@@ -530,31 +531,37 @@ function UnitList({ values }: { values: StockQuantityByUnit[] }) {
 function ReportSummaryCards({ summary }: { summary: StockReportSummary }) {
   const { totals, currentLevels } = summary;
   return (
-    <section className="stock-reports__kpis" aria-label="Resumen del período">
-      <Card className="stock-kpi">
-        <p className="stock-kpi__label">Ingresos</p>
-        <strong className="stock-kpi__value">{totals.income.count}</strong>
+    <section className="stock-reports__kpis kpi-grid" aria-label="Resumen del período">
+      <div className="kpi kpi--positive">
+        <strong className="kpi__value">{totals.income.count}</strong>
+        <span className="kpi__label">
+          <span aria-hidden="true">📥 </span>Ingresos
+        </span>
         <UnitList values={totals.income.byUnit} />
-      </Card>
-      <Card className="stock-kpi">
-        <p className="stock-kpi__label">Consumos</p>
-        <strong className="stock-kpi__value">{totals.consumption.count}</strong>
+      </div>
+      <div className="kpi kpi--info">
+        <strong className="kpi__value">{totals.consumption.count}</strong>
+        <span className="kpi__label">
+          <span aria-hidden="true">📤 </span>Consumos
+        </span>
         <UnitList values={totals.consumption.byUnit} />
-      </Card>
-      <Card className="stock-kpi">
-        <p className="stock-kpi__label">Ajustes</p>
-        <strong className="stock-kpi__value">{totals.adjustments.count}</strong>
-        <span className="stock-reports__muted">
+      </div>
+      <div className="kpi kpi--earth">
+        <strong className="kpi__value">{totals.adjustments.count}</strong>
+        <span className="kpi__label">
+          <span aria-hidden="true">⚙️ </span>Ajustes
+        </span>
+        <span className="kpi__hint">
           {totals.adjustments.increase} al alta · {totals.adjustments.decrease} a la baja
         </span>
-      </Card>
-      <Card className="stock-kpi">
-        <p className="stock-kpi__label">
+      </div>
+      <div className={`kpi kpi--${currentLevels.critical > 0 ? 'danger' : 'positive'}`}>
+        <strong className="kpi__value">{currentLevels.critical}</strong>
+        <span className="kpi__label">
           <span aria-hidden="true">⚠️ </span>Críticos ahora
-        </p>
-        <strong className="stock-kpi__value">{currentLevels.critical}</strong>
-        <span className="stock-reports__muted">Bajos ahora: {currentLevels.low}</span>
-      </Card>
+        </span>
+        <span className="kpi__hint">Bajos ahora: {currentLevels.low}</span>
+      </div>
       {totals.openingBalance.count > 0 ? (
         <p className="stock-reports__note">
           Además hay {totals.openingBalance.count}{' '}
@@ -568,7 +575,13 @@ function ReportSummaryCards({ summary }: { summary: StockReportSummary }) {
 
 function CurrentLevelsCard({ summary }: { summary: StockReportSummary }) {
   return (
-    <Card title="Estado actual por área">
+    <Card
+      title={
+        <>
+          <span aria-hidden="true">⚠️</span>Estado actual por área
+        </>
+      }
+    >
       <p className="stock-reports__note">
         Productos activos según su stock mínimo, hoy (no depende del período).
       </p>
@@ -610,6 +623,8 @@ function CurrentLevelsCard({ summary }: { summary: StockReportSummary }) {
 
 interface ProductsCardProps {
   title: string;
+  /** Emoji del prototipo para el encabezado (decorativo). */
+  emoji: string;
   products: StockReportProduct[];
   /** Valor COMPARABLE entre productos (conteos), nunca cantidades de unidades distintas. */
   metric: (product: StockReportProduct) => number;
@@ -617,10 +632,17 @@ interface ProductsCardProps {
   empty: string;
 }
 
-function ProductsCard({ title, products, metric, describe, empty }: ProductsCardProps) {
+function ProductsCard({ title, emoji, products, metric, describe, empty }: ProductsCardProps) {
   const max = Math.max(1, ...products.map(metric));
   return (
-    <Card title={title}>
+    <Card
+      title={
+        <>
+          <span aria-hidden="true">{emoji}</span>
+          {title}
+        </>
+      }
+    >
       {products.length === 0 ? (
         <EmptyState title={empty} titleAs="p" />
       ) : (
@@ -647,7 +669,14 @@ function ProductsCard({ title, products, metric, describe, empty }: ProductsCard
 
 function DestinationsCard({ summary }: { summary: StockReportSummary }) {
   return (
-    <Card title="Consumos por destino">
+    <Card
+      title={
+        <>
+          <span aria-hidden="true">🚗</span>
+          Consumos por destino
+        </>
+      }
+    >
       {summary.destinations.length === 0 ? (
         <EmptyState title="No hubo consumos en el período." titleAs="p" />
       ) : (
@@ -684,7 +713,14 @@ function EmployeesCard({ summary }: { summary: StockReportSummary }) {
     'OPENING_BALANCE',
   ];
   return (
-    <Card title="Movimientos por persona">
+    <Card
+      title={
+        <>
+          <span aria-hidden="true">👤</span>
+          Movimientos por persona
+        </>
+      }
+    >
       {summary.employees.length === 0 ? (
         <EmptyState title="No hubo movimientos en el período." titleAs="p" />
       ) : (
@@ -753,7 +789,14 @@ function RecentMovementsCard({
   const total = pages?.[pages.length - 1]?.total ?? 0;
 
   return (
-    <Card title="Movimientos del período">
+    <Card
+      title={
+        <>
+          <span aria-hidden="true">📋</span>
+          Movimientos del período
+        </>
+      }
+    >
       {!pages ? (
         isError ? (
           <ErrorState title="No pudimos cargar los movimientos." onRetry={onRetry} />

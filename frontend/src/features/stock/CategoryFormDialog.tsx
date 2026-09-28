@@ -84,7 +84,7 @@ export function CategoryFormDialog({
       }}
       closeDisabled={isSubmitting}
     >
-      <form className="dialog" onSubmit={handleSubmit} noValidate>
+      <form className="dialog dialog--prototype" onSubmit={handleSubmit} noValidate>
         <h2 id={titleId} className="dialog__title">
           {isEdit ? 'Editar categoría' : 'Nueva categoría'}
         </h2>

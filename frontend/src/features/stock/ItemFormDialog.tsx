@@ -152,7 +152,7 @@ export function ItemFormDialog({
       }}
       closeDisabled={isSubmitting}
     >
-      <form className="dialog" onSubmit={handleSubmit} noValidate>
+      <form className="dialog dialog--prototype" onSubmit={handleSubmit} noValidate>
         <h2 id={titleId} className="dialog__title">
           {isEdit ? 'Editar producto' : 'Nuevo producto'}
         </h2>
@@ -240,46 +240,48 @@ export function ItemFormDialog({
           </select>
         </div>
 
-        <div className="field">
-          <label className="field__label" htmlFor={`${titleId}-unit`}>
-            Unidad
-          </label>
-          <input
-            id={`${titleId}-unit`}
-            className="field__input"
-            type="text"
-            maxLength={UNIT_MAX}
-            autoComplete="off"
-            placeholder="kg, litros, unidades…"
-            value={unit}
-            disabled={isSubmitting}
-            onChange={(event) => {
-              setUnit(event.target.value);
-              setErrorMessage(null);
-            }}
-          />
-        </div>
+        <div className="field-row">
+          <div className="field">
+            <label className="field__label" htmlFor={`${titleId}-unit`}>
+              Unidad
+            </label>
+            <input
+              id={`${titleId}-unit`}
+              className="field__input"
+              type="text"
+              maxLength={UNIT_MAX}
+              autoComplete="off"
+              placeholder="kg, litros, unidades…"
+              value={unit}
+              disabled={isSubmitting}
+              onChange={(event) => {
+                setUnit(event.target.value);
+                setErrorMessage(null);
+              }}
+            />
+          </div>
 
-        <div className="field">
-          <label className="field__label" htmlFor={`${titleId}-minimum`}>
-            Stock mínimo
-          </label>
-          <input
-            id={`${titleId}-minimum`}
-            className="field__input"
-            type="text"
-            inputMode="decimal"
-            autoComplete="off"
-            value={minimumQuantity}
-            disabled={isSubmitting}
-            onChange={(event) => {
-              setMinimumQuantity(event.target.value);
-              setErrorMessage(null);
-            }}
-          />
-          <p className="field__hint">
-            Umbral del estado «Stock bajo». Admite 0 (entonces no se muestra barra de progreso).
-          </p>
+          <div className="field">
+            <label className="field__label" htmlFor={`${titleId}-minimum`}>
+              Stock mínimo
+            </label>
+            <input
+              id={`${titleId}-minimum`}
+              className="field__input"
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
+              value={minimumQuantity}
+              disabled={isSubmitting}
+              onChange={(event) => {
+                setMinimumQuantity(event.target.value);
+                setErrorMessage(null);
+              }}
+            />
+            <p className="field__hint">
+              Umbral del estado «Bajo». Admite 0 (entonces no se muestra barra de progreso).
+            </p>
+          </div>
         </div>
 
         <div aria-live="assertive" className="live-status live-status--start">

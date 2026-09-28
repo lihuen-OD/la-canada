@@ -12,72 +12,79 @@ interface StockItemCardProps {
 }
 
 /**
- * Un producto del inventario (docs/UI_CONTEXT.md, "Stock"): cantidad y
- * etiqueta textual como información principal, barra de progreso solo
- * cuando el mínimo permite un porcentaje significativo (mínimo 0 → sin
- * barra: 100% fijo sería engañoso). El nivel es `item.stockLevel`, calculado
- * por el backend; la barra es solo su representación visual. Los
+ * Un producto del inventario con la fila compacta del prototipo (`.si`):
+ * nombre, barra + "actual / mínimo unidad" y la etiqueta de nivel; a la
+ * derecha 📤 (movimiento), ⚙️ (ajuste, ADMIN) y 📋 (historial). La barra solo
+ * aparece cuando el mínimo permite un porcentaje significativo (mínimo 0 →
+ * sin barra: 100% fijo sería engañoso). El nivel es `item.stockLevel`,
+ * calculado por el backend; la barra es solo su representación visual. Los
  * movimientos de un producto desactivado quedan deshabilitados — el backend
  * también los rechaza.
  */
 export function StockItemCard({ item, isAdmin, onMovement, onDetail }: StockItemCardProps) {
   const level = item.stockLevel;
   const percent = stockBarPercent(item.currentQuantity, item.minimumQuantity);
-  const accessibleName = item.name;
 
   return (
-    <li className="stock-item" aria-busy={undefined}>
-      <div className="stock-item__main">
-        <div className="stock-item__text">
-          <p className="stock-item__name">{item.name}</p>
-          <p className="stock-item__meta">
-            {level !== 'ok' ? <span aria-hidden="true">⚠️ </span> : null}
-            <Badge tone={LEVEL_TONE[level]}>{LEVEL_LABEL[level]}</Badge>
-            {!item.active ? <Badge tone="neutral">Desactivado</Badge> : null}
-            <span className="stock-item__min">
-              Mínimo: {item.minimumQuantity} {item.unit}
-            </span>
-          </p>
-        </div>
-        <p className="stock-item__quantity">
-          <span className="stock-item__value">{item.currentQuantity}</span>
-          <span className="stock-item__unit">{item.unit}</span>
+    <li className="stock-item">
+      <div className="stock-item__info">
+        <p className="stock-item__name">
+          {item.name}
+          {!item.active ? <Badge tone="neutral">Desactivado</Badge> : null}
         </p>
+        <div className="stock-item__level">
+          {percent !== null ? (
+            <progress
+              className={`stock-item__bar stock-item__bar--${level}`}
+              max={100}
+              value={percent}
+              aria-hidden="true"
+            />
+          ) : null}
+          <span className="stock-item__quantity">
+            <span className="visually-hidden">Actual: </span>
+            {item.currentQuantity}
+            <span aria-hidden="true"> / </span>
+            <span className="visually-hidden">, mínimo: </span>
+            {item.minimumQuantity} {item.unit}
+          </span>
+          <Badge tone={LEVEL_TONE[level]}>{LEVEL_LABEL[level]}</Badge>
+        </div>
       </div>
-
-      {percent !== null ? (
-        <progress
-          className={`stock-item__bar stock-item__bar--${level}`}
-          max={100}
-          value={percent}
-          aria-hidden="true"
-        />
-      ) : null}
 
       <div className="stock-item__actions">
         <Button
           size="sm"
-          variant="secondary"
+          className="icon-button"
+          aria-label={`Registrar movimiento: ${item.name}`}
+          title="Registrar movimiento"
           disabled={!item.active}
           onClick={() => onMovement(item, 'consumption')}
         >
-          <span aria-hidden="true">📤 </span>Registrar movimiento
-          <span className="visually-hidden">: {accessibleName}</span>
+          <span aria-hidden="true">📤</span>
         </Button>
         {isAdmin ? (
           <Button
             size="sm"
             variant="secondary"
+            className="icon-button"
+            aria-label={`Ajuste: ${item.name}`}
+            title="Ajuste"
             disabled={!item.active}
             onClick={() => onMovement(item, 'adjustment')}
           >
-            <span aria-hidden="true">⚙️ </span>Ajuste
-            <span className="visually-hidden">: {accessibleName}</span>
+            <span aria-hidden="true">⚙️</span>
           </Button>
         ) : null}
-        <Button size="sm" variant="ghost" onClick={() => onDetail(item)}>
-          <span aria-hidden="true">📋 </span>Historial
-          <span className="visually-hidden">: {accessibleName}</span>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="icon-button"
+          aria-label={`Historial: ${item.name}`}
+          title="Historial"
+          onClick={() => onDetail(item)}
+        >
+          <span aria-hidden="true">📋</span>
         </Button>
       </div>
     </li>

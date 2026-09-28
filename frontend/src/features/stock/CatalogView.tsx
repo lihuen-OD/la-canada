@@ -131,14 +131,16 @@ export function CatalogView() {
   const destinations = destinationsQuery.data?.destinations;
 
   return (
-    <StockPage
-      description="Catálogo administrativo: categorías, productos y destinos."
-      refreshing={refreshing}
-    >
+    <StockPage refreshing={refreshing}>
       <StockNotice notice={notice} />
       <div className="stock-catalog">
         <Card
-          title="Categorías"
+          title={
+            <>
+              <span aria-hidden="true">🏷️</span>
+              Categorías
+            </>
+          }
           actions={
             <Button size="sm" onClick={() => setDialog({ type: 'category-form' })}>
               + Nueva categoría
@@ -192,7 +194,12 @@ export function CatalogView() {
         </Card>
 
         <Card
-          title="Productos"
+          title={
+            <>
+              <span aria-hidden="true">📦</span>
+              Productos
+            </>
+          }
           actions={
             <Button
               size="sm"
@@ -280,7 +287,12 @@ export function CatalogView() {
         </Card>
 
         <Card
-          title="Destinos de consumo"
+          title={
+            <>
+              <span aria-hidden="true">🚗</span>
+              Destinos de consumo
+            </>
+          }
           actions={
             <Button size="sm" onClick={() => setDialog({ type: 'destination-form' })}>
               + Nuevo destino

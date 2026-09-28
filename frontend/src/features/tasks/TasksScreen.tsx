@@ -59,7 +59,7 @@ type DialogState =
 type Notice = { tone: 'positive' | 'danger'; text: string } | null;
 
 /**
- * ✅ Tareas — módulo operativo real (Etapa 4A). Consulta `GET /tasks` y
+ * 📋 Tareas — módulo operativo real (Etapa 4A). Consulta `GET /tasks` y
  * `GET /tasks/employees`; los filtros por persona y frecuencia se aplican
  * sobre la lista ya cargada (decenas de tareas: filtrado inmediato y
  * pendientes por persona sin requests extra). Sin actualizaciones
@@ -211,13 +211,14 @@ export function TasksScreen() {
     <PageHeader
       title={
         <>
-          <span aria-hidden="true">✅ </span>Tareas
+          <span aria-hidden="true">📋 </span>Tareas
         </>
       }
-      description="Lo que hay que hacer hoy, esta semana y este mes, y quién lo hizo."
       actions={
         isAdmin && state.status === 'loaded' ? (
-          <Button onClick={() => setDialog({ type: 'create' })}>+ Nueva tarea</Button>
+          <Button className="desktop-add" onClick={() => setDialog({ type: 'create' })}>
+            + Nueva tarea
+          </Button>
         ) : null
       }
       refreshing={refreshing}
@@ -308,11 +309,13 @@ export function TasksScreen() {
       <Card className={tasksQuery.isPlaceholderData ? 'is-stale' : undefined}>
         {data.tasks.length === 0 ? (
           <EmptyState
+            icon={<span aria-hidden="true">✅</span>}
             title="Todavía no hay tareas."
             description={isAdmin ? 'Creá la primera con «Nueva tarea».' : undefined}
           />
         ) : visible.length === 0 ? (
           <EmptyState
+            icon={<span aria-hidden="true">✅</span>}
             title="No hay tareas con estos filtros."
             description="Probá con otra persona o frecuencia."
           />
@@ -326,6 +329,7 @@ export function TasksScreen() {
                 busy={busyTaskIds.has(task.id)}
                 timeZone={data.period.timeZone}
                 today={data.period.today}
+                showAssignee={person === 'all'}
                 onComplete={(target) =>
                   isAdmin
                     ? setDialog({ type: 'complete', task: target })
@@ -359,6 +363,17 @@ export function TasksScreen() {
           setDialog({ type: 'revert', taskId: task.id, description: task.description, execution })
         }
       />
+
+      {isAdmin ? (
+        <Button
+          className="app-fab"
+          aria-label="Nueva tarea"
+          title="Nueva tarea"
+          onClick={() => setDialog({ type: 'create' })}
+        >
+          ＋
+        </Button>
+      ) : null}
 
       {dialog.type === 'create' || dialog.type === 'edit' ? (
         <TaskFormDialog

@@ -48,8 +48,8 @@ type DialogState =
 const PAGE_SIZE = 50;
 const LEVEL_FILTERS: readonly { value: PurchaseLevelFilter; label: string; emoji?: string }[] = [
   { value: 'all', label: 'Todos' },
-  { value: 'critical', label: 'Críticos', emoji: '⚠️' },
-  { value: 'low', label: 'Bajos' },
+  { value: 'critical', label: 'Críticos', emoji: '🔴' },
+  { value: 'low', label: 'Bajos', emoji: '🟡' },
 ];
 const AREA_FILTERS: readonly { value: AreaFilter; label: string; emoji?: string }[] = [
   { value: 'all', label: 'Todas' },
@@ -58,7 +58,13 @@ const AREA_FILTERS: readonly { value: AreaFilter; label: string; emoji?: string 
 ];
 const SECTION_TITLE: Record<PurchaseLevel, string> = {
   critical: 'Críticos',
-  low: 'Stock bajo',
+  low: 'Bajos',
+};
+
+/** Encabezados de grupo del prototipo (`🔴 Crítico`, `🟡 Bajo`), siempre junto al texto. */
+const SECTION_EMOJI: Record<PurchaseLevel, string> = {
+  critical: '🔴',
+  low: '🟡',
 };
 
 /**
@@ -163,16 +169,18 @@ export function PurchasesView() {
       : categories.filter((category) => category.area === filters.area || category.area === 'BOTH');
 
   return (
-    <StockPage
-      description="Lista de compras derivada del stock mínimo de Casa y Jardín."
-      refreshing={refreshing}
-    >
+    <StockPage refreshing={refreshing}>
       <StockNotice notice={notice} />
 
-      <p className="stock-purchases__explain">
-        Aparecen los productos activos en nivel crítico o bajo según su stock mínimo. «Para llegar
-        al mínimo» es solo una referencia: no es una orden de compra ni modifica el stock.
-      </p>
+      <div className="stock-purchases__toolbar">
+        <p className="stock-purchases__explain">
+          Ítems activos con stock bajo o crítico según su mínimo. «Falta» es solo una referencia
+          para llegar al mínimo: no es una orden de compra ni modifica el stock.
+        </p>
+        <Button size="sm" variant="ghost" disabled={!loaded} onClick={() => void sharePurchases()}>
+          <span aria-hidden="true">📤 </span>Compartir
+        </Button>
+      </div>
 
       <div className="stock-filters">
         <div className="filter-scroller" role="group" aria-label="Filtrar por nivel">
@@ -237,23 +245,13 @@ export function PurchasesView() {
         </div>
       </div>
 
-      <div className="stock-purchases__toolbar">
-        <div className="filter-scroller" role="group" aria-label="Agrupar compras">
-          <Chip selected={grouping === 'status'} onSelect={() => setGrouping('status')}>
-            Por estado
-          </Chip>
-          <Chip selected={grouping === 'category'} onSelect={() => setGrouping('category')}>
-            Por categoría
-          </Chip>
-        </div>
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={!loaded}
-          onClick={() => void sharePurchases()}
-        >
-          <span aria-hidden="true">📤 </span>Compartir
-        </Button>
+      <div className="filter-scroller" role="group" aria-label="Agrupar compras">
+        <Chip selected={grouping === 'status'} onSelect={() => setGrouping('status')}>
+          Por estado
+        </Chip>
+        <Chip selected={grouping === 'category'} onSelect={() => setGrouping('category')}>
+          Por categoría
+        </Chip>
       </div>
       <p className="stock__notice" role="status" aria-live="polite">
         {shareNotice}
@@ -286,7 +284,15 @@ export function PurchasesView() {
           </p>
           {groups.map((group) =>
             group.items.length === 0 ? null : (
-              <Card key={group.key} title={`${group.title} (${group.items.length})`}>
+              <Card
+                key={group.key}
+                title={
+                  <>
+                    {group.emoji ? <span aria-hidden="true">{group.emoji}</span> : null}
+                    {`${group.title} (${group.items.length})`}
+                  </>
+                }
+              >
                 <ul className="stock-purchases__list" role="list" aria-label={group.title}>
                   {group.items.map((item) => (
                     <PurchaseRow
@@ -363,11 +369,15 @@ function groupPurchases(items: StockItem[], grouping: PurchaseGrouping) {
   if (grouping === 'status') {
     return (['critical', 'low'] as const).map((level) => ({
       key: level,
+      emoji: SECTION_EMOJI[level],
       title: SECTION_TITLE[level],
       items: items.filter((item) => item.stockLevel === level),
     }));
   }
-  const byCategory = new Map<string, { key: string; title: string; items: StockItem[] }>();
+  const byCategory = new Map<
+    string,
+    { key: string; emoji?: string; title: string; items: StockItem[] }
+  >();
   for (const item of items) {
     const key = `${item.area}:${item.category.id}`;
     const title = `${AREA_LABEL[item.area]} — ${item.category.name}`;
@@ -449,54 +459,59 @@ function PurchaseRow({ item, isAdmin, onIncome, onDetail, onEdit }: PurchaseRowP
   const shortfall = purchaseShortfall(item.currentQuantity, item.minimumQuantity);
   return (
     <li className="stock-purchase">
-      <div className="stock-purchase__main">
-        <div className="stock-item__text">
-          <p className="stock-item__name">{item.name}</p>
-          <p className="stock-item__meta">
-            {level !== 'ok' ? <span aria-hidden="true">⚠️ </span> : null}
-            <Badge tone={LEVEL_TONE[level]}>{LEVEL_LABEL[level]}</Badge>
-            {level !== 'ok' ? <span>{LEVEL_PRIORITY[level]}</span> : null}
-          </p>
-          <p className="stock-item__meta">
-            <span>
-              <span aria-hidden="true">{AREA_EMOJI[item.area]} </span>
-              {AREA_LABEL[item.area]}
-            </span>
-            <span>· {item.category.name}</span>
-          </p>
-        </div>
-        <dl className="stock-purchase__numbers">
-          <div>
-            <dt>Actual</dt>
-            <dd>
-              {item.currentQuantity} {item.unit}
-            </dd>
-          </div>
-          <div>
-            <dt>Mínimo</dt>
-            <dd>
-              {item.minimumQuantity} {item.unit}
-            </dd>
-          </div>
-          <div className="stock-purchase__shortfall">
-            <dt>Para llegar al mínimo</dt>
-            <dd>{shortfall !== null ? `${shortfall} ${item.unit}` : '—'}</dd>
-          </div>
-        </dl>
+      <div className="stock-purchase__info">
+        <p className="stock-item__name">{item.name}</p>
+        <p className="stock-purchase__meta">
+          <span className={`area-tag area-tag--${item.area.toLowerCase()}`}>
+            {AREA_LABEL[item.area]}
+          </span>
+          <span>{item.category.name}</span>
+          <Badge tone={LEVEL_TONE[level]}>{LEVEL_LABEL[level]}</Badge>
+          {level !== 'ok' ? <span className="visually-hidden">{LEVEL_PRIORITY[level]}</span> : null}
+        </p>
+        <p className="stock-purchase__numbers">
+          <span>
+            <span className="visually-hidden">Actual: </span>
+            {item.currentQuantity}
+            <span aria-hidden="true"> / </span>
+            <span className="visually-hidden">, mínimo: </span>
+            {item.minimumQuantity} {item.unit}
+          </span>
+          <span className="stock-purchase__shortfall">
+            Falta: {shortfall !== null ? `${shortfall} ${item.unit}` : '—'}
+          </span>
+        </p>
       </div>
       <div className="stock-item__actions">
-        <Button size="sm" variant="secondary" onClick={onIncome}>
-          <span aria-hidden="true">➕ </span>Registrar entrada
-          <span className="visually-hidden">: {item.name}</span>
+        <Button
+          size="sm"
+          className="icon-button"
+          aria-label={`Registrar entrada: ${item.name}`}
+          title="Registrar entrada"
+          onClick={onIncome}
+        >
+          <span aria-hidden="true">📥</span>
         </Button>
-        <Button size="sm" variant="ghost" onClick={onDetail}>
-          <span aria-hidden="true">📋 </span>Detalle
-          <span className="visually-hidden">: {item.name}</span>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="icon-button"
+          aria-label={`Detalle: ${item.name}`}
+          title="Detalle"
+          onClick={onDetail}
+        >
+          <span aria-hidden="true">📋</span>
         </Button>
         {isAdmin ? (
-          <Button size="sm" variant="ghost" onClick={onEdit}>
-            <span aria-hidden="true">✏️ </span>Editar producto
-            <span className="visually-hidden">: {item.name}</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="icon-button"
+            aria-label={`Editar producto: ${item.name}`}
+            title="Editar producto"
+            onClick={onEdit}
+          >
+            <span aria-hidden="true">✏️</span>
           </Button>
         ) : null}
       </div>
