@@ -21,7 +21,7 @@ import {
   recordsResponse,
   typesResponse,
 } from './fixtures/pets';
-import { eventsResponse, newsResponse, summaryResponse } from './fixtures/more';
+import { eventsResponse, gardenResponse, newsResponse, summaryResponse } from './fixtures/more';
 
 /**
  * Etapa 5P — presupuesto de navegación sobre la APP COMPLETA (`App`: mismos
@@ -99,6 +99,10 @@ function body(path: string): unknown {
   if (/^\/pets\/[^/?]+$/.test(path)) return detailResponse();
   if (path.startsWith('/pets')) return petsListResponse();
   if (path.startsWith('/more/summary')) return summaryResponse();
+  if (/^\/more\/garden\/versions\/[^/?]+\/content/.test(path)) {
+    return new Blob(['plano-sintetico'], { type: 'image/jpeg' });
+  }
+  if (path.startsWith('/more/garden/versions')) return gardenResponse();
   if (path.startsWith('/news')) return newsResponse();
   if (path.startsWith('/events')) return eventsResponse();
   if (path.startsWith('/admin/users'))
@@ -117,10 +121,27 @@ function count(prefix: string): number {
 /** GET del listado de tareas exactamente (sin confundirlo con /tasks/history o /tasks/employees). */
 const taskListCalls = () => calls.filter((call) => /^GET \/tasks(\?|$)/.test(call)).length;
 
+/** GET del historial de planos exactamente (sin confundirlo con `/versions/:id/content`). */
+const gardenListCalls = () =>
+  calls.filter((call) => /^GET \/more\/garden\/versions(\?|$)/.test(call));
+/** GET del binario de un plano. */
+const gardenContentCalls = () =>
+  calls.filter((call) => /^GET \/more\/garden\/versions\/[^/?]+\/content/.test(call));
+
 beforeEach(() => {
   calls = [];
   idempotencyKeys = [];
   window.history.replaceState(null, '', '/');
+  // jsdom no implementa object URLs: sin esto la descarga del binario (fotos,
+  // planos) fallaría y el query quedaría en error, que SI se reintenta al
+  // volver a montar — y el test mediría un reintento, no la caché.
+  vi.stubGlobal(
+    'URL',
+    Object.assign(URL, {
+      createObjectURL: vi.fn((blob: Blob) => `blob:${blob.size}`),
+      revokeObjectURL: vi.fn(),
+    }),
+  );
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string, init?: RequestInit) => {
@@ -500,6 +521,53 @@ describe('☰ Más (Etapa 5X)', () => {
     expect(count('/auth/refresh')).toBe(1);
     expect(count('/auth/me')).toBe(1);
     expect(document.querySelector('.app-header')).toBe(shellHeader);
+  });
+});
+
+describe('\u{1F333} Jardín (Etapa 5Y)', () => {
+  it('Más → Jardín → visor → volver → revisita: SPA, sin refresh/me, datos desde caché', async () => {
+    const user = userEvent.setup();
+    await bootToHome();
+    const shellHeader = document.querySelector('.app-header');
+    // Solo los clicks en links: cada uno debe ser navegación del router
+    // (defaultPrevented), nunca una carga de documento.
+    const prevented: boolean[] = [];
+    const listener = (event: MouseEvent) => {
+      if ((event.target as HTMLElement | null)?.closest('a'))
+        prevented.push(event.defaultPrevented);
+    };
+    window.addEventListener('click', listener);
+
+    await user.click(within(mainNav()).getByRole('link', { name: 'Más' }));
+    await screen.findByRole('link', { name: /Jardín/ });
+    await user.click(screen.getByRole('link', { name: /Jardín/ }));
+    const current = await screen.findByRole('region', { name: 'Plano vigente' });
+    expect(within(current).getByText('Vigente')).toBeInTheDocument();
+    // Una sola request del historial; el binario se pide una vez por version.
+    // Una sola request del historial; y UN request por versión: la miniatura del
+    // historial y el visor comparten la misma entrada de caché (aquí el binario
+    // de cada versión se pide una vez, no dos).
+    expect(gardenListCalls().length).toBe(1);
+    expect(gardenContentCalls().filter((call) => call.includes('garden-2')).length).toBe(1);
+    expect(gardenContentCalls().filter((call) => call.includes('garden-1')).length).toBe(1);
+
+    await user.click(within(current).getByRole('button', { name: /Ver la versión 2/ }));
+    await screen.findByRole('dialog');
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cerrar' }));
+    await user.click(screen.getByRole('link', { name: /Volver/ }));
+    await screen.findByRole('link', { name: /Jardín/ });
+    await user.click(screen.getByRole('link', { name: /Jardín/ }));
+    expect(screen.getByRole('region', { name: 'Plano vigente' })).toBeInTheDocument();
+    expect(screen.queryByText(/Cargando/)).not.toBeInTheDocument();
+    window.removeEventListener('click', listener);
+
+    // Volver no pide ni el historial ni ningún binario otra vez.
+    expect(gardenListCalls().length).toBe(1);
+    expect(gardenContentCalls().length).toBe(2);
+    expect(count('/auth/refresh')).toBe(1);
+    expect(count('/auth/me')).toBe(1);
+    expect(document.querySelector('.app-header')).toBe(shellHeader);
+    expect(prevented.every(Boolean)).toBe(true);
   });
 });
 

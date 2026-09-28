@@ -118,6 +118,15 @@ export const queryKeys = {
     /** Imagen por id de foto: inmutable (una foto nueva es otro id). */
     photoContent: (userId: string, photoId: string) =>
       [...scope(userId), 'more', 'photo-content', photoId] as const,
+    /**
+     * 🌳 Jardín: historial de versiones del plano (el prefijo sin página
+     * invalida todas). Publicar una versión nueva solo invalida esta familia
+     * y el resumen — nunca Fotos, Novedades ni Tareas.
+     */
+    garden: (userId: string) => [...scope(userId), 'more', 'garden'] as const,
+    /** Plano de UNA versión por id: inmutable (cada versión tiene su archivo). */
+    gardenContent: (userId: string, versionId: string) =>
+      [...scope(userId), 'more', 'garden-content', versionId] as const,
     employees: (userId: string) => [...scope(userId), 'more', 'employees'] as const,
     team: (userId: string, filter?: TeamFilter) =>
       filter === undefined

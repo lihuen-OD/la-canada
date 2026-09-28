@@ -4,9 +4,10 @@ import { config } from './index';
 
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_REQUESTS = 100;
-/** Etapa 5X — lecturas de imágenes (galería de Fotos y fichas de Mascotas). */
+/** Lecturas de imágenes (galería de Fotos, fichas de Mascotas y plano del Jardín). */
 const MAX_IMAGE_REQUESTS = 600;
-const IMAGE_READ_PATH = /^\/(?:photos\/[^/]+\/content|pets\/photos\/[^/]+)\/?$/;
+const IMAGE_READ_PATH =
+  /^\/(?:photos\/[^/]+\/content|pets\/photos\/[^/]+|more\/garden\/versions\/[^/]+\/content)\/?$/;
 
 /** GET de una imagen servida por el proxy autenticado (ruta relativa a `/api/v1`). */
 export function isImageRead(req: { method: string; path: string }): boolean {

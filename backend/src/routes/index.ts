@@ -11,6 +11,7 @@ import { petsRouter } from './petsRoutes';
 import {
   employeesRouter,
   eventsRouter,
+  gardenRouter,
   meRouter,
   moreRouter,
   newsRouter,
@@ -34,5 +35,6 @@ apiV1Router.use('/news', newsRouter);
 apiV1Router.use('/events', eventsRouter);
 apiV1Router.use('/weather', weatherRouter);
 apiV1Router.use('/photos', photosRouter);
+apiV1Router.use('/more/garden', gardenRouter);
 apiV1Router.use('/employees', employeesRouter);
 apiV1Router.use('/me', meRouter);

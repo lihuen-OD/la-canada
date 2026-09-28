@@ -1,5 +1,5 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import type { FormEvent, SyntheticEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { IdempotencyIntent, intentFingerprint } from '../../api/idempotency';
 import { uploadPhoto } from '../../api/moreApi';
@@ -16,6 +16,7 @@ import { errorCodeOf, errorMessageOf, isSessionExpired } from '../pets/petErrors
 import { PHOTO_CATEGORY_OPTION, PHOTO_TYPES, normalizeText } from './moreLabels';
 
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+type PreviewState = 'idle' | 'loading' | 'ready' | 'error';
 const CATEGORIES: readonly GalleryCategory[] = ['MEMORY', 'TASK_EVIDENCE'];
 
 interface PhotoUploadDialogProps {
@@ -51,6 +52,53 @@ export function PhotoUploadDialog({
         : null,
   );
   const valid = PHOTO_TYPES.includes(file.type) && file.size <= MAX_PHOTO_BYTES;
+  // La foto solo se puede guardar si se VIÓ: el mismo defecto que en el plano
+  // del jardín (object URL creado en `useMemo` y revocado por el cleanup del
+  // efecto, que en `StrictMode` deja el `<img>` apuntando a una URL muerta y
+  // habilitaba "Guardar" sin vista previa) está corregido igual acá.
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewState, setPreviewState] = useState<PreviewState>(valid ? 'loading' : 'idle');
+  const liveUrl = useRef<string | null>(null);
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect --
+       El object URL es un recurso del efecto: se crea en el setup y se revoca
+       en el cleanup, así que su estado solo puede existir después del setup.
+       Es justamente lo que la regla quiere evitar (un render en cascada por
+       estado derivable), pero acá el valor NO es derivable del render:
+       crearlo en `useMemo` lo deja revocado por el segundo montaje lógico de
+       `StrictMode` (ícono de imagen rota, reproducido en Chrome). El ref evita
+       el segundo render en cascada al cambiar de archivo. */
+    if (!valid) {
+      liveUrl.current = null;
+      setPreviewUrl(null);
+      setPreviewState('idle');
+      return;
+    }
+    if (typeof URL.createObjectURL !== 'function') {
+      liveUrl.current = null;
+      setPreviewUrl(null);
+      setPreviewState('error');
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    liveUrl.current = url;
+    setPreviewUrl(url);
+    setPreviewState('loading');
+    return () => {
+      URL.revokeObjectURL(url);
+      if (liveUrl.current === url) liveUrl.current = null;
+    };
+  }, [file, valid]);
+  /**
+   * URL viva según el último setup. Los eventos `load`/`error` del navegador
+   * llegan de forma asíncrona: el `error` de una URL ya revocada llegaría
+   * DESPUÉS de que el setup siguiente creara otra, y sin esta comparación
+   * desactivaría la preview nueva. Solo se atiende el evento de la URL vigente.
+   */
+  function isLiveEvent(event: SyntheticEvent<HTMLImageElement>): boolean {
+    return event.currentTarget.getAttribute('src') === liveUrl.current;
+  }
+  const previewReady = previewState === 'ready';
   const employees = useQuery({
     queryKey: queryKeys.tasks.employees(userId),
     queryFn: fetchTaskEmployees,
@@ -58,20 +106,9 @@ export function PhotoUploadDialog({
     staleTime: STALE_TIME.catalog,
   });
 
-  const preview = useMemo(
-    () => (valid && typeof URL.createObjectURL === 'function' ? URL.createObjectURL(file) : null),
-    [file, valid],
-  );
-  useEffect(
-    () => () => {
-      if (preview) URL.revokeObjectURL(preview);
-    },
-    [preview],
-  );
-
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (!valid) return;
+    if (!valid || !previewReady) return;
     const metadata = {
       title: normalizeText(title) || 'Sin título',
       category,
@@ -104,8 +141,22 @@ export function PhotoUploadDialog({
         <h2 id={`${formId}-title`} className="dialog__title">
           Guardar foto
         </h2>
-        {preview ? (
-          <img className="upload-preview" src={preview} alt="Vista previa de la foto elegida" />
+        {previewUrl && previewState !== 'error' ? (
+          <img
+            className="upload-preview"
+            src={previewUrl}
+            alt="Vista previa de la foto elegida"
+            onLoad={(event) => {
+              if (!isLiveEvent(event)) return;
+              setPreviewState('ready');
+            }}
+            onError={(event) => {
+              if (!isLiveEvent(event)) return;
+              setPreviewUrl(null);
+              setPreviewState('error');
+              setError('No pudimos generar la vista previa. Volvé a seleccionar la foto.');
+            }}
+          />
         ) : null}
         <div className="field">
           <label className="field__label" htmlFor={`${formId}-name`}>
@@ -174,7 +225,7 @@ export function PhotoUploadDialog({
           <Button variant="secondary" onClick={onClose} disabled={isSubmitting}>
             Cancelar
           </Button>
-          <Button type="submit" loading={isSubmitting} disabled={!valid}>
+          <Button type="submit" loading={isSubmitting} disabled={!valid || !previewReady}>
             Guardar
           </Button>
         </div>

@@ -140,6 +140,17 @@ export const uploadPhotoQuerySchema = z
   })
   .strict();
 
+// ── 🌳 Jardín: versiones del plano (Etapa 5Y) ───────────────────────────
+
+/**
+ * Historial de versiones. No hay filtros: el prototipo no tenía esta pantalla
+ * (módulo nuevo), así que el contrato es el mínimo que la UI necesita — página
+ * y tamaño (tope 50, como el resto de listas de Más).
+ */
+export const listGardenVersionsQuerySchema = z
+  .object({ page: pageSchema, pageSize: pageSizeSchema(50, 20) })
+  .strict();
+
 // ── ⚙️ Configuración: personas y datos del equipo (ADMIN) ────────────────
 
 const colorSchema = z

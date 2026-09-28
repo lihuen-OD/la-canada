@@ -648,6 +648,138 @@
   margin-top: var(--space-2);
 }
 
+/* ── Jardín (5Y) ──────────────────────────────────────────────────────── */
+
+.garden-current {
+  margin-bottom: var(--space-5);
+}
+
+.garden-current__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+
+.garden-current__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+}
+
+.garden-current__tag {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-earth-bg);
+  color: var(--color-earth);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+}
+
+.garden-current__meta,
+.garden-history__meta {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/** Botón-envoltorio del plano: al tocarlo se abre el visor a pantalla completa. */
+.garden-current__open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  background: var(--color-surface-muted);
+  cursor: zoom-in;
+}
+
+/* `contain` y no `cover`: un plano se mira completo, nunca recortado. */
+.garden-plan-image {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+}
+
+.garden-plan-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.garden-plan-image__placeholder {
+  font-size: 2rem;
+  opacity: 0.5;
+}
+
+.garden-history__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+}
+
+.garden-history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.garden-history__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.garden-history__item.is-current {
+  border-color: var(--color-action);
+}
+
+.garden-plan-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 3.5rem;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: var(--radius-control);
+  overflow: hidden;
+  background: var(--color-surface-muted);
+}
+
+.garden-plan-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.garden-history__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.garden-history__label {
+  font-weight: var(--font-weight-semibold);
+}
+
 /* ── Configuración ─────────────────────────────────────────────────────── */
 
 .person-row {

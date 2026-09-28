@@ -261,6 +261,28 @@ Tres orígenes distintos de eventos tipo `cumple`, todos automáticos:
 - **Configuración (solo ADMIN)**: 👥 Personas — alta (nombre, rol Doméstica/Parque/Otro, color; nace con su cuenta pendiente, sin PIN), edición, 🔑 asignar/cambiar PIN y Baja/Activar ("Dar de baja a X?"). La baja es lógica: la persona deja de aparecer en el selector de ingreso, no puede entrar y se cierran sus sesiones (paridad: el prototipo solo listaba personas activas); su historial se conserva. 👤 Datos del equipo (lectura; filtro Todos/Completos/Sin datos; "completo" = fecha de nacimiento, teléfono o CUIL). 📅 Calendario de tareas con la marca aproximada del prototipo (diarias todos los días, semanales de lunes a viernes, mensuales el día 1). 🔐 Cambiar el propio PIN (cierra la sesión, como en Usuarios) y acceso a Usuarios. 📱 Instalar como app (texto).
 - **Mi perfil**: la persona de la sesión (nunca otra) carga sus datos personales, contacto de emergencia e hijos (alta y ✕, sin edición, como el prototipo). Fechas de nacimiento hoy o pasadas. Teléfono y CUIL con formato razonable (solo números y separadores). La auditoría registra qué campos cambiaron, nunca los valores. Un hijo eliminado se borra de verdad (dato de un menor sin historia operativa).
 
+## Jardín (Etapa 5Y)
+
+Módulo **nuevo**: el prototipo no tenía plano del jardín, así que no hay regla heredada ni dato que migrar. El estado inicial es vacío a propósito (no se siembran planos de ejemplo).
+
+- **Ver el plano y su historial**: todos los usuarios autenticados, igual que la galería de Fotos (§18), que también era visible para todos.
+- **Publicar una versión nueva**: **solo `ADMIN`**, la única acción de escritura del módulo y la que deja una versión nueva en el historial; por eso exige el mismo permiso que el resto de la configuración. Sin la imagen no se publica nada (415) ni con un archivo de más de 10 MB (413).
+- **Versiones inmutables y crecientes**: publicar siempre crea una versión nueva (`1`, `2`, `3`…); la anterior **no se modifica, no se reemplaza y no se borra**. No hay edición, restauración, eliminación ni "revertir a una anterior" en el alcance de la etapa.
+- **La vigente es la de número más alto**: no existe una marca de "vigente" que se pueda desincronizar; publicar de nuevo deja la anterior como parte del historial y la nueva como la que se ve.
+- **Un archivo por versión**: una versión no puede reutilizar la imagen de otra. La imagen vive en el almacenamiento privado y se sirve por el backend; nunca se expone el bucket, la clave ni una URL del almacenamiento.
+- **Historial**: paginado de 20 en 20, del más reciente al más antiguo, con la versión vigente arriba. Sin conexión, se ve un estado inicial claro según el rol (no un error).
+- **Auditoría**: cada publicación queda registrada con su actor (`garden_plan.version_published`).
+- **Fuera de alcance** (no existe y no se agrega sin pedido expreso): editar o recortar el plano, marcar zonas o detalles sobre la imagen, medir superficies, OCR, subir varios archivos en una publicación, descargar o compartir el plano por link.
+
+### Contrato implementado en Etapa 5Y (🌳 Jardín)
+
+- **Grilla de Más**: tarjeta "🌳 Jardín" después de 📸 Fotos, con el subtítulo "Sin plano" cuando no hay ninguna versión y "N versiones" cuando las hay. Todos la ven (no es una acción de `ADMIN`).
+- **Pantalla `/more/garden`**: el plano vigente a tamaño completo (nunca recortado: `object-fit: contain`), con quién lo publicó y cuándo; debajo, el historial paginado con miniatura, número, autor y fecha, y un botón para abrir cualquier versión en un visor. "Volver" como en las demás pantallas de Más.
+- **Publicar (solo `ADMIN`)**: se elige **una** imagen JPG/PNG/WebP de hasta 10 MB, se ve una vista previa antes de confirmar y se publica con `Idempotency-Key` (reintentar el mismo archivo no publica dos versiones). Sin almacenamiento configurado, el botón queda deshabilitado con un aviso claro, como en Fotos.
+- **El tipo de imagen lo dicen los bytes**: ni la extensión ni el tipo declarado deciden; un archivo que no sea una imagen válida se rechaza con 415 y no queda registro.
+- **Lo que no existe**: editar una versión, borrarla, restaurarla ni convertir a mano una versión anterior en vigente.
+- **Paridad funcional**: el módulo es nuevo, así que no hay conducta del prototipo que preservar; se sigue el criterio de Fotos (§18) para lo visible por todos y el de Configuración para lo que solo puede hacer un `ADMIN`.
+
 ## 19. Desempeño (ver sección 6)
 
 Repetido aquí por completitud del pedido original — el detalle completo y el bug verificado están en la sección 6.

@@ -7,6 +7,8 @@ import {
   getEmployeesHandler,
   getMyFamilyHandler,
   getEventsHandler,
+  getGardenVersionContentHandler,
+  getGardenVersionsHandler,
   getMoreSummaryHandler,
   getMyProfileHandler,
   getNewsHandler,
@@ -14,6 +16,7 @@ import {
   getPhotosHandler,
   getTeamProfilesHandler,
   getWeatherHandler,
+  parseGardenPlanBody,
   parseGalleryPhotoBody,
   patchEmployeeHandler,
   patchEmployeeStatusHandler,
@@ -24,6 +27,7 @@ import {
   postDeletePhotoHandler,
   postEmployeeHandler,
   postEventHandler,
+  postGardenVersionHandler,
   postMyChildHandler,
   postMyFamilyHandler,
   postNewsHandler,
@@ -64,6 +68,19 @@ photosRouter.get('/', getPhotosHandler);
 photosRouter.post('/', parseGalleryPhotoBody, postPhotoHandler);
 photosRouter.get('/:id/content', getPhotoContentHandler);
 photosRouter.post('/:id/delete', requireJsonContentType, postDeletePhotoHandler);
+
+/**
+ * 🌳 Jardín: ver el plano y el historial es de todos (paridad con Fotos);
+ * publicar una versión nueva es solo ADMIN (el router lo bloquea y el
+ * servicio vuelve a exigirlo). Sin `DELETE` ni `PATCH`: las versiones son
+ * inmutables y el historial no se recorta. El rol se comprueba ANTES del
+ * parser binario, así un EMPLOYEE recibe el 403 sin subir 10 MB.
+ */
+export const gardenRouter = Router();
+gardenRouter.use(requireAuth);
+gardenRouter.get('/versions', getGardenVersionsHandler);
+gardenRouter.post('/versions', requireRole('ADMIN'), parseGardenPlanBody, postGardenVersionHandler);
+gardenRouter.get('/versions/:id/content', getGardenVersionContentHandler);
 
 /** ⚙️ Configuración: exclusivo de ADMIN (y el servicio vuelve a exigirlo). */
 export const employeesRouter = Router();

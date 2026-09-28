@@ -507,6 +507,36 @@ Migración `20260925200000_more_module` (offline con `prisma migrate diff`, revi
 - `file_assets.title` (nullable; `null` en fotos de ficha de mascota) e índice `(category, status, created_at)` para la galería.
 - Precondición en `READ ONLY` (2 novedades y 2 eventos reales, sin duplicados; 0 archivos; 0 perfiles/hijos); aplicada a `demo` el 2026-09-25 con `db:migrate:deploy` y verificada en `pg_indexes`/`pg_constraint`/`information_schema`. `production` intacta. Los cumpleaños no tienen tabla nueva: se derivan de `RecurringBirthday`, `EmployeeProfile.birthDate`, `EmployeeChild.birthDate` y `Animal.birthDate`.
 
+### Etapa 5Y — Jardín: versiones del plano (aplicada a `demo`)
+
+Migración `20260928100000_garden_plan_versions` (offline con `prisma migrate diff --from-schema <schema 5X> --to-schema <schema 5Y>`, revisada; solo agrega, sin `DROP`/`TRUNCATE`/`DELETE`/`INSERT`):
+
+- Valor `GARDEN_PLAN` en `PhotoCategory` (imagen de una versión del plano, en `FileAsset` como las fotos de galería y de ficha de mascota).
+- Tabla **`garden_plan_versions`**: `id` (uuid), `version_number` (int), `file_asset_id` (uuid, FK `file_assets`), `published_by_user_id` (uuid, FK `users`), `created_at`. Módulo **nuevo**: arranca vacía, sin filas sembradas y sin datos que migrar.
+- Índices: **único** en `version_number` (la numeración no puede repetirse aunque se perdiera el lock) y **único** en `file_asset_id` (un archivo es el plano de una sola versión). No hay índice adicional por `version_number`: el único es un btree que Postgres recorre en reverso para el historial paginado, así que un segundo sería redundante.
+- FK `ON DELETE RESTRICT` en las dos columnas: ni el archivo ni quien publicó se pueden borrar mientras exista una versión publicada.
+- Sin columna `current` ni `superseded_at`: la vigente es, por definición, la de `version_number` más alto, así que "como máximo una vigente" es una consecuencia del orden y publicar de nuevo no toca la anterior. Publicar es siempre un `INSERT`: las versiones son inmutables.
+- Sin datos que migrar: la precondición se verificó en `demo` antes de aplicar (0 filas de la tabla nueva y 0 `file_assets` de categoría `GARDEN_PLAN`; no había `PhotoCategory.GARDEN_PLAN` en uso). Aplicada a `demo` el 2026-09-28 con `db:migrate:deploy` (`DATABASE_TARGET=demo`) y verificada en `pg_indexes`/`pg_constraint`/`information_schema`; `production` intacta. El actor de cada publicación queda en `AuditLog` (`garden_plan.version_published`) y el archivo en `FileAsset` con `uploadedByEmployeeId` (empleado de la sesión, `null` para un ADMIN sin empleado).
+
+Verificación contra `demo` después de aplicar (misma receta que las etapas anteriores): `SELECT version_number FROM garden_plan_versions` sin filas, `\d garden_plan_versions` con los dos índices únicos y las dos FK `RESTRICT`, `\dT+` con `GARDEN_PLAN` en `PhotoCategory`, y la integración de 5Y (12 pruebas) que duplica a mano `version_number` y `file_asset_id` para comprobar que **Postgres** los rechaza.
+
+### Perfil y Familia — `UserProfile` y `EmployeeProfile`/`EmployeeChild` son complementarias
+
+`demo` (la base de Neon configurada en `.env`; desde este entorno no hay conexión a `production`) tiene **11** migraciones aplicadas y esta rama tiene **10**: la adicional es `20260928120000_personal_profile_family`, que pertenece al **trabajo paralelo de Claude en el worktree principal**. No es una migración faltante ni un conflicto: los dos modelos conviven y se complementan.
+
+| Modelo | Para quién | Dónde se crea |
+| --- | --- | --- |
+| `UserProfile` (tabla `user_profiles`, enum `FamilyRelation`) | el **ADMIN sin `Employee`** | `20260928120000_personal_profile_family` (trabajo paralelo, worktree principal) |
+| `EmployeeProfile` / `EmployeeChild` (tablas `employee_profiles` / `employee_children`) | los **empleados** | `20260922174631_init` (esta rama, Etapa 3) |
+
+Lo que esta rama declara y usa: `employee_profiles` y `employee_children` en `schema.prisma`, con `EmployeeProfile.employeeId` único e `EmployeeChild` indexado por `employee_id`; las usa el backend de Más (`backend/src/more/profileService.ts` y `eventsService.ts`, Etapa 5X). En `demo` ambas tablas están creadas y vacías (0 filas), que es lo esperado para un módulo sin uso todavía.
+
+Lo que esta rama **no** hace, por diseño:
+
+- No crea, modifica ni borra migraciones, schema ni datos de Perfil/Familia: ni `user_profiles`, ni `FamilyRelation`, ni las columnas `recurring_birthdays.birth_year` / `owner_user_id` / `relation`, ni el índice parcial `task_planning_intervals_one_open_per_task` que el trabajo paralelo ya aplicó en la base compartida.
+- No "reconcilia" ni "elige" entre las dos implementaciones: no hay nada que elegir, resuelven casos distintos.
+- Como las dos ramas comparten `demo`, acá solo se aplican migraciones de esta rama con `db:migrate:deploy` (`DATABASE_TARGET=demo`), nunca `db push` ni `migrate dev`, que sí intentarían alinear el esquema de esta rama contra tablas que administra el otro trabajo. `db:migrate:status` solo compara la carpeta local de migraciones con `_prisma_migrations`, así que no lleva la cuenta del trabajo paralelo: es lo esperado y no un defecto.
+
 ### Qué queda pendiente para la Etapa 3 (autenticación) en adelante
 
 - Enforcement a nivel de servicio de las filas 2, 6, 9, 11, 14, 15 de la matriz de invariantes.

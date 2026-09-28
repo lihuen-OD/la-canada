@@ -41,6 +41,15 @@ export function useMoreCache() {
       () => invalidate(queryKeys.more.photos(userId), queryKeys.more.summary(userId)),
       [invalidate, userId],
     ),
+    /**
+     * 🌳 Jardín: publicar una versión solo cambia el historial del plano y el
+     * conteo de la grilla. Las imágenes ya descargadas siguen en caché (cada
+     * versión es inmutable) y no se pide ninguna foto del historial.
+     */
+    afterGardenChange: useCallback(
+      () => invalidate(queryKeys.more.garden(userId), queryKeys.more.summary(userId)),
+      [invalidate, userId],
+    ),
     /** Personas: listas de Configuración, selectores de empleados, Usuarios, Tareas (nombres/colores) y cumpleaños. */
     afterEmployeeChange: useCallback(
       () =>
