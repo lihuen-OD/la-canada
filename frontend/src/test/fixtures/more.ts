@@ -2,6 +2,7 @@ import type {
   EmployeeProfileResponse,
   EventsResponse,
   FamilyMember,
+  GardenVersionsResponse,
   ManagedEmployee,
   MoreSummary,
   NewsListResponse,
@@ -19,6 +20,7 @@ export const summaryResponse = (overrides: Partial<MoreSummary> = {}): MoreSumma
   news: { today: 2, total: 7 },
   events: { upcoming: 3 },
   photos: { total: 1 },
+  garden: { versions: 0 },
   ...overrides,
 });
 
@@ -154,6 +156,32 @@ export const photosResponse = (
   totalPages: 1,
   photoStorage: storage,
 });
+
+/** Planos SINTÉTICOS (5Y): sin imágenes reales, solo ids y metadatos. */
+export const gardenVersion = (versionNumber: number) => ({
+  id: `garden-${versionNumber}`,
+  versionNumber,
+  createdAt: new Date(Date.now() - versionNumber * 3600_000).toISOString(),
+  sizeBytes: 2048,
+  mimeType: 'image/jpeg',
+  publishedBy: 'pablo',
+});
+
+export const gardenResponse = (
+  storage: 'configured' | 'unconfigured' = 'configured',
+  count = 2,
+): GardenVersionsResponse => {
+  const versions = Array.from({ length: count }, (_, index) => gardenVersion(count - index));
+  return {
+    current: versions[0] ?? null,
+    versions,
+    page: 1,
+    pageSize: 20,
+    total: versions.length,
+    totalPages: 1,
+    gardenStorage: storage,
+  };
+};
 
 export const employeesResponse = (): { employees: ManagedEmployee[] } => ({
   employees: [

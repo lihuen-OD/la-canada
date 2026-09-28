@@ -548,6 +548,16 @@ export class PhotoNotFoundError extends AppError {
   }
 }
 
+// ── Jardín (Etapa 5Y) ─────────────────────────────────────────────────────
+
+/** Etapa 5Y — la versión pedida no existe. El historial nunca se elimina, así que
+ *  no hay "borrado": un 404 solo puede significar un id que nunca existió. */
+export class GardenPlanVersionNotFoundError extends AppError {
+  constructor() {
+    super('Esa versión del plano no existe.', 404, { code: 'GARDEN_PLAN_VERSION_NOT_FOUND' });
+  }
+}
+
 /** Open-Meteo no respondió a tiempo o devolvió algo inesperado. Reintentable. */
 export class WeatherUnavailableError extends AppError {
   constructor() {

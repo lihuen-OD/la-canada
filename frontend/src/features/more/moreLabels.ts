@@ -41,6 +41,12 @@ export const PHOTO_FILTERS: readonly { value: GalleryCategory | 'all'; label: st
 /** Formatos que el backend acepta (el tipo real se valida por bytes allá). */
 export const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
+/** 🌳 Jardín (5Y): mismos formatos que Fotos; el backend valida los bytes. */
+export const GARDEN_PLAN_TYPES = PHOTO_TYPES;
+
+/** "10 MB" como lo muestra la UI (el backend corta en bytes, no en MB). */
+export const MAX_GARDEN_PLAN_BYTES = 10 * 1024 * 1024;
+
 export const PHOTO_CATEGORY_OPTION: Record<GalleryCategory, string> = {
   MEMORY: '📷 Recuerdo',
   TASK_EVIDENCE: '✅ Tarea',

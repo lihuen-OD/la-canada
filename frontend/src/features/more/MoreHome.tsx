@@ -18,8 +18,10 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 
 /**
  * Grilla de ☰ Más del prototipo (`pg-mas`), mismo orden: Novedades, Eventos,
- * Clima, Fotos, Configuración (solo ADMIN) y Mi perfil (equipo y ADMIN), más
- * "Cerrar sesión". Los subtítulos salen de UNA request de conteos.
+ * Clima, Fotos, Jardín (5Y, nuevo — va después de Fotos porque comparte el
+ * almacenamiento de imágenes), Configuración (solo ADMIN) y Mi perfil (equipo
+ * y ADMIN, 5F), más "Cerrar sesión". Los subtítulos salen de UNA request de
+ * conteos.
  */
 export function MoreHome() {
   const { user } = useAuth();
@@ -54,6 +56,16 @@ export function MoreHome() {
       icon: '📸',
       title: 'Fotos',
       subtitle: data ? plural(data.photos.total, 'foto', 'fotos') : '—',
+    },
+    {
+      to: '/more/garden',
+      icon: '🌳',
+      title: 'Jardín',
+      subtitle: data
+        ? data.garden.versions > 0
+          ? plural(data.garden.versions, 'versión', 'versiones')
+          : 'Sin plano'
+        : '—',
     },
     ...(isAdmin
       ? [{ to: '/more/settings', icon: '⚙️', title: 'Configuración', subtitle: 'Solo admin' }]

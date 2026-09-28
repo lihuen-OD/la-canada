@@ -20,6 +20,9 @@ describe('☰ Más — ningún endpoint es público', () => {
     ['POST', '/api/v1/photos'],
     ['GET', `/api/v1/photos/${ID}/content`],
     ['POST', `/api/v1/photos/${ID}/delete`],
+    ['GET', '/api/v1/more/garden/versions'],
+    ['POST', '/api/v1/more/garden/versions'],
+    ['GET', `/api/v1/more/garden/versions/${ID}/content`],
     ['GET', '/api/v1/employees'],
     ['GET', '/api/v1/employees/profiles'],
     ['POST', '/api/v1/employees'],
@@ -63,6 +66,7 @@ describe('routers de Más — superficie', () => {
       'eventsRouter',
       'weatherRouter',
       'photosRouter',
+      'gardenRouter',
       'meRouter',
     ]) {
       expect(source).toMatch(new RegExp(`${name}\\.use\\(requireAuth\\)`));
@@ -77,17 +81,29 @@ describe('routers de Más — superficie', () => {
     expect(source).toMatch(/meRouter\.put\('\/profile', requireJsonContentType/);
   });
 
-  it('toda mutación JSON exige Content-Type; la subida de fotos usa su parser binario acotado', () => {
-    const mutations = [...source.matchAll(/Router\.(post|patch|put)\(([^)]*)\)/g)].map(
+  it('toda mutación exige un guard de cuerpo: JSON, o el parser binario acotado', () => {
+    // `.*` hasta el cierre de la línea: los guards pueden traer paréntesis
+    // propios (`requireRole('ADMIN')`) y no deben partirse al cortarlos.
+    const mutations = [...source.matchAll(/Router\.(post|patch|put)\((.*)\);/g)].map(
       (m) => m[2] ?? '',
     );
-    expect(mutations.length).toBeGreaterThanOrEqual(12);
+    expect(mutations.length).toBeGreaterThanOrEqual(13);
     for (const args of mutations) {
-      expect(args).toMatch(
-        args.startsWith("'/', parseGalleryPhotoBody")
-          ? /parseGalleryPhotoBody/
-          : /requireJsonContentType/,
-      );
+      expect(args).toMatch(/requireJsonContentType|parseGalleryPhotoBody|parseGardenPlanBody/);
     }
+  });
+
+  it('el parser binario acotado es solo de imágenes, y publicar el plano exige ADMIN antes', () => {
+    expect(source).toMatch(/photosRouter\.post\('\/', parseGalleryPhotoBody/);
+    // ADMIN se comprueba ANTES de leer el cuerpo: un EMPLOYEE recibe el 403
+    // sin subir 10 MB de imagen.
+    expect(source).toMatch(
+      /gardenRouter\.post\('\/versions', requireRole\('ADMIN'\), parseGardenPlanBody/,
+    );
+    expect(source).not.toMatch(/express\.json/);
+  });
+
+  it('el Jardín no tiene borrado ni edición: las versiones son inmutables', () => {
+    expect(source).not.toMatch(/gardenRouter\.(delete|patch|put)\(/);
   });
 });

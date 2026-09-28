@@ -31,6 +31,14 @@ import { createNews, listNews } from '../more/newsService';
 import { createEvent, deleteEvent, listEvents, updateEvent } from '../more/eventsService';
 import { getWeather } from '../more/weatherService';
 import {
+  MAX_GARDEN_PLAN_BYTES,
+  findReadableGardenPlanVersion,
+  listGardenPlanVersions,
+  publishGardenPlanVersion,
+  readGardenPlanObject,
+} from '../more/gardenService';
+import { listGardenVersionsQuerySchema } from '../more/moreSchemas';
+import {
   MAX_GALLERY_PHOTO_BYTES,
   deletePhoto,
   findReadablePhoto,
@@ -216,6 +224,73 @@ export async function getPhotoContentHandler(req: Request, res: Response): Promi
     return;
   }
   const body = await readPhotoObject(file.objectKey);
+  res.set('Content-Type', file.mimeType);
+  res.status(200).send(body);
+}
+
+// ── 🌳 Jardín ──
+
+export async function getGardenVersionsHandler(req: Request, res: Response): Promise<void> {
+  await actorFrom(req);
+  send(
+    res,
+    200,
+    await listGardenPlanVersions(
+      parseOrThrow(listGardenVersionsQuerySchema, req.query, 'Filtros inválidos.'),
+    ),
+  );
+}
+
+const rawPlanParser = express.raw({
+  type: [...PET_PHOTO_MIME_TYPES],
+  limit: MAX_GARDEN_PLAN_BYTES,
+});
+
+/** Cuerpo binario del plano; un exceso de tamaño es un 413 propio, nunca un 500. */
+export function parseGardenPlanBody(req: Request, res: Response, next: NextFunction): void {
+  rawPlanParser(req, res, (error?: unknown) => {
+    if (error && (error as { type?: string }).type === 'entity.too.large') {
+      next(new PetPhotoTooLargeError(MAX_GARDEN_PLAN_BYTES / (1024 * 1024)));
+      return;
+    }
+    next(error as Error | undefined);
+  });
+}
+
+export async function postGardenVersionHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const result = await publishGardenPlanVersion(
+    actor,
+    {
+      body: req.body,
+      declaredType: req.header('content-type'),
+      filename: req.header('x-file-name'),
+    },
+    requestMeta(req),
+    idempotencyKeyOf(req),
+  );
+  send(res, result.kind === 'replay' ? result.status : 201, result.body);
+}
+
+/**
+ * Plano servido por el backend. El id es el de la VERSIÓN y el archivo no
+ * cambia nunca, así que caché privada larga e `ETag` = SHA-256 del contenido:
+ * un `If-None-Match` que coincide responde 304 sin leer el bucket.
+ */
+export async function getGardenVersionContentHandler(req: Request, res: Response): Promise<void> {
+  await actorFrom(req);
+  const file = await findReadableGardenPlanVersion(idFrom(req.params.id, 'versión del plano'));
+  const etag = file.checksum ? `"${file.checksum}"` : null;
+  res.set('Cache-Control', 'private, max-age=86400, immutable');
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Content-Security-Policy', "default-src 'none'");
+  if (etag) res.set('ETag', etag);
+  const ifNoneMatch = req.header('if-none-match');
+  if (etag && ifNoneMatch && ifNoneMatch.split(',').some((value) => value.trim() === etag)) {
+    res.status(304).end();
+    return;
+  }
+  const body = await readGardenPlanObject(file.objectKey);
   res.set('Content-Type', file.mimeType);
   res.status(200).send(body);
 }

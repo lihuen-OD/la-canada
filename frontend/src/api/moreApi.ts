@@ -10,6 +10,8 @@ import type {
   FamilyMemberRequest,
   GalleryCategory,
   GalleryPhoto,
+  GardenPlanVersion,
+  GardenVersionsResponse,
   ManagedEmployee,
   MoreSummary,
   MyProfileResponse,
@@ -87,6 +89,29 @@ export function uploadPhoto(
   });
 }
 export const deletePhoto = (photoId: string) => post<unknown>(`/photos/${photoId}/delete`, {});
+
+// 🌳 Jardín
+export function fetchGardenPlanVersions(page: number, pageSize: number) {
+  return apiRequest<GardenVersionsResponse>(
+    `/more/garden/versions?page=${page}&pageSize=${pageSize}`,
+    auth,
+  );
+}
+/** Plano servido por el backend (proxy autenticado): nunca una URL del bucket. */
+export const fetchGardenPlanContent = (versionId: string) =>
+  apiRequest<Blob>(`/more/garden/versions/${versionId}/content`, {
+    ...auth,
+    responseType: 'blob',
+  });
+/** Publica una versión nueva (solo ADMIN). El cuerpo es la imagen, sin metadatos. */
+export const publishGardenPlanVersion = (file: File, idempotencyKey: string) =>
+  apiRequest<{ version: GardenPlanVersion }>('/more/garden/versions', {
+    method: 'POST',
+    rawBody: file,
+    contentType: file.type,
+    headers: { 'X-File-Name': encodeURIComponent(file.name), 'Idempotency-Key': idempotencyKey },
+    ...auth,
+  });
 
 // ⚙️ Personas y datos del equipo (ADMIN)
 export const fetchEmployees = () =>

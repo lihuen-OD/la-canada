@@ -10,6 +10,7 @@ export interface MoreSummary {
   news: { today: number; total: number };
   events: { upcoming: number };
   photos: { total: number };
+  garden: { versions: number };
 }
 
 interface Page {
@@ -107,6 +108,27 @@ export interface GalleryPhoto {
 export interface PhotosListResponse extends Page {
   photos: GalleryPhoto[];
   photoStorage: 'configured' | 'unconfigured';
+}
+
+// 🌳 Jardín (Etapa 5Y)
+/**
+ * Una versión publicada del plano. No hay `fileAssetId`, `objectKey` ni
+ * checksum: el cliente pide la imagen por `id` al backend y nunca conoce el
+ * bucket. `versionNumber` es el orden real del historial.
+ */
+export interface GardenPlanVersion {
+  id: string;
+  versionNumber: number;
+  createdAt: string;
+  sizeBytes: number;
+  mimeType: string;
+  publishedBy: string;
+}
+export interface GardenVersionsResponse extends Page {
+  /** La vigente (la de número más alto) o `null` si todavía no hay ninguna. */
+  current: GardenPlanVersion | null;
+  versions: GardenPlanVersion[];
+  gardenStorage: 'configured' | 'unconfigured';
 }
 
 // ⚙️ Personas y datos del equipo

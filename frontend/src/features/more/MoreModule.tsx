@@ -11,6 +11,7 @@ import { ProfileScreen } from './ProfileScreen';
 
 /** Carga diferida: galería (visor, subida, carga perezosa de imágenes) y Configuración (solo ADMIN). */
 const PhotosScreen = lazy(() => import('./PhotosScreen'));
+const GardenScreen = lazy(() => import('./GardenScreen'));
 const SettingsScreen = lazy(() => import('./SettingsScreen'));
 const TeamScreen = lazy(() => import('./TeamScreen'));
 
@@ -24,8 +25,10 @@ const adminOnly = (element: ReactElement) => (
 /**
  * ☰ Más (`pg-mas` del prototipo) y sus submódulos como rutas descendientes
  * SPA: `/more` (grilla), 📝 `/more/news`, 📅 `/more/events`, 🌤️
- * `/more/weather`, 📸 `/more/photos`, ⚙️ `/more/settings` y 👤
- * `/more/settings/team` (ADMIN) y 👤 `/more/profile` (empleado).
+ * `/more/weather`, 📸 `/more/photos`, 🌳 `/more/garden`, ⚙️
+ * `/more/settings` y 👤 `/more/settings/team` (ADMIN) y 👤 `/more/profile`
+ * (equipo y ADMIN, 5F). Jardín no es una ruta por rol: la pantalla es la misma
+ * para todos y solo aparece "Publicar" al ADMIN.
  */
 export function MoreModule() {
   return (
@@ -39,6 +42,14 @@ export function MoreModule() {
         element={
           <Suspense fallback={fallback}>
             <PhotosScreen />
+          </Suspense>
+        }
+      />
+      <Route
+        path="garden"
+        element={
+          <Suspense fallback={fallback}>
+            <GardenScreen />
           </Suspense>
         }
       />

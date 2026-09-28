@@ -131,6 +131,10 @@ enum PhotoCategory {
   /// cargaba como URL externa en `mascotas.foto`; ahora es un archivo del
   /// bucket privado, subido y servido solo por el backend.
   ANIMAL_PROFILE
+  /// Etapa 5Y — imagen de una versión del plano del jardín. Módulo nuevo
+  /// (no existía en el prototipo): el archivo lo publica un ADMIN y queda
+  /// en el bucket privado, servido solo por el backend.
+  GARDEN_PLAN
 }
 
 /// Proveedor de almacenamiento de un archivo. Un único valor hoy porque Neon
@@ -255,6 +259,10 @@ model User {
   /// p. ej. el ADMIN) y sus familiares (👨‍👩‍👧‍👦 Mi familia).
   personalProfile UserProfile?
   familyBirthdays RecurringBirthday[] @relation("RecurringBirthdayOwner")
+
+  /// Etapa 5Y — actor real (User de la sesión) que publicó una versión del
+  /// plano del jardín. Siempre un ADMIN (el servicio lo exige otra vez).
+  publishedGardenPlanVersions GardenPlanVersion[] @relation("GardenPlanVersionPublishedBy")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -937,6 +945,13 @@ model FileAsset {
   animalId String? @map("animal_id") @db.Uuid
   animal   Animal? @relation(fields: [animalId], references: [id])
 
+  /// Etapa 5Y — lado inverso de `GardenPlanVersion.fileAssetId` (1 a 1): la
+  /// versión que usa ESTE archivo como imagen del plano, o `null` si el
+  /// archivo es una foto de la galería o de una ficha de mascota. Vive acá
+  /// solo para que Prisma pueda tipar la relación; la dirección de la FK es
+  /// desde la versión (`ON DELETE RESTRICT`).
+  gardenPlanVersion GardenPlanVersion?
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -949,6 +964,61 @@ model FileAsset {
   @@index([animalId])
   @@index([uploadedByEmployeeId])
   @@map("file_assets")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// JARDÍN — VERSIONES DEL PLANO
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Una versión publicada del plano del jardín (Etapa 5Y). Módulo **nuevo**:
+/// el prototipo no tenía esta pantalla ni esta tabla, así que no hay filas
+/// sembradas ni datos que migrar — el estado inicial es vacío a propósito.
+///
+/// Reglas de la versión, garantizadas por el modelo y no por la aplicación:
+/// - **Inmutable**: no existe ningún camino de código que actualice una fila
+///   (publicar es siempre un `INSERT`; no hay edición, restauración ni
+///   borrado de versiones en el alcance de la etapa).
+/// - **Monotónica**: `versionNumber` es un entero creciente con `@unique`;
+///   el servicio lo calcula como el máximo vigente + 1 dentro de la misma
+///   transacción que inserta, serializada con un lock de aviso de Postgres.
+/// - **Un archivo por versión**: `fileAssetId` es `@unique` — una versión no
+///   puede reutilizar el objeto de otra, ni al revés. La relación va de la
+///   versión AL `FileAsset` (FK explícita, `ON DELETE RESTRICT` inferido por
+///   Prisma al ser obligatoria): así la versión no puede existir sin su
+///   archivo y `FileAsset` no necesita ninguna columna nueva.
+/// - **Como máximo una vigente**: no hay columna `current`/`supersededAt`
+///   justamente porque no hace falta — la vigente es, por definición, la de
+///   `versionNumber` más alto, así que solo puede haber una. Publicar de
+///   nuevo no modifica la anterior: la conserva.
+///
+/// La imagen vive en el bucket privado (`FileAsset.bucket` + `objectKey`,
+/// nunca expuesto al cliente) y se sirve por proxy autenticado del backend.
+model GardenPlanVersion {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// Número de versión, monotónico y único (1, 2, 3…). Es el orden real del
+  /// historial, no la fecha: dos publicaciones en el mismo minuto no pueden
+  /// empatar. La unicidad la garantiza la base (índice único), no solo el
+  /// servicio: dos ADMIN publicando a la vez no pueden obtener el mismo
+  /// número aunque el lock se perdiera.
+  versionNumber Int @unique @map("version_number")
+
+  /// Archivo del bucket que contiene la imagen de ESTA versión.
+  fileAssetId String    @unique @map("file_asset_id") @db.Uuid
+  fileAsset   FileAsset @relation(fields: [fileAssetId], references: [id])
+
+  /// Actor real (User de la sesión) que la publicó. Obligatorio: solo un
+  /// ADMIN publica y el usuario de la sesión siempre existe. Queda también
+  /// en `AuditLog` (`garden_plan.version_published`).
+  publishedByUserId String @map("published_by_user_id") @db.Uuid
+  publishedBy       User   @relation("GardenPlanVersionPublishedBy", fields: [publishedByUserId], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// Sin índice adicional por `versionNumber`: el índice único ya es un btree
+  /// que Postgres puede recorrer en reverso para el historial (más reciente
+  /// primero), así que un segundo índice sería redundante.
+  @@map("garden_plan_versions")
 }
 
 // ═══════════════════════════════════════════════════════════════════════

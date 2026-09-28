@@ -301,6 +301,15 @@ Desempeño se integra mediante navegación secundaria en chips `📋 Tareas | �
 - Análisis por período mediante chips.
 - Historial legible y verificable.
 
+### Jardín
+
+- El plano se ve **completo y centrado**, nunca recortado: `object-fit: contain` sobre una superficie clara (a diferencia de `cover` en la galería de Fotos, que es un mosaico de recuerdos).
+- Versión vigente destacada (número y "Vigente") y autor/fecha en texto secundario.
+- Historial en lista vertical con miniatura cuadrada, número, autor y fecha; la miniatura se pide recién al acercarse a la pantalla.
+- Visor sobre fondo oscuro, como en Fotografías, con la versión y su autor a la vista.
+- Zona de publicación con borde discontinuo (misma gramática que Fotos), **solo para `ADMIN`**, con vista previa antes de confirmar.
+- Etiqueta accesible junto al emoji, como en el resto de la aplicación.
+
 ### Más y Configuración
 
 - Grilla de accesos de dos columnas en móvil.

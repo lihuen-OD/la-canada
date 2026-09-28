@@ -1,12 +1,14 @@
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '../../test/render';
+import { fireEvent, render, screen, waitFor, within } from '../../test/render';
 import {
   PERSON,
   employeesResponse,
   eventsResponse,
   familyMember,
+  gardenResponse,
+  gardenVersion,
   personalProfileResponse,
   newsResponse,
   photosResponse,
@@ -16,6 +18,7 @@ import {
   weatherResponse,
 } from '../../test/fixtures/more';
 import type { TaskItem } from '../../api/taskTypes';
+import { ApiError } from '../../api/httpClient';
 
 const api = vi.hoisted(() => ({
   fetchMoreSummary: vi.fn(),
@@ -30,6 +33,9 @@ const api = vi.hoisted(() => ({
   fetchPhotoContent: vi.fn(),
   uploadPhoto: vi.fn(),
   deletePhoto: vi.fn(),
+  fetchGardenPlanVersions: vi.fn(),
+  fetchGardenPlanContent: vi.fn(),
+  publishGardenPlanVersion: vi.fn(),
   fetchEmployees: vi.fn(),
   createEmployee: vi.fn(),
   updateEmployee: vi.fn(),
@@ -121,6 +127,8 @@ beforeEach(() => {
   api.fetchWeather.mockResolvedValue(weatherResponse());
   api.fetchPhotos.mockResolvedValue(photosResponse());
   api.fetchPhotoContent.mockResolvedValue(new Blob(['x'], { type: 'image/jpeg' }));
+  api.fetchGardenPlanVersions.mockResolvedValue(gardenResponse());
+  api.fetchGardenPlanContent.mockResolvedValue(new Blob(['x'], { type: 'image/jpeg' }));
   api.fetchEmployees.mockResolvedValue(employeesResponse());
   api.fetchTeamProfiles.mockResolvedValue(teamResponse());
   api.fetchMyProfile.mockResolvedValue(profileResponse());
@@ -134,7 +142,7 @@ beforeEach(() => {
 });
 
 describe('☰ Más — grilla', () => {
-  it('EMPLOYEE: Novedades, Eventos, Clima, Fotos y Mi perfil con los subtítulos del prototipo; sin Configuración', async () => {
+  it('EMPLOYEE: Novedades, Eventos, Clima, Fotos, Jardín y Mi perfil con los subtítulos del prototipo; sin Configuración', async () => {
     renderMore();
     const grid = within(await screen.findByRole('list', { name: 'Secciones' }));
     expect(grid.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual([
@@ -142,6 +150,7 @@ describe('☰ Más — grilla', () => {
       '/more/events',
       '/more/weather',
       '/more/photos',
+      '/more/garden',
       '/more/profile',
     ]);
     expect(await grid.findByText('2 hoy')).toBeInTheDocument();
@@ -163,6 +172,22 @@ describe('☰ Más — grilla', () => {
     );
     expect(grid.getByRole('link', { name: /Mi perfil/ })).toHaveAttribute('href', '/more/profile');
     expect(await grid.findByText('7 total')).toBeInTheDocument();
+  });
+
+  it('🌳 Jardín: la tarjeta va después de Fotos y sin plano lo dice', async () => {
+    renderMore();
+    const grid = within(await screen.findByRole('list', { name: 'Secciones' }));
+    const hrefs = grid.getAllByRole('link').map((link) => link.getAttribute('href'));
+    expect(hrefs.indexOf('/more/garden')).toBe(hrefs.indexOf('/more/photos') + 1);
+    expect(grid.getByRole('link', { name: /Jardín/ })).toHaveAttribute('href', '/more/garden');
+    expect(await grid.findByText('Sin plano')).toBeInTheDocument();
+  });
+
+  it('🌳 Jardín: con versiones, el subtítulo dice cuántas hay', async () => {
+    api.fetchMoreSummary.mockResolvedValue(summaryResponse({ garden: { versions: 3 } }));
+    renderMore();
+    const grid = within(await screen.findByRole('list', { name: 'Secciones' }));
+    expect(await grid.findByText('3 versiones')).toBeInTheDocument();
   });
 });
 
@@ -383,6 +408,10 @@ describe('📸 Fotos', () => {
     const dialog = within(await screen.findByRole('dialog'));
     await user.type(dialog.getByLabelText('Título'), 'Jardín');
     await user.selectOptions(dialog.getByLabelText('Tipo'), 'TASK_EVIDENCE');
+    // "Guardar" recién se habilita cuando el navegador terminó de cargar la
+    // preview (jsdom no decodifica imágenes: el evento real lo dispara el navegador).
+    expect(dialog.getByRole('button', { name: 'Guardar' })).toBeDisabled();
+    fireEvent.load(dialog.getByRole('img', { name: 'Vista previa de la foto elegida' }));
     await user.click(dialog.getByRole('button', { name: 'Guardar' }));
     await waitFor(() => expect(api.uploadPhoto).toHaveBeenCalledTimes(1));
     const [sent, metadata, key] = api.uploadPhoto.mock.calls[0] as [File, object, string];
@@ -396,6 +425,100 @@ describe('📸 Fotos', () => {
     renderMore('/more/photos');
     expect(await screen.findByText(/falta configurar el almacenamiento/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Subir foto/ })).toBeDisabled();
+  });
+});
+
+describe('🌳 Jardín', () => {
+  it('EMPLOYEE ve el plano vigente y el historial, sin botón de publicar', async () => {
+    renderMore('/more/garden');
+    const current = await screen.findByRole('region', { name: 'Plano vigente' });
+    expect(within(current).getByText('Versión 2')).toBeInTheDocument();
+    expect(within(current).getByText('Vigente')).toBeInTheDocument();
+    const history = screen.getByRole('list', { name: 'Versiones del plano' });
+    expect(within(history).getByText('Versión 2 · vigente')).toBeInTheDocument();
+    expect(within(history).getByText('Versión 1')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Publicar nueva versión/ }),
+    ).not.toBeInTheDocument();
+    expect(api.fetchGardenPlanVersions).toHaveBeenCalledWith(1, 20);
+  });
+
+  it('abre el visor de una versión con quién la publicó y cuándo', async () => {
+    const user = userEvent.setup();
+    renderMore('/more/garden');
+    await user.click(await screen.findByRole('button', { name: /Ver la versión 1/ }));
+    const viewer = within(screen.getByRole('dialog'));
+    expect(viewer.getByText('Versión 1')).toBeInTheDocument();
+    expect(viewer.getByText(/Publicada por pablo/)).toBeInTheDocument();
+  });
+
+  it('sin plano: estado inicial claro según el rol, no un error', async () => {
+    api.fetchGardenPlanVersions.mockResolvedValue(gardenResponse('configured', 0));
+    const { unmount } = renderMore('/more/garden');
+    expect(
+      await screen.findByText('Cuando se publique la primera versión, va a aparecer acá.'),
+    ).toBeInTheDocument();
+    unmount();
+    asAdmin();
+    api.fetchGardenPlanVersions.mockResolvedValue(gardenResponse('configured', 0));
+    renderMore('/more/garden');
+    expect(
+      await screen.findByText('Publicá la primera versión para que todos la vean.'),
+    ).toBeInTheDocument();
+  });
+
+  it('ADMIN publica una versión con Idempotency-Key e invalida solo el historial', async () => {
+    asAdmin();
+    const user = userEvent.setup();
+    api.publishGardenPlanVersion.mockResolvedValue({ version: gardenVersion(3) });
+    const { container } = renderMore('/more/garden');
+    await user.click(await screen.findByRole('button', { name: /Publicar nueva versión/ }));
+    const file = new File([new Uint8Array([0xff, 0xd8, 0xff])], 'plano.jpg', {
+      type: 'image/jpeg',
+    });
+    await user.upload(
+      container.ownerDocument.querySelector('input[type="file"]') as HTMLInputElement,
+      file,
+    );
+    const dialog = within(await screen.findByRole('dialog'));
+    // El botón recién se habilita cuando la preview cargó (jsdom no decodifica).
+    await waitFor(() => expect(dialog.getByRole('button', { name: 'Publicar' })).toBeDisabled());
+    fireEvent.load(dialog.getByRole('img', { name: 'Vista previa del plano elegido' }));
+    await user.click(dialog.getByRole('button', { name: 'Publicar' }));
+    await waitFor(() => expect(api.publishGardenPlanVersion).toHaveBeenCalledTimes(1));
+    const [sent, key] = api.publishGardenPlanVersion.mock.calls[0] as [File, string];
+    expect(sent).toBe(file);
+    expect(key).toMatch(/^[0-9a-f]{32}$/);
+    await waitFor(() => expect(api.fetchGardenPlanVersions).toHaveBeenCalledTimes(2));
+    // Publicar un plano no toca Fotos ni Novedades.
+    expect(api.fetchPhotos).not.toHaveBeenCalled();
+    expect(api.fetchNews).not.toHaveBeenCalled();
+  });
+
+  it('el backend rechaza el tipo: el error se muestra en el diálogo', async () => {
+    asAdmin();
+    const user = userEvent.setup();
+    api.publishGardenPlanVersion.mockRejectedValue(
+      new ApiError(415, 'El plano debe ser una imagen JPG, PNG o WebP.', 'PET_PHOTO_INVALID'),
+    );
+    const { container } = renderMore('/more/garden');
+    await user.click(await screen.findByRole('button', { name: /Publicar nueva versión/ }));
+    await user.upload(
+      container.ownerDocument.querySelector('input[type="file"]') as HTMLInputElement,
+      new File([new Uint8Array([0xff, 0xd8, 0xff])], 'plano.jpg', { type: 'image/jpeg' }),
+    );
+    const dialog = within(await screen.findByRole('dialog'));
+    fireEvent.load(dialog.getByRole('img', { name: 'Vista previa del plano elegido' }));
+    await user.click(dialog.getByRole('button', { name: 'Publicar' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/JPG, PNG o WebP/);
+  });
+
+  it('sin almacenamiento configurado, publicar queda deshabilitado con aviso claro', async () => {
+    asAdmin();
+    api.fetchGardenPlanVersions.mockResolvedValue(gardenResponse('unconfigured', 0));
+    renderMore('/more/garden');
+    expect(await screen.findByText(/falta configurar el almacenamiento/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Publicar nueva versión/ })).toBeDisabled();
   });
 });
 

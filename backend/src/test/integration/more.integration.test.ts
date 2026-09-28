@@ -361,12 +361,13 @@ describe('📅 Eventos y 🎂 cumpleaños derivados', () => {
     );
   });
 
-  it('la tarjeta de Más cuenta novedades, eventos próximos (cumpleaños incluidos) y fotos', async () => {
+  it('la tarjeta de Más cuenta novedades, eventos próximos (cumpleaños incluidos), fotos y planos', async () => {
     const summary = await request(app).get('/api/v1/more/summary').set(as(employee));
     expect(summary.status).toBe(200);
     expect(summary.body.news.today).toBeGreaterThanOrEqual(3);
     expect(summary.body.events.upcoming).toBeGreaterThanOrEqual(5);
     expect(summary.body.photos).toEqual({ total: expect.any(Number) });
+    expect(summary.body.garden).toEqual({ versions: expect.any(Number) });
   });
 });
 
