@@ -52,7 +52,9 @@ export function AdminUserRow({
   onChangeStatus,
 }: AdminUserRowProps) {
   const lockoutHintId = useId();
-  const displayName = user.employee?.displayName ?? user.username;
+  // Etapa 5F: nombre visible (Employee o perfil personal); el username solo si no hay ninguno (vista administrativa).
+  const displayName =
+    user.employee?.displayName ?? user.personalProfile?.displayName ?? user.username;
   const transitions = getAllowedStatusTransitions(user.status);
   const isAdminAccount = user.role === 'ADMIN' && !user.employee;
 

@@ -55,9 +55,68 @@ export function useMoreCache() {
         ),
       [invalidate, userId],
     ),
+    /**
+     * Etapa 5F — cambió el nombre visible de un EMPLEADO (él mismo en Mi
+     * perfil o el ADMIN en Datos del equipo): todo lo que muestra nombres de
+     * personas. Solo se llama si el nombre cambió de verdad.
+     */
+    afterPersonNameChange: useCallback(
+      () =>
+        invalidate(
+          queryKeys.more.profile(userId),
+          queryKeys.more.employees(userId),
+          queryKeys.more.team(userId),
+          queryKeys.more.news(userId),
+          queryKeys.more.photos(userId),
+          queryKeys.more.events(userId),
+          queryKeys.tasks.all(userId),
+          queryKeys.performance.all(userId),
+          queryKeys.chickenCoop.all(userId),
+          queryKeys.stock.all(userId),
+          queryKeys.pets.all(userId),
+          queryKeys.admin.users(userId),
+          queryKeys.dashboard(userId),
+        ),
+      [invalidate, userId],
+    ),
+    /** Etapa 5F — el ADMIN cambió SU nombre visible: su cumpleaños (Eventos, Inicio) y Usuarios. */
+    afterOwnNameChange: useCallback(
+      () =>
+        invalidate(
+          queryKeys.more.events(userId),
+          queryKeys.dashboard(userId),
+          queryKeys.admin.users(userId),
+        ),
+      [invalidate, userId],
+    ),
     /** PIN asignado o cambiado: estado de cuenta en Personas y en Usuarios. */
     afterAccountChange: useCallback(
       () => invalidate(queryKeys.more.employees(userId), queryKeys.admin.users(userId)),
+      [invalidate, userId],
+    ),
+    /**
+     * 🎂 Mi cumpleaños (perfil personal): los cumpleaños derivados (Eventos,
+     * Inicio, Más). El perfil propio NO se invalida: la respuesta del PUT ya
+     * se escribió en su caché (`setQueryData`), sin una request extra.
+     */
+    afterOwnBirthdayChange: useCallback(
+      () =>
+        invalidate(
+          queryKeys.more.events(userId),
+          queryKeys.more.summary(userId),
+          queryKeys.dashboard(userId),
+        ),
+      [invalidate, userId],
+    ),
+    /** 👨‍👩‍👧‍👦 Mi familia: la lista y los cumpleaños derivados (Eventos, Inicio, Más). */
+    afterFamilyChange: useCallback(
+      () =>
+        invalidate(
+          queryKeys.more.family(userId),
+          queryKeys.more.events(userId),
+          queryKeys.more.summary(userId),
+          queryKeys.dashboard(userId),
+        ),
       [invalidate, userId],
     ),
     /** Mi perfil o hijos: el propio perfil, Datos del equipo y los cumpleaños derivados. */

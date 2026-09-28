@@ -32,9 +32,15 @@ export interface NewsListResponse extends Page {
 
 // 📅 Eventos
 export type EventType = 'VISIT' | 'BIRTHDAY' | 'MAINTENANCE' | 'OTHER';
-export type BirthdaySource = 'FAMILY' | 'EMPLOYEE' | 'CHILD' | 'PET';
+/** Origen explícito (Etapa 5F): nunca se deduce del título. */
+export type BirthdayOrigin =
+  'USER_PROFILE' | 'USER_FAMILY' | 'EMPLOYEE' | 'EMPLOYEE_CHILD' | 'ANIMAL' | 'GLOBAL_RECURRING';
+/** A dónde puede ir QUIEN MIRA para corregir un cumpleaños derivado (null = a ningún lado). */
+export type BirthdaySourceRef =
+  { kind: 'MY_PROFILE' } | { kind: 'TEAM_PROFILES' } | { kind: 'PET'; id: string } | null;
 export interface CalendarEvent {
   kind: 'event';
+  origin: 'MANUAL';
   id: string;
   title: string;
   date: string;
@@ -44,13 +50,14 @@ export interface CalendarEvent {
 }
 export interface BirthdayEvent {
   kind: 'birthday';
+  origin: BirthdayOrigin;
   id: string;
   title: string;
   date: string;
   type: 'BIRTHDAY';
   note: string;
   daysUntil: number;
-  source: BirthdaySource;
+  sourceRef: BirthdaySourceRef;
 }
 export type EventListItem = CalendarEvent | BirthdayEvent;
 export interface EventsResponse {
@@ -152,9 +159,38 @@ export interface TeamMember {
   children: Child[];
 }
 
-// 👤 Mi perfil
-export interface MyProfileResponse {
+// 👤 Mi perfil — ficha de equipo (EMPLOYEE) o perfil personal (usuario sin Employee, p. ej. ADMIN)
+export interface EmployeeProfileResponse {
+  kind: 'employee';
   employee: PersonRef & { role: string };
   profile: PersonalProfile | null;
   children: Child[];
+}
+export interface OwnBirthday {
+  displayName: string | null;
+  birthDate: string | null;
+}
+export interface PersonalProfileResponse {
+  kind: 'personal';
+  profile: OwnBirthday;
+}
+export type MyProfileResponse = EmployeeProfileResponse | PersonalProfileResponse;
+
+// 👨‍👩‍👧‍👦 Mi familia
+export type FamilyRelation = 'PARTNER' | 'CHILD' | 'FAMILY' | 'OTHER';
+export interface FamilyMember {
+  id: string;
+  name: string;
+  relation: FamilyRelation;
+  /** `YYYY-MM-DD`, o `--MM-DD` si no se conoce el año (nunca uno inventado). */
+  birthDate: string;
+  active: boolean;
+  age: Age | null;
+  /** De los datos originales: se desactiva, no se elimina. */
+  seeded: boolean;
+}
+export interface FamilyMemberRequest {
+  name: string;
+  relation: FamilyRelation;
+  birthDate: string;
 }

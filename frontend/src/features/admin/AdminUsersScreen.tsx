@@ -165,7 +165,11 @@ export function AdminUsersScreen() {
       {dialog.type === 'activate' ? (
         <PinDialog
           mode="activate"
-          targetDisplayName={dialog.user.employee?.displayName ?? dialog.user.username}
+          targetDisplayName={
+            dialog.user.employee?.displayName ??
+            dialog.user.personalProfile?.displayName ??
+            dialog.user.username
+          }
           isSelf={currentUser?.id === dialog.user.id}
           onCancel={closeDialog}
           onSubmit={async (pin) => {
@@ -178,7 +182,11 @@ export function AdminUsersScreen() {
       {dialog.type === 'reset' ? (
         <PinDialog
           mode="reset"
-          targetDisplayName={dialog.user.employee?.displayName ?? dialog.user.username}
+          targetDisplayName={
+            dialog.user.employee?.displayName ??
+            dialog.user.personalProfile?.displayName ??
+            dialog.user.username
+          }
           isSelf={currentUser?.id === dialog.user.id}
           onCancel={closeDialog}
           onSubmit={async (pin) => {
@@ -190,7 +198,7 @@ export function AdminUsersScreen() {
 
       {dialog.type === 'status' ? (
         <ConfirmDialog
-          title={`${getTransitionActionLabel(dialog.nextStatus)} a ${dialog.user.employee?.displayName ?? dialog.user.username}`}
+          title={`${getTransitionActionLabel(dialog.nextStatus)} a ${dialog.user.employee?.displayName ?? dialog.user.personalProfile?.displayName ?? dialog.user.username}`}
           description={
             <>
               Esta persona pasará de <strong>{getStatusLabel(dialog.user.status)}</strong> a{' '}

@@ -124,6 +124,8 @@ export const queryKeys = {
         ? ([...scope(userId), 'more', 'team'] as const)
         : ([...scope(userId), 'more', 'team', filter] as const),
     profile: (userId: string) => [...scope(userId), 'more', 'profile'] as const,
+    /** 👨‍👩‍👧‍👦 Mi familia (usuario sin Employee). */
+    family: (userId: string) => [...scope(userId), 'more', 'family'] as const,
   },
   admin: {
     users: (userId: string) => [...scope(userId), 'admin', 'users'] as const,

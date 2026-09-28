@@ -20,6 +20,11 @@ export interface AuthContextValue {
   /** Reintenta la restauración de sesión — solo tiene sentido desde `sessionError` (falla de red). */
   retryBootstrap: () => void;
   hasRole: (role: SystemRole) => boolean;
+  /**
+   * Etapa 5F — refleja en la sesión en memoria un nombre visible recién
+   * guardado en Mi perfil (sin request extra ni reinicio de sesión).
+   */
+  applyDisplayName: (displayName: string) => void;
 }
 
 /** Consumido exclusivamente por `useAuth.ts` — nunca directamente por componentes. */

@@ -4,7 +4,10 @@ import type {
   EmployeeFormRequest,
   EventFormRequest,
   EventType,
+  EmployeeProfileResponse,
   EventsResponse,
+  FamilyMember,
+  FamilyMemberRequest,
   GalleryCategory,
   GalleryPhoto,
   ManagedEmployee,
@@ -12,7 +15,9 @@ import type {
   MyProfileResponse,
   NewsItem,
   NewsListResponse,
+  OwnBirthday,
   PersonalProfile,
+  PersonalProfileResponse,
   PhotosListResponse,
   TeamFilter,
   TeamMember,
@@ -88,7 +93,7 @@ export const fetchEmployees = () =>
   apiRequest<{ employees: ManagedEmployee[] }>('/employees', auth);
 export const createEmployee = (body: EmployeeFormRequest) =>
   post<{ employee: ManagedEmployee }>('/employees', body);
-export const updateEmployee = (employeeId: string, body: EmployeeFormRequest) =>
+export const updateEmployee = (employeeId: string, body: Partial<EmployeeFormRequest>) =>
   apiRequest<{ employee: ManagedEmployee }>(`/employees/${employeeId}`, {
     method: 'PATCH',
     body,
@@ -106,10 +111,32 @@ export const fetchTeamProfiles = (filter: TeamFilter) =>
 // 👤 Mi perfil
 export const fetchMyProfile = () => apiRequest<MyProfileResponse>('/me/profile', auth);
 export const saveMyProfile = (body: PersonalProfile) =>
-  apiRequest<MyProfileResponse>('/me/profile', { method: 'PUT', body, ...auth });
+  apiRequest<EmployeeProfileResponse>('/me/profile', { method: 'PUT', body, ...auth });
+/** Perfil personal (usuario sin Employee): mismo endpoint, contrato según la sesión. */
+export const saveMyOwnBirthday = (body: OwnBirthday) =>
+  apiRequest<PersonalProfileResponse>('/me/profile', { method: 'PUT', body, ...auth });
 export const addMyChild = (
   body: { name: string; birthDate: string | null },
   idempotencyKey: string,
 ) => post<{ child: Child }>('/me/children', body, { 'Idempotency-Key': idempotencyKey });
 export const removeMyChild = (childId: string) =>
   post<unknown>(`/me/children/${childId}/remove`, {});
+
+// 👨‍👩‍👧‍👦 Mi familia (el propietario sale de la sesión: nunca se envía userId)
+export const fetchMyFamily = () => apiRequest<{ family: FamilyMember[] }>('/me/family', auth);
+export const createFamilyMember = (body: FamilyMemberRequest, idempotencyKey: string) =>
+  post<{ member: FamilyMember }>('/me/family', body, { 'Idempotency-Key': idempotencyKey });
+export const updateFamilyMember = (memberId: string, body: Partial<FamilyMemberRequest>) =>
+  apiRequest<{ member: FamilyMember }>(`/me/family/${memberId}`, {
+    method: 'PATCH',
+    body,
+    ...auth,
+  });
+export const setFamilyMemberActive = (memberId: string, active: boolean) =>
+  apiRequest<{ member: FamilyMember }>(`/me/family/${memberId}/status`, {
+    method: 'PATCH',
+    body: { active },
+    ...auth,
+  });
+export const deleteFamilyMember = (memberId: string) =>
+  apiRequest<void>(`/me/family/${memberId}`, { method: 'DELETE', ...auth });

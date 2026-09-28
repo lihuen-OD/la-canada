@@ -6,12 +6,15 @@ import { queryKeys } from '../../api/queryKeys';
 import { useSessionScope } from '../../api/useSessionScope';
 import { useAuth } from '../../auth/useAuth';
 import { Avatar } from '../../components/ui/Avatar';
+import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { Chip } from '../../components/ui/Chip';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
 import { errorMessageOf, isSessionExpired } from '../pets/petErrors';
+import { EmployeeNameDialog } from './EmployeeNameDialog';
 import { MoreBackLink } from './MoreBackLink';
+import { useMoreCache } from './useMoreCache';
 import { ageLabel, shortDate } from './moreLabels';
 
 const FILTERS: readonly { value: TeamFilter; label: string }[] = [
@@ -21,13 +24,17 @@ const FILTERS: readonly { value: TeamFilter; label: string }[] = [
 ];
 
 /**
- * 👤 Datos del equipo (`pg-empleados-datos`, solo ADMIN, lectura): ficha e
- * hijos que cada persona cargó en Mi perfil, con filtro completos / sin datos.
+ * 👤 Datos del equipo (`pg-empleados-datos`, solo ADMIN): ficha e hijos que
+ * cada persona cargó en Mi perfil (lectura), con filtro completos / sin datos.
+ * Etapa 5F: el ADMIN puede corregir el nombre visible de cada persona.
  */
 export default function TeamScreen() {
   const { logout } = useAuth();
   const { userId, enabled } = useSessionScope();
   const [filter, setFilter] = useState<TeamFilter>('all');
+  const [renaming, setRenaming] = useState<{ id: string; displayName: string } | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const { afterPersonNameChange } = useMoreCache();
   const handleSessionExpired = useCallback(() => void logout(), [logout]);
   const query = useQuery({
     queryKey: queryKeys.more.team(userId, filter),
@@ -62,6 +69,9 @@ export default function TeamScreen() {
           </Chip>
         ))}
       </div>
+      <div aria-live="polite" className="live-status live-status--start">
+        {status ? <span role="status">{status}</span> : null}
+      </div>
       {!query.data ? (
         query.isError ? (
           <ErrorState
@@ -90,8 +100,23 @@ export default function TeamScreen() {
                       <span className="team-card__name">
                         {profile?.fullLegalName || member.displayName}
                       </span>
-                      <span className="more__muted">{member.role}</span>
+                      <span className="more__muted">
+                        {profile?.fullLegalName && profile.fullLegalName !== member.displayName
+                          ? `${member.displayName} · ${member.role}`
+                          : member.role}
+                      </span>
                     </span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      aria-label={`Editar nombre de ${member.displayName}`}
+                      onClick={() => {
+                        setStatus(null);
+                        setRenaming({ id: member.id, displayName: member.displayName });
+                      }}
+                    >
+                      <span aria-hidden="true">✏️</span>
+                    </Button>
                     <span
                       className={
                         member.complete ? 'team-card__state is-complete' : 'team-card__state'
@@ -160,6 +185,19 @@ export default function TeamScreen() {
           })}
         </ul>
       )}
+      {renaming ? (
+        <EmployeeNameDialog
+          employee={renaming}
+          onClose={() => setRenaming(null)}
+          onSaved={(displayName, changed) => {
+            setRenaming(null);
+            if (!changed) return;
+            setStatus(`Nombre actualizado: ${displayName} ✓`);
+            afterPersonNameChange();
+          }}
+          onSessionExpired={handleSessionExpired}
+        />
+      ) : null}
     </div>
   );
 }

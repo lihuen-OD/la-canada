@@ -3,7 +3,9 @@ import { requireAuth } from '../middleware/requireAuth';
 import { requireJsonContentType } from '../middleware/requireJsonContentType';
 import { requireRole } from '../middleware/requireRole';
 import {
+  deleteMyFamilyHandler,
   getEmployeesHandler,
+  getMyFamilyHandler,
   getEventsHandler,
   getMoreSummaryHandler,
   getMyProfileHandler,
@@ -16,11 +18,14 @@ import {
   patchEmployeeHandler,
   patchEmployeeStatusHandler,
   patchEventHandler,
+  patchMyFamilyHandler,
+  patchMyFamilyStatusHandler,
   postDeleteEventHandler,
   postDeletePhotoHandler,
   postEmployeeHandler,
   postEventHandler,
   postMyChildHandler,
+  postMyFamilyHandler,
   postNewsHandler,
   postPhotoHandler,
   postRemoveMyChildHandler,
@@ -69,10 +74,19 @@ employeesRouter.post('/', requireJsonContentType, postEmployeeHandler);
 employeesRouter.patch('/:id', requireJsonContentType, patchEmployeeHandler);
 employeesRouter.patch('/:id/status', requireJsonContentType, patchEmployeeStatusHandler);
 
-/** 👤 Mi perfil: siempre el empleado de la sesión. */
+/**
+ * 👤 Mi perfil: siempre la persona de la sesión (nunca un `userId` del
+ * cliente). Hijos: ficha de equipo. Familia: usuario sin Employee (Etapa 5F);
+ * `DELETE` solo para un familiar cargado por error.
+ */
 export const meRouter = Router();
 meRouter.use(requireAuth);
 meRouter.get('/profile', getMyProfileHandler);
 meRouter.put('/profile', requireJsonContentType, putMyProfileHandler);
 meRouter.post('/children', requireJsonContentType, postMyChildHandler);
 meRouter.post('/children/:id/remove', requireJsonContentType, postRemoveMyChildHandler);
+meRouter.get('/family', getMyFamilyHandler);
+meRouter.post('/family', requireJsonContentType, postMyFamilyHandler);
+meRouter.patch('/family/:id', requireJsonContentType, patchMyFamilyHandler);
+meRouter.patch('/family/:id/status', requireJsonContentType, patchMyFamilyStatusHandler);
+meRouter.delete('/family/:id', deleteMyFamilyHandler);

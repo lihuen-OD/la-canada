@@ -50,6 +50,8 @@ export async function listUsers(req: Request, res: Response): Promise<void> {
         createdAt: true,
         updatedAt: true,
         employee: { select: { id: true, displayName: true } },
+        /** Etapa 5F — nombre visible del perfil personal (ADMIN sin Employee). */
+        personalProfile: { select: { displayName: true } },
       },
       orderBy: { createdAt: 'asc' },
       skip: (page - 1) * pageSize,

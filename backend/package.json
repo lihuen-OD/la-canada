@@ -19,6 +19,7 @@
     "db:migrate:status": "tsx src/scripts/guardDbCommand.ts --require DIRECT_URL --shape direct && prisma migrate status",
     "db:seed": "tsx src/scripts/guardDbCommand.ts --require DATABASE_URL --shape pooled --gate-target && prisma db seed",
     "auth:bootstrap-admin": "tsx src/scripts/bootstrapAdmin.ts",
+    "family:backfill-admin": "tsx src/scripts/guardDbCommand.ts --require DATABASE_URL --shape pooled --gate-target && tsx src/scripts/backfillAdminFamily.ts",
     "storage:reconcile": "tsx src/scripts/guardDbCommand.ts --require DATABASE_URL --shape pooled --gate-target && tsx src/scripts/reconcileStorage.ts"
   },
   "dependencies": {

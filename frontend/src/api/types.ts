@@ -33,6 +33,8 @@ export interface AuthenticatedUser {
   id: string;
   role: SystemRole;
   status: UserStatus;
+  /** Etapa 5F — nombre visible cargado (Employee o perfil personal); null = sin nombre. Nunca `username`. */
+  displayName: string | null;
   employee: { id: string; displayName: string; colorHex: string } | null;
 }
 

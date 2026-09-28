@@ -28,6 +28,12 @@ export interface PublicUser {
   id: string;
   role: 'ADMIN' | 'EMPLOYEE';
   status: string;
+  /**
+   * Etapa 5F — nombre visible cargado: el del `Employee` vinculado o, si no
+   * tiene, el de `UserProfile` (ADMIN). `null` = todavía sin nombre (el
+   * frontend muestra "Administrador"). Nunca el `username`.
+   */
+  displayName: string | null;
   employee: { id: string; displayName: string; colorHex: string } | null;
 }
 
@@ -39,17 +45,40 @@ export interface LoginResult {
   user: PublicUser;
 }
 
+/**
+ * Etiqueta genérica para un `ADMIN` sin `Employee` vinculado ni nombre cargado
+ * en Mi perfil — nunca se usa `username` como reemplazo, aunque estuviera
+ * disponible, porque es un identificador técnico interno, no un nombre
+ * pensado para mostrarse.
+ */
+const ADMIN_FALLBACK_DISPLAY_NAME = 'Administrador';
+
+type NamedUser = {
+  employee?: { displayName: string } | null;
+  personalProfile?: { displayName: string | null } | null;
+};
+
+/** Nombre visible cargado (Employee → perfil personal) o null. Nunca `username`. */
+export const loadedVisibleName = (user: NamedUser): string | null =>
+  user.employee?.displayName ?? user.personalProfile?.displayName ?? null;
+
+/** Nombre visible con el fallback "Administrador" (selector de ingreso). */
+export const resolveVisibleName = (user: NamedUser): string =>
+  loadedVisibleName(user) ?? ADMIN_FALLBACK_DISPLAY_NAME;
+
 function toPublicUser(user: {
   id: string;
   role: 'ADMIN' | 'EMPLOYEE';
   status: string;
   employee: { id: string; displayName: string; colorHex: string } | null;
+  personalProfile?: { displayName: string | null } | null;
 }): PublicUser {
   const { employee } = user;
   return {
     id: user.id,
     role: user.role,
     status: user.status,
+    displayName: loadedVisibleName(user),
     // Campos explícitos: `active` (y cualquier otro) nunca se filtra al cliente.
     employee: employee
       ? { id: employee.id, displayName: employee.displayName, colorHex: employee.colorHex }
@@ -77,6 +106,7 @@ const USER_SELECT_FOR_AUTH = {
   failedLoginAttempts: true,
   lockedUntil: true,
   employee: { select: { id: true, displayName: true, colorHex: true, active: true } },
+  personalProfile: { select: { displayName: true } },
 } as const;
 
 /**
@@ -254,15 +284,6 @@ export interface LoginOption {
 }
 
 /**
- * Etiqueta genérica para un `ADMIN` sin `Employee` vinculado (el caso
- * normal: el admin se crea vía `bootstrapAdmin`, nunca vía el seed de
- * empleados) — nunca se usa `username` como reemplazo, aunque estuviera
- * disponible, porque es un identificador técnico interno, no un nombre
- * pensado para mostrarse.
- */
-const ADMIN_FALLBACK_DISPLAY_NAME = 'Administrador';
-
-/**
  * Únicamente usuarios `status: ACTIVE` — los `PENDING_ACTIVATION` todavía no
  * tienen PIN (no pueden autenticarse), y `SUSPENDED`/`DEACTIVATED` no deben
  * ofrecerse como identidad seleccionable aunque conserven su PIN antiguo.
@@ -277,6 +298,7 @@ export async function getLoginOptions(prisma: PrismaClient): Promise<LoginOption
       id: true,
       role: true,
       employee: { select: { displayName: true, colorHex: true, active: true } },
+      personalProfile: { select: { displayName: true } },
     },
     orderBy: { createdAt: 'asc' },
   });
@@ -293,7 +315,7 @@ export async function getLoginOptions(prisma: PrismaClient): Promise<LoginOption
     }
     options.push({
       id: user.id,
-      displayName: user.employee?.displayName ?? ADMIN_FALLBACK_DISPLAY_NAME,
+      displayName: resolveVisibleName(user),
       role: user.role,
       colorHex: user.employee?.colorHex ?? null,
     });

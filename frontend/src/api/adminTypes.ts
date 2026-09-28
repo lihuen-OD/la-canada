@@ -30,6 +30,8 @@ export interface AdminUserListItem {
   createdAt: string;
   updatedAt: string;
   employee: { id: string; displayName: string } | null;
+  /** Etapa 5F — nombre visible del perfil personal (ADMIN sin Employee). */
+  personalProfile?: { displayName: string | null } | null;
 }
 
 export interface AdminUsersListResponse {

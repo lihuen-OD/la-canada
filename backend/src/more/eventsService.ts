@@ -4,6 +4,8 @@ import type { EventType } from '../generated/prisma/enums';
 import { config } from '../config';
 import { recordAuditLog } from '../auth/auditLog';
 import {
+  EventBirthdayDerivedError,
+  EventBirthdayDuplicateError,
   EventDuplicateError,
   EventNotFoundError,
   ForbiddenError,
@@ -13,19 +15,26 @@ import { formatLocalDate, parseLocalDate, toLocalDate, type LocalDate } from '..
 import { prisma } from '../lib/prisma';
 import type { RequestMeta, TaskActor } from '../tasks/tasksService';
 import {
+  birthdayFallsOn,
+  birthdayPersonKey,
+  birthdayTitle,
   monthDayOf,
   upcomingBirthdays,
   type BirthdayInput,
-  type BirthdaySource,
+  type BirthdayOrigin,
 } from './birthdays';
+import { FAMILY_RELATION_LABEL } from './familyService';
 import type { createEventBodySchema, updateEventBodySchema } from './moreSchemas';
 
 /**
  * 📅 Eventos (docs/BUSINESS_RULES.md §13–§14). Paridad: todos ven eventos y
  * cumpleaños; crear, editar y eliminar es solo de ADMIN. "Eliminar" es una
- * anulación lógica auditada (el prototipo borraba la fila). Los cumpleaños no
- * son filas: se derivan al leer (ver `birthdays.ts`) y no se editan acá — se
- * corrigen en su origen (Mi perfil, la ficha de la mascota).
+ * anulación lógica auditada (el prototipo borraba la fila). Los cumpleaños
+ * derivados no son filas: se calculan al leer (ver `birthdays.ts`), llevan su
+ * `origin` explícito y no se editan acá — se corrigen en su fuente (Mi perfil,
+ * Mi familia, la ficha de la mascota). Un cumpleaños MANUAL (Event tipo
+ * BIRTHDAY) sí es una fila: ADMIN lo crea, edita y anula, y no puede duplicar
+ * a otro manual ni a uno derivado (Etapa 5F).
  */
 
 type CreateEventInput = z.infer<typeof createEventBodySchema>;
@@ -57,6 +66,7 @@ function serializeEvent(row: EventRow, today: string) {
   const date = dateText(row.date);
   return {
     kind: 'event' as const,
+    origin: 'MANUAL' as const,
     id: row.id,
     title: row.title,
     date,
@@ -68,77 +78,154 @@ function serializeEvent(row: EventRow, today: string) {
 
 export type SerializedEvent = ReturnType<typeof serializeEvent>;
 
+/** Quién mira el listado: decide solo el enlace a la fuente, nunca qué filas se ven. */
+export type EventViewer = Pick<TaskActor, 'userId' | 'role' | 'employeeId'>;
+
+/**
+ * Referencia mínima para que el frontend navegue a la fuente de un cumpleaños
+ * derivado: el propio perfil (o la propia familia), Datos del equipo (ADMIN,
+ * lectura) o la ficha de la mascota. `null` = no hay nada que esa persona
+ * pueda abrir (p. ej. la familia del ADMIN vista por un EMPLOYEE). No expone
+ * ids de usuarios ni de empleados.
+ */
+export type BirthdaySourceRef =
+  { kind: 'MY_PROFILE' } | { kind: 'TEAM_PROFILES' } | { kind: 'PET'; id: string } | null;
+
+export function birthdaySourceRef(input: BirthdayInput, viewer: EventViewer): BirthdaySourceRef {
+  switch (input.origin) {
+    case 'USER_PROFILE':
+    case 'USER_FAMILY':
+      return input.ownerUserId === viewer.userId ? { kind: 'MY_PROFILE' } : null;
+    case 'EMPLOYEE':
+    case 'EMPLOYEE_CHILD':
+      if (viewer.employeeId && input.employeeId === viewer.employeeId)
+        return { kind: 'MY_PROFILE' };
+      return viewer.role === 'ADMIN' ? { kind: 'TEAM_PROFILES' } : null;
+    case 'ANIMAL':
+      return { kind: 'PET', id: input.sourceId };
+    case 'GLOBAL_RECURRING':
+      return null;
+  }
+}
+
 const RELATIONSHIP_LABEL: Record<string, string> = { familia: 'Familia' };
 
-/** Los cumpleaños vigentes de las cuatro fuentes. Cuatro sentencias de base (más una por relación). */
-async function loadBirthdayInputs(): Promise<BirthdayInput[]> {
-  const [family, profiles, children, animals] = await Promise.all([
-    prisma.recurringBirthday.findMany({
-      where: { active: true },
-      select: { id: true, personLabel: true, month: true, day: true, relationship: true },
+/**
+ * Los cumpleaños vigentes de todas las fuentes, en cinco sentencias fijas en
+ * paralelo (más una por relación incluida), sin importar cuántas filas haya:
+ * nunca una consulta por cumpleaños. Omite fuentes inactivas: familiares o
+ * globales desactivados, usuarios no activos, personas dadas de baja y
+ * mascotas inactivas.
+ */
+export async function loadBirthdayInputs(): Promise<BirthdayInput[]> {
+  const db = prisma;
+  const [recurring, userProfiles, profiles, children, animals] = await Promise.all([
+    db.recurringBirthday.findMany({
+      where: { active: true, OR: [{ ownerUserId: null }, { owner: { status: 'ACTIVE' } }] },
+      select: {
+        id: true,
+        personLabel: true,
+        month: true,
+        day: true,
+        relationship: true,
+        relation: true,
+        ownerUserId: true,
+      },
     }),
-    prisma.employeeProfile.findMany({
+    // Solo usuarios SIN Employee: uno con ficha de equipo cumple desde `EmployeeProfile`.
+    db.userProfile.findMany({
+      where: { birthDate: { not: null }, user: { status: 'ACTIVE', employeeId: null } },
+      select: { id: true, userId: true, displayName: true, birthDate: true },
+    }),
+    db.employeeProfile.findMany({
       where: { birthDate: { not: null }, employee: { active: true } },
       select: { employeeId: true, birthDate: true, employee: { select: { displayName: true } } },
     }),
-    prisma.employeeChild.findMany({
+    db.employeeChild.findMany({
       where: { birthDate: { not: null }, employee: { active: true } },
       select: {
         id: true,
         name: true,
         birthDate: true,
+        employeeId: true,
         employee: { select: { displayName: true } },
       },
     }),
-    prisma.animal.findMany({
+    db.animal.findMany({
       where: { active: true, birthDate: { not: null } },
       select: { id: true, name: true, birthDate: true },
     }),
   ]);
   const of = (
-    source: BirthdaySource,
+    origin: BirthdayOrigin,
     sourceId: string,
     name: string,
     date: Date,
     note: string,
-  ) => ({
-    source,
-    sourceId,
-    name,
-    note,
-    ...monthDayOf(date),
-  });
+    extra: Partial<BirthdayInput> = {},
+  ): BirthdayInput => ({ origin, sourceId, name, note, ...monthDayOf(date), ...extra });
   return [
-    ...family.map((row) => ({
-      source: 'FAMILY' as const,
+    ...recurring.map((row): BirthdayInput =>
+      row.ownerUserId && row.relation
+        ? {
+            origin: 'USER_FAMILY',
+            sourceId: row.id,
+            name: row.personLabel,
+            month: row.month,
+            day: row.day,
+            note: FAMILY_RELATION_LABEL[row.relation],
+            ownerUserId: row.ownerUserId,
+          }
+        : {
+            origin: 'GLOBAL_RECURRING',
+            sourceId: row.id,
+            name: row.personLabel,
+            month: row.month,
+            day: row.day,
+            note: row.relationship
+              ? (RELATIONSHIP_LABEL[row.relationship] ?? row.relationship)
+              : 'Familia',
+          },
+    ),
+    ...userProfiles.map((row) => ({
+      origin: 'USER_PROFILE' as const,
       sourceId: row.id,
-      name: row.personLabel,
-      month: row.month,
-      day: row.day,
-      note: row.relationship
-        ? (RELATIONSHIP_LABEL[row.relationship] ?? row.relationship)
-        : 'Familia',
+      name: row.displayName,
+      fallbackTitle: 'Cumpleaños del administrador',
+      note: 'Administración',
+      ownerUserId: row.userId,
+      ...monthDayOf(row.birthDate as Date),
     })),
     ...profiles.map((row) =>
-      of('EMPLOYEE', row.employeeId, row.employee.displayName, row.birthDate as Date, 'Equipo'),
+      of('EMPLOYEE', row.employeeId, row.employee.displayName, row.birthDate as Date, 'Equipo', {
+        employeeId: row.employeeId,
+      }),
     ),
     ...children.map((row) =>
-      of('CHILD', row.id, row.name, row.birthDate as Date, `Hijo/a de ${row.employee.displayName}`),
+      of(
+        'EMPLOYEE_CHILD',
+        row.id,
+        row.name,
+        row.birthDate as Date,
+        `Hijo/a de ${row.employee.displayName}`,
+        { employeeId: row.employeeId },
+      ),
     ),
-    ...animals.map((row) => of('PET', row.id, row.name, row.birthDate as Date, 'Mascota')),
+    ...animals.map((row) => of('ANIMAL', row.id, row.name, row.birthDate as Date, 'Mascota')),
   ];
 }
 
-function birthdayItems(inputs: readonly BirthdayInput[], today: LocalDate) {
+function birthdayItems(inputs: readonly BirthdayInput[], today: LocalDate, viewer: EventViewer) {
   return upcomingBirthdays(inputs, today).map((birthday) => ({
     kind: 'birthday' as const,
-    id: `${birthday.source.toLowerCase()}:${birthday.sourceId}`,
-    title: `Cumpleaños de ${birthday.name}`,
+    origin: birthday.origin,
+    id: `${birthday.origin.toLowerCase()}:${birthday.sourceId}`,
+    title: birthdayTitle(birthday),
     date: birthday.date,
     type: 'BIRTHDAY' as const,
     note: birthday.note,
     daysUntil: birthday.daysUntil,
-    source: birthday.source,
+    sourceRef: birthdaySourceRef(birthday, viewer),
   }));
 }
 
@@ -148,6 +235,7 @@ function birthdayItems(inputs: readonly BirthdayInput[], today: LocalDate) {
  * prototipo. Sentencias fijas, independientes del número de filas.
  */
 export async function listEvents(
+  viewer: EventViewer,
   filters: { type?: EventType; pastPage: number; pastPageSize: number },
   now = new Date(),
 ) {
@@ -179,7 +267,7 @@ export async function listEvents(
   ]);
   const items = [
     ...upcoming.map((row) => serializeEvent(row, todayText)),
-    ...birthdayItems(birthdayInputs, today),
+    ...birthdayItems(birthdayInputs, today, viewer),
   ].sort((a, b) => a.daysUntil - b.daysUntil || a.title.localeCompare(b.title, 'es'));
   return {
     today: todayText,
@@ -195,7 +283,7 @@ export async function listEvents(
 }
 
 /** Solo los próximos eventos/cumpleaños para Inicio; evita cargar y contar pasados. */
-export async function listUpcomingEvents(limit: number, now = new Date()) {
+export async function listUpcomingEvents(viewer: EventViewer, limit: number, now = new Date()) {
   const today = businessToday(now);
   const todayText = formatLocalDate(today);
   const todayDb = toDbDate(today);
@@ -210,7 +298,7 @@ export async function listUpcomingEvents(limit: number, now = new Date()) {
   ]);
   return [
     ...upcoming.map((row) => serializeEvent(row, todayText)),
-    ...birthdayItems(birthdayInputs, today),
+    ...birthdayItems(birthdayInputs, today, viewer),
   ]
     .sort((a, b) => a.daysUntil - b.daysUntil || a.title.localeCompare(b.title, 'es'))
     .slice(0, limit);
@@ -221,7 +309,12 @@ export async function countUpcomingEvents(now = new Date()) {
   const todayDb = toDbDate(businessToday(now));
   const counts = await Promise.all([
     prisma.event.count({ where: { deletedAt: null, date: { gte: todayDb } } }),
-    prisma.recurringBirthday.count({ where: { active: true } }),
+    prisma.recurringBirthday.count({
+      where: { active: true, OR: [{ ownerUserId: null }, { owner: { status: 'ACTIVE' } }] },
+    }),
+    prisma.userProfile.count({
+      where: { birthDate: { not: null }, user: { status: 'ACTIVE', employeeId: null } },
+    }),
     prisma.employeeProfile.count({
       where: { birthDate: { not: null }, employee: { active: true } },
     }),
@@ -239,6 +332,49 @@ function auditEventState(row: EventRow) {
   return { title: row.title, date: dateText(row.date), type: row.type, note: row.note };
 }
 
+/**
+ * Antes de guardar un cumpleaños MANUAL: (1) otro manual vigente de la misma
+ * persona el mismo día → 409; (2) un cumpleaños derivado activo de la misma
+ * persona que cae ese día (29/02 → 01/03 en años no bisiestos) → 409 y se
+ * indica editarlo desde su perfil. La persona se compara por nombre sin
+ * mayúsculas ni espacios extra (`birthdayPersonKey`); dos personas distintas
+ * con igual nombre y fecha solo se distinguen cambiando el título (riesgo
+ * documentado: no hay constraint de base para esto). Lecturas fuera de la
+ * transacción: una carrera entre dos altas idénticas la frena el índice único.
+ */
+async function assertManualBirthdayIsUnique(
+  title: string,
+  date: LocalDate,
+  exceptEventId?: string,
+): Promise<void> {
+  const person = birthdayPersonKey(title);
+  const [sameDay, derived] = await Promise.all([
+    prisma.event.findMany({
+      where: {
+        type: 'BIRTHDAY',
+        deletedAt: null,
+        date: toDbDate(date),
+        ...(exceptEventId ? { id: { not: exceptEventId } } : {}),
+      },
+      select: { title: true },
+    }),
+    loadBirthdayInputs(),
+  ]);
+  if (sameDay.some((row) => birthdayPersonKey(row.title) === person)) {
+    throw new EventBirthdayDuplicateError();
+  }
+  if (
+    derived.some(
+      (input) =>
+        input.name !== null &&
+        birthdayPersonKey(input.name) === person &&
+        birthdayFallsOn(input, date),
+    )
+  ) {
+    throw new EventBirthdayDerivedError();
+  }
+}
+
 /** "+ Nuevo" (ADMIN). Sin duplicados vigentes (título + fecha + tipo). */
 export async function createEvent(
   actor: TaskActor,
@@ -248,6 +384,7 @@ export async function createEvent(
 ) {
   requireAdmin(actor, 'Solo un administrador puede crear eventos.');
   const date = resolveEventDate(input.date);
+  if (input.type === 'BIRTHDAY') await assertManualBirthdayIsUnique(input.title, date);
   try {
     return await prisma.$transaction(async (tx) => {
       const row = await tx.event.create({
@@ -286,6 +423,22 @@ export async function updateEvent(
 ) {
   requireAdmin(actor, 'Solo un administrador puede editar eventos.');
   const date = input.date !== undefined ? resolveEventDate(input.date) : undefined;
+  if (input.type === 'BIRTHDAY' || input.type === undefined) {
+    // El chequeo necesita el estado final (título, fecha y tipo tras el cambio).
+    const current = await prisma.event.findFirst({
+      where: { id: eventId, deletedAt: null },
+      select: { title: true, date: true, type: true },
+    });
+    if (!current) throw new EventNotFoundError();
+    const finalType = input.type ?? current.type;
+    if (finalType === 'BIRTHDAY') {
+      await assertManualBirthdayIsUnique(
+        input.title ?? current.title,
+        date ?? (parseLocalDate(dateText(current.date)) as LocalDate),
+        eventId,
+      );
+    }
+  }
   try {
     return await prisma.$transaction(async (tx) => {
       const before = await tx.event.findFirst({

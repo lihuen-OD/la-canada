@@ -78,6 +78,21 @@ describe('AuthProvider — restauración de sesión (bootstrap)', () => {
     await pending.promise.catch(() => undefined);
   });
 
+  it('applyDisplayName refleja el nombre nuevo en la sesión sin requests extra (Etapa 5F)', async () => {
+    refreshSessionMock.mockResolvedValue({ accessToken: 'token-1', expiresIn: 720 });
+    fetchMeMock.mockResolvedValue({ user: USER });
+    const { result } = renderAuth();
+    await waitFor(() => expect(result.current.status).toBe('authenticated'));
+    const calls = fetchMeMock.mock.calls.length;
+    act(() => result.current.applyDisplayName('Nombre corregido'));
+    expect(result.current.user?.displayName).toBe('Nombre corregido');
+    if (result.current.user?.employee) {
+      expect(result.current.user.employee.displayName).toBe('Nombre corregido');
+    }
+    expect(fetchMeMock.mock.calls.length).toBe(calls);
+    expect(refreshSessionMock).toHaveBeenCalledTimes(1);
+  });
+
   it('refresh + /me exitosos -> authenticated, con el usuario real', async () => {
     refreshSessionMock.mockResolvedValue({ accessToken: 'token-1', expiresIn: 720 });
     fetchMeMock.mockResolvedValue({ user: USER });

@@ -15,6 +15,7 @@ import type { SystemRole } from '../../api/types';
 import { fetchStockDestinations } from '../../api/stockApi';
 import { fetchTaskEmployees } from '../../api/tasksApi';
 import { useAuth } from '../../auth/useAuth';
+import { getUserDisplayName } from '../../auth/userDisplay';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { AlertIcon } from '../../components/ui/icons';
@@ -414,7 +415,7 @@ export function MovementDialog({
                       changeField(() => setPersonId(next));
                     }}
                   >
-                    <option value="">🔐 Administrador</option>
+                    <option value="">🔐 {user ? getUserDisplayName(user) : 'Administrador'}</option>
                     {(employeesQuery.data?.employees ?? []).map((employee) => (
                       <option key={employee.id} value={employee.id}>
                         {employee.displayName}

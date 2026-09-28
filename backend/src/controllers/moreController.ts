@@ -11,8 +11,10 @@ import {
   createChildBodySchema,
   createEmployeeBodySchema,
   createEventBodySchema,
+  createFamilyMemberBodySchema,
   createNewsBodySchema,
   employeeStatusBodySchema,
+  familyStatusBodySchema,
   idParamSchema,
   listEventsQuerySchema,
   listNewsQuerySchema,
@@ -20,6 +22,8 @@ import {
   teamProfilesQuerySchema,
   updateEmployeeBodySchema,
   updateEventBodySchema,
+  updateFamilyMemberBodySchema,
+  updatePersonalProfileBodySchema,
   updateProfileBodySchema,
   uploadPhotoQuerySchema,
 } from '../more/moreSchemas';
@@ -42,6 +46,14 @@ import {
   updateEmployee,
 } from '../more/employeesService';
 import { addMyChild, getMyProfile, removeMyChild, updateMyProfile } from '../more/profileService';
+import {
+  createFamilyMember,
+  deleteFamilyMember,
+  listMyFamily,
+  setFamilyMemberActive,
+  updateFamilyMember,
+  updatePersonalProfile,
+} from '../more/familyService';
 import { getMoreSummary } from '../more/summaryService';
 import { PET_PHOTO_MIME_TYPES } from '../pets/petPhotoService';
 
@@ -103,11 +115,11 @@ export async function postNewsHandler(req: Request, res: Response): Promise<void
 // ── 📅 Eventos ──
 
 export async function getEventsHandler(req: Request, res: Response): Promise<void> {
-  await actorFrom(req);
+  const actor = await actorFrom(req);
   send(
     res,
     200,
-    await listEvents(parseOrThrow(listEventsQuerySchema, req.query, 'Filtros inválidos.')),
+    await listEvents(actor, parseOrThrow(listEventsQuerySchema, req.query, 'Filtros inválidos.')),
   );
 }
 
@@ -250,8 +262,18 @@ export async function getMyProfileHandler(req: Request, res: Response): Promise<
   send(res, 200, await getMyProfile(await actorFrom(req)));
 }
 
+/** El contrato depende de la sesión: ficha de equipo o perfil personal (sin Employee). */
 export async function putMyProfileHandler(req: Request, res: Response): Promise<void> {
   const actor = await actorFrom(req);
+  if (!actor.employeeId) {
+    const input = parseOrThrow(
+      updatePersonalProfileBodySchema,
+      req.body,
+      'Datos del perfil inválidos.',
+    );
+    send(res, 200, await updatePersonalProfile(actor, input, requestMeta(req)));
+    return;
+  }
   const input = parseOrThrow(updateProfileBodySchema, req.body, 'Datos del perfil inválidos.');
   send(res, 200, await updateMyProfile(actor, input, requestMeta(req)));
 }
@@ -266,4 +288,46 @@ export async function postMyChildHandler(req: Request, res: Response): Promise<v
 export async function postRemoveMyChildHandler(req: Request, res: Response): Promise<void> {
   const actor = await actorFrom(req);
   send(res, 200, await removeMyChild(actor, idFrom(req.params.id, 'hijo'), requestMeta(req)));
+}
+
+// ── 👨‍👩‍👧‍👦 Mi familia (usuario sin Employee; el propietario es siempre la sesión) ──
+
+export async function getMyFamilyHandler(req: Request, res: Response): Promise<void> {
+  send(res, 200, await listMyFamily(await actorFrom(req)));
+}
+
+export async function postMyFamilyHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const input = parseOrThrow(
+    createFamilyMemberBodySchema,
+    req.body,
+    'Datos del familiar inválidos.',
+  );
+  const result = await createFamilyMember(actor, input, requestMeta(req), idempotencyKeyOf(req));
+  send(res, result.kind === 'replay' ? result.status : 201, result.body);
+}
+
+export async function patchMyFamilyHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const memberId = idFrom(req.params.id, 'familiar');
+  const input = parseOrThrow(
+    updateFamilyMemberBodySchema,
+    req.body,
+    'Datos del familiar inválidos.',
+  );
+  send(res, 200, await updateFamilyMember(actor, memberId, input, requestMeta(req)));
+}
+
+export async function patchMyFamilyStatusHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const memberId = idFrom(req.params.id, 'familiar');
+  const { active } = parseOrThrow(familyStatusBodySchema, req.body, 'El body debe incluir active.');
+  send(res, 200, await setFamilyMemberActive(actor, memberId, active, requestMeta(req)));
+}
+
+/** `DELETE /me/family/:id` — un familiar cargado por error (los del seed solo se desactivan). */
+export async function deleteMyFamilyHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  await deleteFamilyMember(actor, idFrom(req.params.id, 'familiar'), requestMeta(req));
+  res.set('Cache-Control', 'no-store').status(204).end();
 }

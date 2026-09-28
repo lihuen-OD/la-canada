@@ -74,7 +74,7 @@ export async function getDashboard(actor: TaskActor, now = new Date()) {
       where: { collectionDate: todayDb, voidedAt: null },
       _sum: { goodEggsCount: true },
     }),
-    listUpcomingEvents(3, now),
+    listUpcomingEvents(actor, 3, now),
     prisma.newsReport.findMany({
       select: newsSelect,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],

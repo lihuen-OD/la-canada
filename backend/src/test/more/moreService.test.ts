@@ -369,6 +369,7 @@ describe('⚙️ Personas (solo ADMIN)', () => {
 
 describe('👤 Mi perfil — siempre la persona de la sesión', () => {
   const form = {
+    displayName: 'Coke',
     fullLegalName: 'María González',
     birthDate: '1990-05-04',
     maritalStatus: null,
@@ -401,6 +402,37 @@ describe('👤 Mi perfil — siempre la persona de la sesión', () => {
     expect(audit).toMatchObject({ action: 'profile.updated', entityId: 'emp-1' });
     expect(audit.newState.changedFields).toEqual(['fullLegalName', 'birthDate', 'phone']);
     expect(JSON.stringify(audit)).not.toMatch(/María|3442|1990/);
+  });
+
+  it('corrige su nombre visible en Employee.displayName (sin tocar code/username); auditado', async () => {
+    db.employeeProfile.findUnique.mockResolvedValue(null);
+    db.employeeProfile.upsert.mockResolvedValue({});
+    db.employee.findUnique.mockResolvedValue({
+      id: 'emp-1',
+      displayName: 'Coke',
+      role: 'Doméstica',
+      colorHex: '#4a7c59',
+    });
+    db.employee.update.mockResolvedValue({});
+    db.employeeChild.findMany.mockResolvedValue([]);
+    await updateMyProfile(EMPLOYEE, { ...form, displayName: 'Jorgelina Pérez' }, META, NOW);
+    expect(db.employee.update.mock.calls[0]?.[0]).toEqual({
+      where: { id: 'emp-1' },
+      data: { displayName: 'Jorgelina Pérez' },
+    });
+    expect(audits()[0]).toMatchObject({
+      action: 'employee.display_name_updated',
+      entityType: 'Employee',
+      previousState: { displayName: 'Coke' },
+      newState: { displayName: 'Jorgelina Pérez', bySelf: true },
+    });
+    // Nunca el nombre dentro de la ficha personal ni en UserProfile.
+    expect(JSON.stringify(db.employeeProfile.upsert.mock.calls[0]?.[0])).not.toContain('Jorgelina');
+    // El mismo nombre no escribe ni audita de nuevo.
+    db.employee.update.mockClear();
+    db.employee.findUnique.mockResolvedValue({ displayName: 'Coke' });
+    await updateMyProfile(EMPLOYEE, form, META, NOW);
+    expect(db.employee.update).not.toHaveBeenCalled();
   });
 
   it('una fecha de nacimiento futura se rechaza', async () => {

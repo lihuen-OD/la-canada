@@ -13,6 +13,7 @@ import { canonicalRequestHash, executeIdempotent } from '../lib/idempotency';
 import { prisma } from '../lib/prisma';
 import { computePetAge } from '../pets/petDates';
 import type { RequestMeta, TaskActor } from '../tasks/tasksService';
+import { getPersonalProfile } from './familyService';
 import type { createChildBodySchema, updateProfileBodySchema } from './moreSchemas';
 
 /**
@@ -22,6 +23,9 @@ import type { createChildBodySchema, updateProfileBodySchema } from './moreSchem
  * el perfil de otra persona. Las auditorías registran qué campos cambiaron,
  * nunca sus valores (son datos personales sensibles, docs/SECURITY.md §6).
  * Los cumpleaños resultantes se derivan en Eventos (no se crean filas).
+ * Etapa 5F: un usuario SIN empleado vinculado (el ADMIN) tiene su propio
+ * perfil personal y su familia en `familyService.ts`; `GET /me/profile`
+ * responde uno u otro según la sesión (`kind`).
  */
 
 type UpdateProfileInput = z.infer<typeof updateProfileBodySchema>;
@@ -79,7 +83,13 @@ const PROFILE_FIELDS = Object.keys(profileSelect) as ProfileField[];
 const serializeProfile = (row: ProfileRow | null) =>
   row ? { ...row, birthDate: dateText(row.birthDate) } : null;
 
+/** 👤 Mi perfil de la sesión: ficha de equipo (`kind: 'employee'`) o perfil personal (`'personal'`). */
 export async function getMyProfile(actor: TaskActor, now = new Date()) {
+  if (!actor.employeeId) return getPersonalProfile(actor);
+  return getMyEmployeeProfile(actor, now);
+}
+
+async function getMyEmployeeProfile(actor: TaskActor, now: Date) {
   const employeeId = requireEmployee(actor);
   const [employee, profile, children] = await Promise.all([
     prisma.employee.findUnique({
@@ -96,13 +106,20 @@ export async function getMyProfile(actor: TaskActor, now = new Date()) {
   if (!employee) throw new EmployeeLinkRequiredError();
   const today = businessToday(now);
   return {
+    kind: 'employee' as const,
     employee,
     profile: serializeProfile(profile),
     children: children.map((child) => serializeChild(child, today)),
   };
 }
 
-/** "Guardar mis datos": upsert del formulario completo. */
+/**
+ * "Guardar mis datos": upsert del formulario completo. Etapa 5F: el nombre
+ * visible propio se guarda en `Employee.displayName` (el mismo campo que
+ * edita el ADMIN en Datos del equipo) — nunca en `UserProfile` ni tocando
+ * `code`, `username`, rol, sesiones ni historial. Se audita con el nombre
+ * anterior y el nuevo (dato visible para todo el equipo, no sensible).
+ */
 export async function updateMyProfile(
   actor: TaskActor,
   input: UpdateProfileInput,
@@ -110,8 +127,27 @@ export async function updateMyProfile(
   now = new Date(),
 ) {
   const employeeId = requireEmployee(actor);
-  const data = { ...input, birthDate: resolveBirthDate(input.birthDate, now) };
+  const { displayName, ...fields } = input;
+  const data = { ...fields, birthDate: resolveBirthDate(input.birthDate, now) };
   await prisma.$transaction(async (tx) => {
+    const employee = await tx.employee.findUnique({
+      where: { id: employeeId },
+      select: { displayName: true },
+    });
+    if (!employee) throw new EmployeeLinkRequiredError();
+    if (employee.displayName !== displayName) {
+      await tx.employee.update({ where: { id: employeeId }, data: { displayName } });
+      await recordAuditLog(tx, {
+        actorUserId: actor.userId,
+        action: 'employee.display_name_updated',
+        entityType: 'Employee',
+        entityId: employeeId,
+        previousState: { displayName: employee.displayName },
+        newState: { displayName, bySelf: true },
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      });
+    }
     const before = await tx.employeeProfile.findUnique({
       where: { employeeId },
       select: profileSelect,
@@ -140,7 +176,7 @@ export async function updateMyProfile(
       });
     }
   });
-  return getMyProfile(actor, now);
+  return getMyEmployeeProfile(actor, now);
 }
 
 export type AddChildResult =

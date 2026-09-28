@@ -3,10 +3,11 @@ import type { FormEvent } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { IdempotencyIntent, intentFingerprint } from '../../api/idempotency';
 import { addMyChild, fetchMyProfile, removeMyChild, saveMyProfile } from '../../api/moreApi';
-import type { Child, MyProfileResponse, PersonalProfile } from '../../api/moreTypes';
+import type { Child, EmployeeProfileResponse, PersonalProfile } from '../../api/moreTypes';
 import { queryKeys } from '../../api/queryKeys';
 import { useSessionScope } from '../../api/useSessionScope';
 import { useAuth } from '../../auth/useAuth';
+import { PERSON_NAME_MAX, normalizePersonName, personNameError } from '../../utils/personName';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { PageHeader } from '../../components/ui/PageHeader';
@@ -16,6 +17,7 @@ import { ConfirmDialog } from '../admin/ConfirmDialog';
 import { useSubmitGuard } from '../tasks/useSubmitGuard';
 import { errorCodeOf, errorMessageOf, humanError, isSessionExpired } from '../pets/petErrors';
 import { MoreBackLink } from './MoreBackLink';
+import PersonalProfileSection from './PersonalProfile';
 import { ageLabel, localToday, normalizeText, shortDate } from './moreLabels';
 import { useMoreCache } from './useMoreCache';
 
@@ -36,19 +38,20 @@ const toForm = (profile: PersonalProfile | null): FormState =>
   Object.fromEntries(FIELDS.map((field) => [field, profile?.[field] ?? ''])) as FormState;
 
 /**
- * 👤 Mi perfil (`pg-mi-perfil`): datos personales, 🆘 contacto de emergencia
- * y 👨‍👧‍👦 hijos de la persona de la sesión. Nunca se edita el perfil de otra
- * persona (el backend usa la sesión); el ADMIN los ve en Datos del equipo.
+ * 👤 Mi perfil (`pg-mi-perfil`) de la persona de la sesión — nunca de otra (el
+ * backend usa la sesión). Con ficha de equipo: datos personales, 🆘 contacto
+ * de emergencia y 👨‍👧‍👦 hijos (el ADMIN los ve en Datos del equipo). Sin
+ * ficha (el ADMIN, Etapa 5F): 🎂 Mi cumpleaños y 👨‍👩‍👧‍👦 Mi familia, sin campos
+ * laborales.
  */
 export function ProfileScreen() {
   const { user, logout } = useAuth();
   const { userId, enabled } = useSessionScope();
-  const hasEmployee = Boolean(user?.employee);
   const handleSessionExpired = useCallback(() => void logout(), [logout]);
   const query = useQuery({
     queryKey: queryKeys.more.profile(userId),
     queryFn: fetchMyProfile,
-    enabled: enabled && hasEmployee,
+    enabled,
   });
   const expired = isSessionExpired(query.error);
   useEffect(() => {
@@ -62,19 +65,18 @@ export function ProfileScreen() {
         title={
           <>
             <span aria-hidden="true">👤 </span>
-            {data?.employee.displayName ?? user?.employee?.displayName ?? 'Mi perfil'}
+            {(data?.kind === 'employee'
+              ? data.employee.displayName
+              : data?.kind === 'personal'
+                ? data.profile.displayName
+                : user?.employee?.displayName) ?? 'Mi perfil'}
           </>
         }
         description="Mi perfil"
         refreshing={Boolean(data) && query.isFetching}
         actions={<MoreBackLink />}
       />
-      {!hasEmployee ? (
-        <EmptyState
-          title="Tu usuario no tiene una persona vinculada"
-          description="Mi perfil es para el equipo de trabajo."
-        />
-      ) : !data ? (
+      {!data ? (
         query.isError ? (
           <ErrorState
             title="No pudimos cargar tu perfil"
@@ -84,6 +86,8 @@ export function ProfileScreen() {
         ) : (
           <LoadingState label="Cargando tu perfil…" />
         )
+      ) : data.kind === 'personal' ? (
+        <PersonalProfileSection data={data} onSessionExpired={handleSessionExpired} />
       ) : (
         <>
           <ProfileForm
@@ -102,15 +106,18 @@ function ProfileForm({
   initial,
   onSessionExpired,
 }: {
-  initial: MyProfileResponse;
+  initial: EmployeeProfileResponse;
   onSessionExpired: () => void;
 }) {
   const formId = useId();
   const queryClient = useQueryClient();
   const { userId } = useSessionScope();
-  const { afterProfileChange } = useMoreCache();
+  const { applyDisplayName } = useAuth();
+  const { afterProfileChange, afterPersonNameChange } = useMoreCache();
   const { isSubmitting, run } = useSubmitGuard();
   const [form, setForm] = useState<FormState>(() => toForm(initial.profile));
+  /** Nombre visible → `Employee.displayName` (distinto del "Nombre completo" legal de la ficha). */
+  const [displayName, setDisplayName] = useState(initial.employee.displayName);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const today = localToday();
   const set = (field: keyof PersonalProfile) => (value: string) => {
@@ -120,19 +127,31 @@ function ProfileForm({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
+    const nameError = personNameError(displayName);
+    if (nameError) {
+      setStatus({ ok: false, text: nameError });
+      return;
+    }
     if (form.birthDate && form.birthDate > today) {
       setStatus({ ok: false, text: 'La fecha de nacimiento no puede ser futura.' });
       return;
     }
-    const body = Object.fromEntries(
-      FIELDS.map((field) => [field, normalizeText(form[field]) || null]),
-    ) as unknown as PersonalProfile;
+    const body = {
+      ...(Object.fromEntries(
+        FIELDS.map((field) => [field, normalizeText(form[field]) || null]),
+      ) as unknown as PersonalProfile),
+      displayName: normalizePersonName(displayName),
+    };
     void run(async () => {
       try {
         const saved = await saveMyProfile(body);
+        const renamed = saved.employee.displayName !== initial.employee.displayName;
         queryClient.setQueryData(queryKeys.more.profile(userId), saved);
         setForm(toForm(saved.profile));
-        afterProfileChange();
+        setDisplayName(saved.employee.displayName);
+        applyDisplayName(saved.employee.displayName);
+        if (renamed) afterPersonNameChange();
+        else afterProfileChange();
         setStatus({ ok: true, text: 'Datos guardados ✓' });
       } catch (caught) {
         if (isSessionExpired(caught)) {
@@ -173,6 +192,27 @@ function ProfileForm({
           </>
         }
       >
+        <div className="field">
+          <label className="field__label" htmlFor={`${formId}-displayName`}>
+            Nombre visible
+          </label>
+          <input
+            id={`${formId}-displayName`}
+            className="field__input"
+            value={displayName}
+            maxLength={PERSON_NAME_MAX}
+            autoComplete="nickname"
+            aria-describedby={`${formId}-displayName-hint`}
+            disabled={isSubmitting}
+            onChange={(event) => {
+              setDisplayName(event.target.value);
+              setStatus(null);
+            }}
+          />
+          <p id={`${formId}-displayName-hint`} className="field__hint">
+            Así te ve el equipo en toda la app.
+          </p>
+        </div>
         {input('fullLegalName', 'Nombre completo', {
           maxLength: 120,
           placeholder: 'Ej: María González',

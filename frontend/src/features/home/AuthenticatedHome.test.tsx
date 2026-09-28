@@ -66,6 +66,7 @@ const dashboard: DashboardResponse = {
   upcomingEvents: [
     {
       kind: 'event',
+      origin: 'MANUAL',
       id: 'ev1',
       title: 'Visita técnica',
       date: '2026-09-26',

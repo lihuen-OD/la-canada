@@ -480,9 +480,65 @@ export class EventDuplicateError extends AppError {
   }
 }
 
+/** Etapa 5F — un cumpleaños manual para alguien cuyo cumpleaños ya se deriva de un perfil. */
+export class EventBirthdayDerivedError extends AppError {
+  constructor() {
+    super(
+      'Este cumpleaños ya se genera automáticamente desde el perfil correspondiente. Editalo desde su perfil para evitar duplicados.',
+      409,
+      { code: 'EVENT_BIRTHDAY_DERIVED' },
+    );
+  }
+}
+
+/** Etapa 5F — otro cumpleaños manual vigente con el mismo nombre (sin distinguir mayúsculas) y fecha. */
+export class EventBirthdayDuplicateError extends AppError {
+  constructor() {
+    super('Ya existe un cumpleaños con este nombre y fecha.', 409, {
+      code: 'EVENT_BIRTHDAY_DUPLICATE',
+    });
+  }
+}
+
 export class ChildNotFoundError extends AppError {
   constructor() {
     super('El hijo no existe en tu perfil.', 404, { code: 'CHILD_NOT_FOUND' });
+  }
+}
+
+/** Etapa 5F — el familiar no existe o pertenece a otra persona (misma respuesta: no se revela cuál). */
+export class FamilyMemberNotFoundError extends AppError {
+  constructor() {
+    super('El familiar no existe en tu perfil.', 404, { code: 'FAMILY_MEMBER_NOT_FOUND' });
+  }
+}
+
+/** Mismo nombre y misma fecha que otro familiar propio (doble carga), sin impedir homónimos. */
+export class FamilyMemberDuplicateError extends AppError {
+  constructor() {
+    super('Ya agregaste un familiar con ese nombre y esa fecha.', 409, {
+      code: 'FAMILY_MEMBER_DUPLICATE',
+    });
+  }
+}
+
+/** Un familiar de los datos originales (con clave de seed) se desactiva, nunca se elimina. */
+export class FamilyMemberSeededError extends AppError {
+  constructor() {
+    super(
+      'Este familiar viene de los datos originales y no se puede eliminar. Podés desactivarlo.',
+      409,
+      { code: 'FAMILY_MEMBER_SEEDED' },
+    );
+  }
+}
+
+/** Un usuario con ficha de equipo carga sus hijos en `EmployeeChild`, no en Mi familia. */
+export class FamilyUsesEmployeeProfileError extends AppError {
+  constructor() {
+    super('Tus hijos se cargan en la sección «Hijos» de tu perfil.', 409, {
+      code: 'FAMILY_USES_EMPLOYEE_PROFILE',
+    });
   }
 }
 

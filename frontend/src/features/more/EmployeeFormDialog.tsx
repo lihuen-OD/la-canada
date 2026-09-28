@@ -4,11 +4,11 @@ import { createEmployee, updateEmployee } from '../../api/moreApi';
 import type { EmployeeRole, ManagedEmployee } from '../../api/moreTypes';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
+import { PERSON_NAME_MAX, normalizePersonName, personNameError } from '../../utils/personName';
 import { AlertIcon } from '../../components/ui/icons';
 import { DEFAULT_PERSON_COLOR, isPersonColor } from '../../utils/color';
 import { useSubmitGuard } from '../tasks/useSubmitGuard';
 import { errorMessageOf, isSessionExpired } from '../pets/petErrors';
-import { normalizeText } from './moreLabels';
 
 const ROLES: readonly EmployeeRole[] = ['Doméstica', 'Parque', 'Otro'];
 
@@ -41,11 +41,13 @@ export function EmployeeFormDialog({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    const clean = normalizeText(name);
-    if (!clean) {
-      setError('Ingresá un nombre.');
+    // Etapa 5F: la misma validación del nombre visible que Mi perfil y el backend.
+    const problem = personNameError(name);
+    if (problem) {
+      setError(problem);
       return;
     }
+    const clean = normalizePersonName(name);
     const body = { displayName: clean, role, colorHex: color };
     void run(async () => {
       setError(null);
@@ -76,7 +78,7 @@ export function EmployeeFormDialog({
           <input
             id={`${formId}-name`}
             className="field__input"
-            maxLength={40}
+            maxLength={PERSON_NAME_MAX}
             autoComplete="off"
             placeholder="Ej: Coke"
             value={name}

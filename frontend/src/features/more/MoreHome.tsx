@@ -18,7 +18,7 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 
 /**
  * Grilla de ☰ Más del prototipo (`pg-mas`), mismo orden: Novedades, Eventos,
- * Clima, Fotos, Configuración (solo ADMIN) y Mi perfil (empleado), más
+ * Clima, Fotos, Configuración (solo ADMIN) y Mi perfil (equipo y ADMIN), más
  * "Cerrar sesión". Los subtítulos salen de UNA request de conteos.
  */
 export function MoreHome() {
@@ -58,7 +58,8 @@ export function MoreHome() {
     ...(isAdmin
       ? [{ to: '/more/settings', icon: '⚙️', title: 'Configuración', subtitle: 'Solo admin' }]
       : []),
-    ...(!isAdmin && user?.employee
+    // Etapa 5F: también el ADMIN (su cumpleaños y su familia), autorizado explícitamente.
+    ...(isAdmin || user?.employee
       ? [{ to: '/more/profile', icon: '👤', title: 'Mi perfil', subtitle: 'Mis datos' }]
       : []),
   ];

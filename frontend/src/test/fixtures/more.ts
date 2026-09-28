@@ -1,9 +1,11 @@
 import type {
+  EmployeeProfileResponse,
   EventsResponse,
+  FamilyMember,
   ManagedEmployee,
   MoreSummary,
-  MyProfileResponse,
   NewsListResponse,
+  PersonalProfileResponse,
   PhotosListResponse,
   TeamMember,
   WeatherReport,
@@ -38,6 +40,7 @@ export const eventsResponse = (): EventsResponse => ({
   upcoming: [
     {
       kind: 'event',
+      origin: 'MANUAL',
       id: 'ev-1',
       title: 'Visita sintética',
       date: '2026-09-26',
@@ -47,19 +50,53 @@ export const eventsResponse = (): EventsResponse => ({
     },
     {
       kind: 'birthday',
-      id: 'family:1',
+      origin: 'USER_FAMILY',
+      id: 'user_family:1',
       title: 'Cumpleaños de Familiar sintético',
       date: '2026-10-05',
       type: 'BIRTHDAY',
       note: 'Familia',
       daysUntil: 10,
-      source: 'FAMILY',
+      sourceRef: { kind: 'MY_PROFILE' },
+    },
+    {
+      kind: 'event',
+      origin: 'MANUAL',
+      id: 'ev-2',
+      title: 'Cumpleaños manual sintético',
+      date: '2026-10-07',
+      type: 'BIRTHDAY',
+      note: null,
+      daysUntil: 12,
+    },
+    {
+      kind: 'birthday',
+      origin: 'ANIMAL',
+      id: 'animal:pet-1',
+      title: 'Cumpleaños de Mascota sintética',
+      date: '2026-10-09',
+      type: 'BIRTHDAY',
+      note: 'Mascota',
+      daysUntil: 14,
+      sourceRef: { kind: 'PET', id: 'pet-1' },
+    },
+    {
+      kind: 'birthday',
+      origin: 'EMPLOYEE',
+      id: 'employee:emp-otra',
+      title: 'Cumpleaños de Otra persona sintética',
+      date: '2026-10-11',
+      type: 'BIRTHDAY',
+      note: 'Equipo',
+      daysUntil: 16,
+      sourceRef: null,
     },
   ],
   past: {
     items: [
       {
         kind: 'event',
+        origin: 'MANUAL',
         id: 'ev-0',
         title: 'Mantenimiento sintético',
         date: '2026-09-20',
@@ -165,8 +202,25 @@ export const teamResponse = (): { team: TeamMember[] } => ({
   ],
 });
 
-export const profileResponse = (): MyProfileResponse => ({
+export const profileResponse = (): EmployeeProfileResponse => ({
+  kind: 'employee',
   employee: { ...PERSON, role: 'Doméstica' },
   profile: null,
   children: [],
+});
+
+/** Perfil personal SINTÉTICO de un usuario sin Employee (ADMIN). */
+export const personalProfileResponse = (
+  profile: PersonalProfileResponse['profile'] = { displayName: null, birthDate: null },
+): PersonalProfileResponse => ({ kind: 'personal', profile });
+
+export const familyMember = (overrides: Partial<FamilyMember> = {}): FamilyMember => ({
+  id: 'fam-1',
+  name: 'Familiar sintético',
+  relation: 'FAMILY',
+  birthDate: '--03-10',
+  active: true,
+  age: null,
+  seeded: false,
+  ...overrides,
 });

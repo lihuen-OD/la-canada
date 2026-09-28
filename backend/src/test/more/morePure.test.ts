@@ -1,17 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { nextBirthday, upcomingBirthdays } from '../../more/birthdays';
+import {
+  birthdayFallsOn,
+  birthdayPersonKey,
+  birthdayTitle,
+  nextBirthday,
+  upcomingBirthdays,
+  type BirthdayInput,
+} from '../../more/birthdays';
+import { birthdaySourceRef } from '../../more/eventsService';
+import { formatFamilyBirthDate, parseFamilyBirthDate } from '../../more/familyService';
 import { buildWeatherReport, gardenRecommendations } from '../../more/weatherService';
 import {
+  createEmployeeBodySchema,
   createEventBodySchema,
+  createFamilyMemberBodySchema,
   createNewsBodySchema,
+  updateEmployeeBodySchema,
+  updateFamilyMemberBodySchema,
+  updatePersonalProfileBodySchema,
   updateProfileBodySchema,
   uploadPhotoQuerySchema,
 } from '../../more/moreSchemas';
 import { isImageRead } from '../../config/rateLimit';
+import { personDisplayNameSchema } from '../../lib/personName';
 
 const TODAY = { year: 2026, month: 9, day: 25 };
-const input = (name: string, month: number, day: number) => ({
-  source: 'FAMILY' as const,
+const input = (name: string, month: number, day: number): BirthdayInput => ({
+  origin: 'USER_FAMILY' as const,
   sourceId: name,
   name,
   month,
@@ -42,6 +57,113 @@ describe('🎂 cumpleaños derivados (nunca filas fijas)', () => {
       TODAY,
     );
     expect(list.map((item) => item.name)).toEqual(['C', 'A', 'B']);
+  });
+
+  it('cambio de año: el 31/12 cuenta el 01/01 siguiente como mañana y el 31/12 como hoy', () => {
+    const newYearsEve = { year: 2026, month: 12, day: 31 };
+    expect(nextBirthday(input('Año nuevo', 1, 1), newYearsEve)).toMatchObject({
+      date: '2027-01-01',
+      daysUntil: 1,
+    });
+    expect(nextBirthday(input('Fin de año', 12, 31), newYearsEve).daysUntil).toBe(0);
+    expect(nextBirthday(input('Ayer', 12, 30), newYearsEve).date).toBe('2027-12-30');
+  });
+
+  it('29/02: cae el 01/03 en años no bisiestos y el 29/02 en bisiestos', () => {
+    expect(birthdayFallsOn({ month: 2, day: 29 }, { year: 2027, month: 3, day: 1 })).toBe(true);
+    expect(birthdayFallsOn({ month: 2, day: 29 }, { year: 2028, month: 2, day: 29 })).toBe(true);
+    expect(birthdayFallsOn({ month: 2, day: 29 }, { year: 2028, month: 3, day: 1 })).toBe(false);
+    expect(birthdayFallsOn({ month: 3, day: 10 }, { year: 2027, month: 3, day: 10 })).toBe(true);
+  });
+
+  it('título: "Cumpleaños de <nombre>"; sin nombre, el título de respaldo', () => {
+    expect(birthdayTitle(input('Vicky', 3, 10))).toBe('Cumpleaños de Vicky');
+    expect(
+      birthdayTitle({
+        ...input('x', 1, 1),
+        name: null,
+        fallbackTitle: 'Cumpleaños del administrador',
+      }),
+    ).toBe('Cumpleaños del administrador');
+  });
+
+  it('clave de persona: sin mayúsculas, espacios extra, 🎂 ni el prefijo "Cumpleaños de"', () => {
+    expect(birthdayPersonKey('🎂 Cumpleaños de  Vicky ')).toBe('vicky');
+    expect(birthdayPersonKey('cumpleaños de vicky')).toBe('vicky');
+    expect(birthdayPersonKey('VICKY')).toBe('vicky');
+    expect(birthdayPersonKey('Cumple de Ana María')).toBe('ana maría');
+    expect(birthdayPersonKey('Visita de Vicky')).toBe('visita de vicky');
+  });
+});
+
+describe('👨‍👩‍👧‍👦 fechas de familiares (año opcional, nunca inventado)', () => {
+  const today = { year: 2026, month: 9, day: 28 };
+  it('YYYY-MM-DD conserva el año; --MM-DD no inventa ninguno', () => {
+    expect(parseFamilyBirthDate('1990-03-10', today)).toEqual({ month: 3, day: 10, year: 1990 });
+    expect(parseFamilyBirthDate('--03-10', today)).toEqual({ month: 3, day: 10, year: null });
+    expect(formatFamilyBirthDate({ month: 3, day: 10, year: null })).toBe('--03-10');
+    expect(formatFamilyBirthDate({ month: 6, day: 1, year: 2001 })).toBe('2001-06-01');
+  });
+
+  it('29/02 sin año se admite; con año solo si es bisiesto; fechas imposibles o futuras no', () => {
+    expect(parseFamilyBirthDate('--02-29', today)).toEqual({ month: 2, day: 29, year: null });
+    expect(parseFamilyBirthDate('2000-02-29', today).year).toBe(2000);
+    for (const bad of ['2001-02-29', '--02-30', '--13-01', '1899-12-31', '2026-09-29']) {
+      expect(() => parseFamilyBirthDate(bad, today), bad).toThrow();
+    }
+  });
+
+  it('contratos .strict(): nunca aceptan userId ni ownerUserId', () => {
+    const body = { name: 'Ana', relation: 'CHILD', birthDate: '2010-05-04' };
+    expect(createFamilyMemberBodySchema.safeParse(body).success).toBe(true);
+    expect(createFamilyMemberBodySchema.safeParse({ ...body, ownerUserId: 'x' }).success).toBe(
+      false,
+    );
+    expect(createFamilyMemberBodySchema.safeParse({ ...body, relation: 'SELF' }).success).toBe(
+      false,
+    );
+    expect(updateFamilyMemberBodySchema.safeParse({ userId: 'x' }).success).toBe(false);
+    expect(updateFamilyMemberBodySchema.safeParse({}).success).toBe(false);
+    expect(
+      updatePersonalProfileBodySchema.safeParse({ displayName: 'Ana', birthDate: '', userId: 'x' })
+        .success,
+    ).toBe(false);
+    expect(
+      updatePersonalProfileBodySchema.safeParse({ displayName: '', birthDate: '' }).success,
+    ).toBe(false);
+    expect(
+      updatePersonalProfileBodySchema.parse({ displayName: '  Ana  ', birthDate: '' }),
+    ).toEqual({ displayName: 'Ana', birthDate: null });
+  });
+});
+
+describe('🔗 enlace a la fuente de un cumpleaños derivado (según quién mira)', () => {
+  const admin = { userId: 'u-admin', role: 'ADMIN' as const, employeeId: null };
+  const employee = { userId: 'u-emp', role: 'EMPLOYEE' as const, employeeId: 'emp-1' };
+  const of = (origin: BirthdayInput['origin'], extra: Partial<BirthdayInput> = {}) => ({
+    ...input('X', 1, 1),
+    origin,
+    sourceId: 'src-1',
+    ...extra,
+  });
+
+  it('perfil y familia propios → Mi perfil; ajenos → nada (el EMPLOYEE no ve la familia del ADMIN)', () => {
+    const family = of('USER_FAMILY', { ownerUserId: 'u-admin' });
+    expect(birthdaySourceRef(family, admin)).toEqual({ kind: 'MY_PROFILE' });
+    expect(birthdaySourceRef(family, employee)).toBeNull();
+    expect(birthdaySourceRef(of('USER_PROFILE', { ownerUserId: 'u-admin' }), employee)).toBeNull();
+  });
+
+  it('empleado/hijo: el propio → Mi perfil; ADMIN → Datos del equipo; otro EMPLOYEE → nada', () => {
+    const child = of('EMPLOYEE_CHILD', { employeeId: 'emp-1' });
+    expect(birthdaySourceRef(child, employee)).toEqual({ kind: 'MY_PROFILE' });
+    expect(birthdaySourceRef(child, admin)).toEqual({ kind: 'TEAM_PROFILES' });
+    expect(birthdaySourceRef(of('EMPLOYEE', { employeeId: 'emp-2' }), employee)).toBeNull();
+  });
+
+  it('mascota → su ficha; global → nada', () => {
+    expect(birthdaySourceRef(of('ANIMAL'), employee)).toEqual({ kind: 'PET', id: 'src-1' });
+    expect(birthdaySourceRef(of('GLOBAL_RECURRING'), admin)).toBeNull();
   });
 });
 
@@ -152,18 +274,80 @@ describe('schemas de Más (.strict())', () => {
       emergencyContactName: '',
       emergencyContactPhone: '',
     };
-    expect(
-      Object.values(updateProfileBodySchema.parse(base)).every((value) => value === null),
-    ).toBe(true);
-    expect(updateProfileBodySchema.safeParse({ ...base, phone: 'llamame' }).success).toBe(false);
-    expect(updateProfileBodySchema.safeParse({ ...base, taxId: '27-1234x' }).success).toBe(false);
-    expect(updateProfileBodySchema.safeParse({ ...base, maritalStatus: 'Otro' }).success).toBe(
+    expect(updateProfileBodySchema.safeParse(base).success).toBe(false); // el nombre es obligatorio
+    const { displayName, ...rest } = updateProfileBodySchema.parse({
+      ...base,
+      displayName: ' Coke ',
+    });
+    expect(displayName).toBe('Coke');
+    expect(Object.values(rest).every((value) => value === null)).toBe(true);
+    const named = { ...base, displayName: 'Coke' };
+    for (const field of ['userId', 'employeeId', 'username', 'role', 'code', 'status', 'active']) {
+      expect(updateProfileBodySchema.safeParse({ ...named, [field]: 'x' }).success, field).toBe(
+        false,
+      );
+    }
+    expect(updateProfileBodySchema.safeParse({ ...named, phone: 'llamame' }).success).toBe(false);
+    expect(updateProfileBodySchema.safeParse({ ...named, taxId: '27-1234x' }).success).toBe(false);
+    expect(updateProfileBodySchema.safeParse({ ...named, maritalStatus: 'Otro' }).success).toBe(
       false,
     );
     expect(updateProfileBodySchema.safeParse({ ...base, employeeId: 'x' }).success).toBe(false);
     expect(
-      updateProfileBodySchema.parse({ ...base, phone: '3442 123456', taxId: '27-12345678-9' }),
+      updateProfileBodySchema.parse({ ...named, phone: '3442 123456', taxId: '27-12345678-9' }),
     ).toMatchObject({ phone: '3442 123456', taxId: '27-12345678-9' });
+  });
+});
+
+describe('🪪 nombre visible — validación única compartida', () => {
+  const ok = (value: string) => personDisplayNameSchema.safeParse(value);
+  it('normaliza espacios y admite nombres reales en español', () => {
+    expect(personDisplayNameSchema.parse('  María   José  ')).toBe('María José');
+    for (const name of [
+      'Coke',
+      'Cami',
+      'Ruth',
+      'Pablo',
+      'Ñandú Peña',
+      'O’Dwyer',
+      "D'Angelo",
+      'Ana-Lía',
+      'María J.',
+      'Güemes',
+      'Jo',
+    ]) {
+      expect(ok(name).success, name).toBe(true);
+    }
+  });
+
+  it('rechaza vacío, 1 letra, > 100, dígitos, símbolos, HTML y caracteres de control', () => {
+    const cases: [string, RegExp][] = [
+      ['   ', /Ingresá el nombre/],
+      ['A', /al menos 2 letras/],
+      ['--', /al menos 2 letras/],
+      ['a'.repeat(101), /100 caracteres/],
+      ['Ana2', /solo puede tener letras/],
+      ['<b>Ana</b>', /solo puede tener letras/],
+      [`Ana${String.fromCharCode(0)}`, /solo puede tener letras/],
+      ['Ana 😀', /solo puede tener letras/],
+    ];
+    for (const [value, message] of cases) {
+      const parsed = ok(value);
+      expect(parsed.success, value).toBe(false);
+      expect(parsed.error?.issues[0]?.message).toMatch(message);
+    }
+    expect(ok('a'.repeat(100)).success).toBe(true);
+  });
+
+  it('alta y edición de personas usan la misma validación (sin unicidad)', () => {
+    expect(
+      createEmployeeBodySchema.safeParse({ displayName: 'Ana2', role: 'Otro', colorHex: '#4a7c59' })
+        .success,
+    ).toBe(false);
+    expect(updateEmployeeBodySchema.parse({ displayName: '  Ana   Lía ' })).toEqual({
+      displayName: 'Ana Lía',
+    });
+    expect(updateEmployeeBodySchema.safeParse({ displayName: 'x'.repeat(60) }).success).toBe(true);
   });
 });
 

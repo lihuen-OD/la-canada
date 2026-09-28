@@ -140,6 +140,7 @@ Ubicación: línea 1759-1778 (`addFamilyBirthdays`).
 - Entidad: se traducen a filas de `eventos` (tipo `cumple`, nota `'familia'`), recalculando la próxima fecha cada vez que corre la función (dedupe por título exacto `'🎂 Cumpleaños de <Nombre>'`).
 - ¿Se siembra hoy? **Sí, de forma indirecta** — `addFamilyBirthdays()` se ejecuta en cada `initUI()` y llama a `dbAddEvento()` si el evento no existe todavía, por lo que Vicky y Felicitas sí quedan en Supabase; Benjamín también, pero con el conflicto de fecha ya señalado en la sección 7.
 - ¿Incluir en seed de Neon? Sí, para Vicky (10/03) y Felicitas (01/06) sin dudas. Para Benjamín, resolver primero la inconsistencia de fecha.
+- **Etapa 5F**: el seed los sigue creando como `RecurringBirthday` globales, sin cambios. El backfill `family:backfill-admin` los asocia después al ADMIN como "Mi familia" (`relation = FAMILY`: el HTML no dice pareja ni hijo), sobre las mismas filas: sin duplicarlos, sin año inventado y sin cambiar nombres, fechas ni slugs.
 
 ## 9. Tipos de mascota (catálogo inicial)
 

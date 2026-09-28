@@ -133,6 +133,8 @@ El tercer evento original ("Cumpleaños de Benjamín", 2026-02-19) **no se siemb
 | vicky | Vicky | 3 | 10 | familia |
 | felicitas | Felicitas | 6 | 1 | familia |
 
+Etapa 5F: el seed no cambia (sigue creando ambos sin propietario). La asociación al ADMIN es un paso operativo posterior (`npm run family:backfill-admin`), no parte del seed.
+
 Benjamín **no se siembra** — ver "Datos deliberadamente omitidos".
 
 ### AnimalType (9)

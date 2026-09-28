@@ -238,3 +238,9 @@ Endpoints autenticados y rango Zod de hasta 90 días. El backend fuerza sesión 
 ## Actualización — Eliminación definitiva (Etapa 5E)
 
 Solo ADMIN (verificado en el backend, nunca solo en la UI); nada con historia se borra físicamente; auditoría con snapshot antes del borrado, sin PIN, hashes, tokens ni binarios; los errores de Postgres/Prisma nunca se exponen: la FK solo se traduce dentro de la eliminación (`*_IN_USE`) y cualquier otro error no controlado responde «Ocurrió un error inesperado. Intentá nuevamente.». Todo mensaje público está en español (códigos estables en inglés); Zod usa un mapa de mensajes en español para los casos sin mensaje propio; el rate limit responde `429 RATE_LIMITED` y el login lo muestra como tal, sin confundirlo con «Identidad o PIN incorrectos.».
+
+## Actualización — Perfil personal y familia (Etapa 5F)
+
+El propietario del perfil y de la familia sale siempre de la sesión: ningún endpoint acepta `userId`, los cuerpos son `.strict()` y un id de otra familia responde 404, igual que uno inexistente (no revela si existe). La auditoría registra campos cambiados, nunca valores (fecha, nombre); la eliminación guarda solo nombre y relación. Eventos no expone ids de usuario, años ni fechas completas de nacimiento: solo la próxima ocurrencia y una referencia de navegación que depende de quién mira. El backfill no identifica al ADMIN por `username`, se detiene con 0 o más de un ADMIN activo, exige `DATABASE_TARGET=demo` (en el script npm y dentro del script) e imprime solo slugs y conteos.
+
+Nombre visible (ampliación 5F): `/me/profile` sigue tomando a la persona de la sesión y rechaza (`.strict()`) `userId`, `employeeId`, `username`, `role`, `code` y estado. Solo el ADMIN corrige nombres ajenos, por el endpoint administrativo existente (403 para EMPLOYEE). Cambiar un nombre no toca credenciales ni sesiones. El `username` sigue sin exponerse en `/auth/me`, en el login ni en el selector de ingreso.

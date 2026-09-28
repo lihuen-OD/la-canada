@@ -10,9 +10,13 @@ import { AppShell } from './AppShell';
 
 const IMPLEMENTED_PATHS = ['/', '/tasks', '/stock', '/chicken-coop', '/pets', '/more'];
 
-function mockUser(role: SystemRole, employee: AuthenticatedUser['employee'] = null) {
+function mockUser(
+  role: SystemRole,
+  employee: AuthenticatedUser['employee'] = null,
+  displayName: string | null = employee?.displayName ?? null,
+) {
   useAuthMock.mockReturnValue({
-    user: { id: 'u1', role, status: 'ACTIVE', employee },
+    user: { id: 'u1', role, status: 'ACTIVE', displayName, employee },
     hasRole: (r: SystemRole) => r === role,
     logout: vi.fn(),
   });
@@ -163,6 +167,14 @@ describe('AppShell', () => {
 
     const header = screen.getByRole('banner');
     expect(within(header).getAllByText('Administrador').length).toBeGreaterThan(0);
+  });
+
+  it('un ADMIN con nombre visible en Mi perfil se muestra con ese nombre (Etapa 5F)', () => {
+    mockUser('ADMIN', null, 'Nombre sintético');
+    renderShell();
+
+    const header = screen.getByRole('banner');
+    expect(within(header).getByText('Nombre sintético')).toBeInTheDocument();
   });
 
   it('la marca no es un heading: el único <h1> es el de cada pantalla', () => {

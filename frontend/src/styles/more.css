@@ -164,6 +164,7 @@
 .news-list,
 .event-list,
 .child-list,
+.family-list,
 .people-list,
 .garden-tips,
 .team-list,
@@ -902,4 +903,95 @@
 
 .child-form {
   margin-top: var(--space-3);
+}
+
+/* ── Mi perfil personal: 🎂 Mi cumpleaños y 👨‍👩‍👧‍👦 Mi familia (Etapa 5F) ── */
+
+.own-birthday {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.own-birthday dt {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.own-birthday dd {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+}
+
+.family-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.family-item:last-child {
+  border-bottom: 0;
+}
+
+.family-item__icon {
+  font-size: 1.25rem;
+}
+
+/* El nombre nunca se parte letra por letra: si no entra junto a las acciones, estas bajan. */
+.family-item .child-item__body {
+  flex: 1 1 10rem;
+}
+
+.family-item--inactive .child-item__body {
+  opacity: 0.6;
+}
+
+.family-item__badge {
+  vertical-align: middle;
+}
+
+.family-item__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.more-form .field__hint {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.check-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap-target);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.check-field input {
+  width: 1.125rem;
+  height: 1.125rem;
+  accent-color: var(--color-action);
+}
+
+/* Cumpleaños derivado en Eventos: de dónde sale y acceso a su fuente. */
+.event-item__origin {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.event-item__source {
+  margin-top: var(--space-1);
+  margin-left: calc(var(--space-3) * -1);
 }

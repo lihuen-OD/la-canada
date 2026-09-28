@@ -29,6 +29,11 @@ describe('☰ Más — ningún endpoint es público', () => {
     ['PUT', '/api/v1/me/profile'],
     ['POST', '/api/v1/me/children'],
     ['POST', `/api/v1/me/children/${ID}/remove`],
+    ['GET', '/api/v1/me/family'],
+    ['POST', '/api/v1/me/family'],
+    ['PATCH', `/api/v1/me/family/${ID}`],
+    ['PATCH', `/api/v1/me/family/${ID}/status`],
+    ['DELETE', `/api/v1/me/family/${ID}`],
   ] as const)('%s %s requiere sesión', async (method, path) => {
     const app = createApp();
     const agent = request(app);
@@ -39,7 +44,9 @@ describe('☰ Más — ningún endpoint es público', () => {
           ? agent.post(path).send({})
           : method === 'PUT'
             ? agent.put(path).send({})
-            : agent.patch(path).send({});
+            : method === 'DELETE'
+              ? agent.delete(path)
+              : agent.patch(path).send({});
     const response = await call;
     expect(response.status).toBe(401);
     expect(response.body.error.code).toBe('AUTH_REQUIRED');
@@ -63,8 +70,9 @@ describe('routers de Más — superficie', () => {
     expect(source).toMatch(/employeesRouter\.use\(requireAuth, requireRole\('ADMIN'\)\)/);
   });
 
-  it('sin DELETE; el único PUT es el formulario completo de Mi perfil', () => {
-    expect(source).not.toMatch(/\.delete\(/);
+  it('el único DELETE es un familiar propio (Etapa 5F); el único PUT es el formulario de Mi perfil', () => {
+    expect([...source.matchAll(/\.delete\(/g)].map((m) => m.index)).toHaveLength(1);
+    expect(source).toMatch(/meRouter\.delete\('\/family\/:id', deleteMyFamilyHandler\)/);
     expect([...source.matchAll(/\.put\(/g)]).toHaveLength(1);
     expect(source).toMatch(/meRouter\.put\('\/profile', requireJsonContentType/);
   });

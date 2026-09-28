@@ -8,6 +8,7 @@ import { STALE_TIME } from '../../api/queryClient';
 import { queryKeys } from '../../api/queryKeys';
 import { useSessionScope } from '../../api/useSessionScope';
 import { useAuth } from '../../auth/useAuth';
+import { getLoadedDisplayName } from '../../auth/userDisplay';
 import { Avatar } from '../../components/ui/Avatar';
 import { Card } from '../../components/ui/Card';
 import { PageHeader } from '../../components/ui/PageHeader';
@@ -68,9 +69,15 @@ export function AuthenticatedHome() {
 
 function DashboardContent({ data, refreshing }: { data: DashboardResponse; refreshing: boolean }) {
   const { kpis } = data;
+  const { user } = useAuth();
+  // Etapa 5F: el saludo lleva el nombre visible cargado; sin nombre, el saludo de siempre.
+  const name = getLoadedDisplayName(user);
   return (
     <div className="home">
-      <PageHeader title="Buenos días 👋" refreshing={refreshing} />
+      <PageHeader
+        title={name ? `Buenos días, ${name} 👋` : 'Buenos días 👋'}
+        refreshing={refreshing}
+      />
       <nav className="home-kpis" aria-label="Indicadores de Inicio">
         <KpiLink
           to="/tasks"

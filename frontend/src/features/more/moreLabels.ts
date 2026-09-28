@@ -1,4 +1,10 @@
-import type { Age, EventType, GalleryCategory } from '../../api/moreTypes';
+import type {
+  Age,
+  BirthdayOrigin,
+  EventType,
+  FamilyRelation,
+  GalleryCategory,
+} from '../../api/moreTypes';
 import { formatDate } from '../../utils/dateFormat';
 
 /** Textos y emojis del prototipo (`EV_LBL`, `EV_IC`, `MESC`, `DIAS3`, `ago`, `calcEdad`). */
@@ -128,3 +134,48 @@ export function localToday(): string {
 }
 
 export const normalizeText = (value: string) => value.replace(/\s+/g, ' ').trim();
+
+/** 👨‍👩‍👧‍👦 Mi familia (Etapa 5F): relación controlada, sin "yo" (la fecha propia es aparte). */
+export const FAMILY_RELATIONS: readonly FamilyRelation[] = ['PARTNER', 'CHILD', 'FAMILY', 'OTHER'];
+export const FAMILY_RELATION_LABEL: Record<FamilyRelation, string> = {
+  PARTNER: 'Pareja',
+  CHILD: 'Hijo/a',
+  FAMILY: 'Familia',
+  OTHER: 'Otro',
+};
+export const FAMILY_RELATION_ICON: Record<FamilyRelation, string> = {
+  PARTNER: '💑',
+  CHILD: '👶',
+  FAMILY: '👪',
+  OTHER: '🧑',
+};
+
+/** `YYYY-MM-DD` → `dd/mm/aaaa`; `--MM-DD` (año desconocido) → `dd/mm`, sin inventar un año. */
+export function familyBirthDateLabel(birthDate: string): string {
+  if (!birthDate.startsWith('--')) return formatDate(birthDate);
+  const [month, day] = birthDate.slice(2).split('-');
+  return `${day}/${month}`;
+}
+
+/**
+ * De dónde se calcula un cumpleaños derivado (Eventos), en lenguaje humano.
+ * Perfil y familia personales hablan en primera persona solo para su dueño
+ * (`sourceRef` MY_PROFILE); para el resto, en tercera.
+ */
+export function birthdayOriginLabel(origin: BirthdayOrigin, own: boolean): string {
+  if (origin === 'USER_PROFILE')
+    return own ? 'desde Mi perfil' : 'desde el perfil del administrador';
+  if (origin === 'USER_FAMILY') {
+    return own ? 'desde Mi familia' : 'desde la familia del administrador';
+  }
+  return BIRTHDAY_ORIGIN_LABEL[origin];
+}
+
+const BIRTHDAY_ORIGIN_LABEL: Record<BirthdayOrigin, string> = {
+  USER_PROFILE: 'desde el perfil del administrador',
+  USER_FAMILY: 'desde la familia del administrador',
+  EMPLOYEE: 'desde el perfil del equipo',
+  EMPLOYEE_CHILD: 'desde el perfil del equipo',
+  ANIMAL: 'desde la ficha de la mascota',
+  GLOBAL_RECURRING: 'desde los datos originales',
+};

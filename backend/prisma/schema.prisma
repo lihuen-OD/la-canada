@@ -102,6 +102,17 @@ enum EventType {
   OTHER
 }
 
+/// Etapa 5F — relación de un familiar con el `User` propietario (👨‍👩‍👧‍👦 Mi
+/// familia). Sin `SELF`: la fecha propia vive en `UserProfile`, nunca como
+/// familiar. Sin evidencia concreta de parentesco se usa `FAMILY` (Vicky y
+/// Felicitas: el prototipo solo decía `nota: 'familia'`).
+enum FamilyRelation {
+  PARTNER
+  CHILD
+  FAMILY
+  OTHER
+}
+
 /// Tipo de registro clínico de un animal.
 enum MedicalRecordType {
   VACCINE
@@ -240,11 +251,37 @@ model User {
   recordedNewsReports NewsReport[] @relation("NewsReportRecordedBy")
   deletedEvents       Event[]      @relation("EventDeletedBy")
 
+  /// Etapa 5F — perfil personal (👤 Mi perfil de un usuario SIN `Employee`,
+  /// p. ej. el ADMIN) y sus familiares (👨‍👩‍👧‍👦 Mi familia).
+  personalProfile UserProfile?
+  familyBirthdays RecurringBirthday[] @relation("RecurringBirthdayOwner")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([employeeId])
   @@map("users")
+}
+
+/// Etapa 5F — perfil personal 1:1 de un `User` sin `Employee` vinculado (el
+/// ADMIN es una persona, pero no un empleado operativo: no se le crea un
+/// `Employee` ficticio). Un usuario con `Employee` sigue usando
+/// `EmployeeProfile`/`EmployeeChild`; el servicio nunca escribe esta tabla para
+/// él (una sola fuente por cumpleaños). `displayName` es opcional: el ADMIN no
+/// tiene nombre en el sistema (el frontend lo muestra como "Administrador") y
+/// Eventos necesita uno para "Cumpleaños de <nombre>".
+model UserProfile {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @unique @map("user_id") @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  displayName String?   @map("display_name")
+  birthDate   DateTime? @map("birth_date") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("user_profiles")
 }
 
 /// Registro básico de un empleado (identidad operativa: nombre a mostrar,
@@ -751,24 +788,44 @@ model Event {
 
 /// Cumpleaños recurrente de una persona sin entidad propia en el sistema
 /// (familiares del hogar — no son Employee ni Animal, que ya calculan su
-/// propio próximo cumpleaños desde su propio `birthDate`). Solo se guarda
-/// mes y día: la próxima ocurrencia anual se calcula dinámicamente en la
-/// capa de aplicación, nunca se persiste una fecha con año fijo como si
-/// fuera permanente — ver docs/BUSINESS_RULES.md §14.
+/// propio próximo cumpleaños desde su propio `birthDate`). Se guarda mes y
+/// día; la próxima ocurrencia anual se calcula dinámicamente en la capa de
+/// aplicación, nunca se persiste una fecha con año fijo como si fuera
+/// permanente — ver docs/BUSINESS_RULES.md §14.
+///
+/// Etapa 5F — el mismo modelo representa dos cosas, sin duplicar filas:
+///  - **familiar de un usuario** (`ownerUserId` + `relation` no nulos): 👨‍👩‍👧‍👦
+///    Mi familia del ADMIN. Vicky y Felicitas son estas mismas filas del seed,
+///    asociadas por el backfill `family:backfill-admin` (misma fila, mismo
+///    `slug`: nunca una copia);
+///  - **cumpleaños global** (`ownerUserId` y `relation` nulos): sin propietario.
+/// CHECK en la migración: ambos nulos o ambos no nulos. `birthYear` es
+/// opcional y nunca ficticio (sin 1900 de relleno): la edad se calcula solo
+/// con año real. `relationship` (texto) queda como dato histórico del seed.
 model RecurringBirthday {
-  id   String @id @default(uuid()) @db.Uuid
-  /// Clave natural estable para el seed idempotente (ej. "vicky").
-  slug String @unique
+  id   String  @id @default(uuid()) @db.Uuid
+  /// Clave natural estable del seed idempotente (ej. "vicky"). Nula en los
+  /// familiares cargados desde la app (no tienen clave natural de seed).
+  slug String? @unique
 
   personLabel  String  @map("person_label")
   month        Int
   day          Int
+  /// Año de nacimiento real, si se conoce (1900–2100, 29/02 solo en bisiesto).
+  birthYear    Int?    @map("birth_year")
+  /// Texto histórico del seed ("familia"); los familiares usan `relation`.
   relationship String?
   active       Boolean @default(true)
+
+  ownerUserId String?         @map("owner_user_id") @db.Uuid
+  owner       User?           @relation("RecurringBirthdayOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  relation    FamilyRelation?
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  /// "Mi familia" de un usuario, en orden de alta.
+  @@index([ownerUserId, createdAt])
   @@map("recurring_birthdays")
 }
 

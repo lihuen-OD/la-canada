@@ -514,3 +514,9 @@ Migración `20260925200000_more_module` (offline con `prisma migrate diff`, revi
 - Diseño de índices adicionales según patrones de consulta reales (los `@@index` actuales cubren las FKs más obvias, no un análisis de performance con datos reales).
 - Política de retención/expiración de `Session` y `AuditLog`.
 - Migración equivalente contra `production`, con su propia autorización explícita — no forma parte de esta etapa.
+
+## Actualización — Etapa 5F (perfil personal y familia)
+
+- **`UserProfile`** (`user_profiles`): 1:1 con `User` (`user_id` único, FK `ON DELETE RESTRICT`), `display_name?`, `birth_date? DATE`. Solo lo escribe un usuario sin `Employee`: un cumpleaños tiene una sola fuente.
+- **`RecurringBirthday`**: `owner_user_id?` (FK `RESTRICT`, índice `(owner_user_id, created_at)`), `relation? FamilyRelation`, `birth_year?`; `slug` pasa a opcional (único; los familiares cargados desde la app no tienen slug). CHECKs: `recurring_birthdays_owner_relation_check` (ambos nulos o ambos no nulos), `recurring_birthdays_month_day_check` (día/mes de calendario reales, 29/02 incluido) y `recurring_birthdays_birth_year_check` (1900–2100, 29/02 solo en bisiesto). `relationship` (texto) queda como dato histórico del seed.
+- Sin DROP de tablas/columnas, sin `CASCADE`, sin datos en la migración. Vicky y Felicitas se asocian al único ADMIN activo con el backfill idempotente `family:backfill-admin` (mismas filas, mismos slugs; `relation = FAMILY`).

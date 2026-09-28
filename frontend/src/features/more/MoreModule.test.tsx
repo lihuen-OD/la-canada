@@ -6,6 +6,8 @@ import {
   PERSON,
   employeesResponse,
   eventsResponse,
+  familyMember,
+  personalProfileResponse,
   newsResponse,
   photosResponse,
   profileResponse,
@@ -37,12 +39,19 @@ const api = vi.hoisted(() => ({
   saveMyProfile: vi.fn(),
   addMyChild: vi.fn(),
   removeMyChild: vi.fn(),
+  saveMyOwnBirthday: vi.fn(),
+  fetchMyFamily: vi.fn(),
+  createFamilyMember: vi.fn(),
+  updateFamilyMember: vi.fn(),
+  setFamilyMemberActive: vi.fn(),
+  deleteFamilyMember: vi.fn(),
 }));
 const tasksApi = vi.hoisted(() => ({ fetchTaskEmployees: vi.fn(), fetchTasks: vi.fn() }));
 const adminApi = vi.hoisted(() => ({ activateUser: vi.fn(), resetUserPin: vi.fn() }));
-const { useAuthMock, logoutMock } = vi.hoisted(() => ({
+const { useAuthMock, logoutMock, applyDisplayNameMock } = vi.hoisted(() => ({
   useAuthMock: vi.fn(),
   logoutMock: vi.fn(),
+  applyDisplayNameMock: vi.fn(),
 }));
 vi.mock('../../api/moreApi', () => api);
 vi.mock('../../api/tasksApi', () => tasksApi);
@@ -51,19 +60,33 @@ vi.mock('../../auth/useAuth', () => ({ useAuth: useAuthMock }));
 
 import { MoreModule } from './MoreModule';
 import { tasksForDay } from './calendarDays';
-import { ageLabel, relativeDays, timeAgo } from './moreLabels';
+import {
+  ageLabel,
+  birthdayOriginLabel,
+  familyBirthDateLabel,
+  relativeDays,
+  timeAgo,
+} from './moreLabels';
 
 function asEmployee() {
   useAuthMock.mockReturnValue({
-    user: { id: 'u-e', role: 'EMPLOYEE', status: 'ACTIVE', employee: PERSON },
+    user: {
+      id: 'u-e',
+      role: 'EMPLOYEE',
+      status: 'ACTIVE',
+      displayName: PERSON.displayName,
+      employee: PERSON,
+    },
     logout: logoutMock,
+    applyDisplayName: applyDisplayNameMock,
     hasRole: (role: string) => role === 'EMPLOYEE',
   });
 }
 function asAdmin() {
   useAuthMock.mockReturnValue({
-    user: { id: 'u-a', role: 'ADMIN', status: 'ACTIVE', employee: null },
+    user: { id: 'u-a', role: 'ADMIN', status: 'ACTIVE', displayName: null, employee: null },
     logout: logoutMock,
+    applyDisplayName: applyDisplayNameMock,
     hasRole: (role: string) => role === 'ADMIN',
   });
 }
@@ -84,6 +107,7 @@ beforeEach(() => {
     mock.mockReset();
   }
   logoutMock.mockReset();
+  applyDisplayNameMock.mockReset();
   vi.stubGlobal(
     'URL',
     Object.assign(URL, {
@@ -100,6 +124,7 @@ beforeEach(() => {
   api.fetchEmployees.mockResolvedValue(employeesResponse());
   api.fetchTeamProfiles.mockResolvedValue(teamResponse());
   api.fetchMyProfile.mockResolvedValue(profileResponse());
+  api.fetchMyFamily.mockResolvedValue({ family: [] });
   tasksApi.fetchTaskEmployees.mockResolvedValue({ employees: [PERSON] });
   tasksApi.fetchTasks.mockResolvedValue({
     period: { today: '2026-09-25', weekStart: '2026-09-22', timeZone: 'x' },
@@ -127,7 +152,7 @@ describe('☰ Más — grilla', () => {
     expect(api.fetchMoreSummary).toHaveBeenCalledTimes(1);
   });
 
-  it('ADMIN: ve Configuración y no Mi perfil; sin novedades hoy muestra el total', async () => {
+  it('ADMIN: ve Configuración y también Mi perfil (Etapa 5F); sin novedades hoy muestra el total', async () => {
     asAdmin();
     api.fetchMoreSummary.mockResolvedValue(summaryResponse({ news: { today: 0, total: 7 } }));
     renderMore();
@@ -136,7 +161,7 @@ describe('☰ Más — grilla', () => {
       'href',
       '/more/settings',
     );
-    expect(grid.queryByRole('link', { name: /Mi perfil/ })).not.toBeInTheDocument();
+    expect(grid.getByRole('link', { name: /Mi perfil/ })).toHaveAttribute('href', '/more/profile');
     expect(await grid.findByText('7 total')).toBeInTheDocument();
   });
 });
@@ -178,7 +203,7 @@ describe('📝 Novedades', () => {
 });
 
 describe('📅 Eventos', () => {
-  it('Próximos con cumpleaños calculados y Pasados; EMPLOYEE no ve acciones', async () => {
+  it('Próximos con cumpleaños calculados y Pasados; EMPLOYEE no ve acciones de eventos', async () => {
     renderMore('/more/events');
     const upcoming = within(await screen.findByRole('list', { name: 'Próximos' }));
     expect(upcoming.getByText('Visita sintética')).toBeInTheDocument();
@@ -190,18 +215,107 @@ describe('📅 Eventos', () => {
     expect(
       screen.queryByRole('button', { name: /Eliminar|Editar|\+ Nuevo/ }),
     ).not.toBeInTheDocument();
+    // La mascota se puede VER (no editar) desde la ficha.
+    expect(screen.getByRole('link', { name: /Ver ficha/ })).toHaveAttribute('href', '/pets/pet-1');
   });
 
-  it('ADMIN: los cumpleaños no se editan; eliminar pide confirmación y anula', async () => {
+  it('ADMIN: los derivados no se eliminan; eliminar un evento pide confirmación y anula', async () => {
     asAdmin();
     const user = userEvent.setup();
     api.deleteEvent.mockResolvedValue({});
     renderMore('/more/events');
     await screen.findByText('Visita sintética');
-    expect(screen.queryByRole('button', { name: /Eliminar Cumpleaños/ })).not.toBeInTheDocument();
+    for (const derived of ['Familiar sintético', 'Mascota sintética', 'Otra persona sintética']) {
+      expect(
+        screen.queryByRole('button', {
+          name: new RegExp(`(Eliminar|Editar) Cumpleaños de ${derived}`),
+        }),
+      ).not.toBeInTheDocument();
+    }
     await user.click(screen.getByRole('button', { name: 'Eliminar Visita sintética' }));
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Eliminar' }));
     await waitFor(() => expect(api.deleteEvent).toHaveBeenCalledWith('ev-1'));
+  });
+
+  it('ADMIN: un cumpleaños MANUAL se edita y se anula con confirmación; invalida Eventos, Más e Inicio', async () => {
+    asAdmin();
+    const user = userEvent.setup();
+    api.updateEvent.mockResolvedValue({});
+    api.deleteEvent.mockResolvedValue({});
+    const { queryClient } = renderMore('/more/events');
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    const item = (await screen.findByText('Cumpleaños manual sintético')).closest(
+      'li',
+    ) as HTMLElement;
+    expect(within(item).getByText('Cargado a mano')).toBeInTheDocument();
+    await user.click(
+      within(item).getByRole('button', { name: 'Editar Cumpleaños manual sintético' }),
+    );
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByLabelText('Tipo')).toHaveValue('BIRTHDAY');
+    await user.click(dialog.getByRole('button', { name: 'Guardar' }));
+    await waitFor(() =>
+      expect(api.updateEvent).toHaveBeenCalledWith('ev-2', {
+        title: 'Cumpleaños manual sintético',
+        date: '2026-10-07',
+        type: 'BIRTHDAY',
+        note: null,
+      }),
+    );
+    await user.click(
+      within(item).getByRole('button', { name: 'Eliminar Cumpleaños manual sintético' }),
+    );
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Eliminar' }));
+    await waitFor(() => expect(api.deleteEvent).toHaveBeenCalledWith('ev-2'));
+    const keys = invalidate.mock.calls.map((call) => JSON.stringify(call[0]?.queryKey));
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        JSON.stringify(['session', 'u-a', 'more', 'events']),
+        JSON.stringify(['session', 'u-a', 'more', 'summary']),
+        JSON.stringify(['session', 'u-a', 'dashboard']),
+      ]),
+    );
+    expect(keys.some((key) => /tasks|stock|pets|family|profile/.test(key))).toBe(false);
+  });
+
+  it('un duplicado de cumpleaños derivado muestra el mensaje del backend en español', async () => {
+    asAdmin();
+    const user = userEvent.setup();
+    const { ApiError } = await import('../../api/httpClient');
+    const message =
+      'Este cumpleaños ya se genera automáticamente desde el perfil correspondiente. Editalo desde su perfil para evitar duplicados.';
+    api.createEvent.mockRejectedValue(new ApiError(409, message, 'EVENT_BIRTHDAY_DERIVED'));
+    renderMore('/more/events');
+    await user.click(await screen.findByRole('button', { name: '+ Nuevo' }));
+    const dialog = within(screen.getByRole('dialog'));
+    await user.type(dialog.getByLabelText('Título'), 'Cumpleaños de Vicky');
+    await user.type(dialog.getByLabelText('Fecha'), '2027-03-10');
+    await user.selectOptions(dialog.getByLabelText('Tipo'), 'BIRTHDAY');
+    await user.click(dialog.getByRole('button', { name: 'Guardar' }));
+    expect(await dialog.findByRole('alert')).toHaveTextContent(message);
+  });
+
+  it('derivados: muestran su origen y navegan por SPA a la fuente correcta según quién mira', async () => {
+    asAdmin();
+    renderMore('/more/events');
+    const family = (await screen.findByText('Cumpleaños de Familiar sintético')).closest(
+      'li',
+    ) as HTMLElement;
+    expect(within(family).getByText(/Automático desde Mi familia/)).toBeInTheDocument();
+    expect(within(family).getByRole('link', { name: /Editar en Mi familia/ })).toHaveAttribute(
+      'href',
+      '/more/profile',
+    );
+    const pet = screen.getByText('Cumpleaños de Mascota sintética').closest('li') as HTMLElement;
+    expect(within(pet).getByRole('link', { name: /Editar ficha/ })).toHaveAttribute(
+      'href',
+      '/pets/pet-1',
+    );
+    const other = screen
+      .getByText('Cumpleaños de Otra persona sintética')
+      .closest('li') as HTMLElement;
+    expect(within(other).queryByRole('link')).not.toBeInTheDocument();
+    expect(within(other).queryByRole('button')).not.toBeInTheDocument();
   });
 
   it('filtrar por tipo pide ese tipo al backend', async () => {
@@ -330,6 +444,7 @@ describe('⚙️ Configuración y 👤 Mi perfil', () => {
     await user.click(screen.getByRole('button', { name: 'Guardar mis datos' }));
     await waitFor(() =>
       expect(api.saveMyProfile).toHaveBeenCalledWith({
+        displayName: 'Persona sintética',
         fullLegalName: null,
         birthDate: null,
         maritalStatus: null,
@@ -351,7 +466,289 @@ describe('⚙️ Configuración y 👤 Mi perfil', () => {
   });
 });
 
+describe('👤 Mi perfil del ADMIN (sin Employee) — 🎂 Mi cumpleaños y 👨‍👩‍👧‍👦 Mi familia', () => {
+  beforeEach(() => {
+    asAdmin();
+    api.fetchMyProfile.mockResolvedValue(
+      personalProfileResponse({ displayName: null, birthDate: '1985-07-20' }),
+    );
+  });
+
+  it('muestra su fecha dd/mm/aaaa, sin campos laborales; guardar envía ISO y solo invalida lo propio', async () => {
+    const user = userEvent.setup();
+    api.saveMyOwnBirthday.mockResolvedValue(
+      personalProfileResponse({ displayName: 'Nombre sintético', birthDate: '1985-07-21' }),
+    );
+    const { queryClient } = renderMore('/more/profile');
+    const card = within(await screen.findByRole('region', { name: /Mi cumpleaños/ }));
+    expect(card.getByText('20/07/1985')).toBeInTheDocument();
+    for (const labor of [
+      /CUIL/,
+      /Obra social/,
+      /Estado civil/,
+      /Contacto de emergencia/,
+      /Hijos/,
+    ]) {
+      expect(screen.queryByText(labor)).not.toBeInTheDocument();
+    }
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    await user.click(card.getByRole('button', { name: 'Editar' }));
+    const date = card.getByLabelText('Fecha de nacimiento');
+    expect(date).toHaveAttribute('type', 'date');
+    expect(date).toHaveValue('1985-07-20');
+    await user.clear(date);
+    await user.type(date, '1985-07-21');
+    await user.type(card.getByLabelText('Nombre visible'), '  Nombre   sintético ');
+    await user.click(card.getByRole('button', { name: 'Guardar' }));
+    await waitFor(() =>
+      expect(api.saveMyOwnBirthday).toHaveBeenCalledWith({
+        displayName: 'Nombre sintético',
+        birthDate: '1985-07-21',
+      }),
+    );
+    expect(applyDisplayNameMock).toHaveBeenCalledWith('Nombre sintético');
+    expect(await card.findByText('21/07/1985')).toBeInTheDocument();
+    const keys = invalidate.mock.calls.map((call) => JSON.stringify(call[0]?.queryKey));
+    // El nombre del ADMIN solo aparece en su sesión, su cumpleaños y Usuarios.
+    expect(
+      keys.some((key) => /tasks|stock|pets|team|family|chickenCoop|performance/.test(key)),
+    ).toBe(false);
+    expect(keys).toContain(JSON.stringify(['session', 'u-a', 'more', 'events']));
+    expect(keys).toContain(JSON.stringify(['session', 'u-a', 'admin', 'users']));
+    expect(api.fetchMyProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it('el nombre visible es obligatorio y se valida en español antes de enviar', async () => {
+    const user = userEvent.setup();
+    renderMore('/more/profile');
+    const card = within(await screen.findByRole('region', { name: /Mi cumpleaños/ }));
+    expect(card.getByText('Sin cargar (se muestra «Administrador»)')).toBeInTheDocument();
+    await user.click(card.getByRole('button', { name: 'Editar' }));
+    await user.click(card.getByRole('button', { name: 'Guardar' }));
+    expect(await card.findByRole('alert')).toHaveTextContent('Ingresá el nombre.');
+    await user.type(card.getByLabelText('Nombre visible'), 'Ana2');
+    await user.click(card.getByRole('button', { name: 'Guardar' }));
+    expect(await card.findByRole('alert')).toHaveTextContent(/solo puede tener letras/);
+    expect(api.saveMyOwnBirthday).not.toHaveBeenCalled();
+  });
+
+  it('estado vacío de la familia', async () => {
+    renderMore('/more/profile');
+    expect(await screen.findByText('Todavía no agregaste familiares.')).toBeInTheDocument();
+  });
+
+  it('error al cargar la familia: mensaje en español y reintento', async () => {
+    const user = userEvent.setup();
+    api.fetchMyFamily.mockRejectedValueOnce(new Error('offline'));
+    renderMore('/more/profile');
+    expect(await screen.findByText('No pudimos cargar tu familia')).toBeInTheDocument();
+    api.fetchMyFamily.mockResolvedValue({ family: [familyMember()] });
+    await user.click(screen.getByRole('button', { name: /Reintentar/ }));
+    expect(await screen.findByText('Familiar sintético')).toBeInTheDocument();
+  });
+
+  it('carga: indicador accesible mientras llega la familia', async () => {
+    api.fetchMyFamily.mockReturnValue(new Promise(() => undefined));
+    renderMore('/more/profile');
+    expect(await screen.findByText('Cargando tu familia…')).toBeInTheDocument();
+  });
+
+  it('crear: nombre, relación y fecha ISO; sin año envía --MM-DD; Idempotency-Key; doble clic = 1 request', async () => {
+    const user = userEvent.setup();
+    let resolve: (value: unknown) => void = () => undefined;
+    api.createFamilyMember.mockReturnValue(new Promise((r) => (resolve = r)));
+    renderMore('/more/profile');
+    await screen.findByText('Todavía no agregaste familiares.');
+    await user.click(screen.getByRole('button', { name: '+ Agregar' }));
+    const dialog = within(screen.getByRole('dialog'));
+    await user.type(dialog.getByLabelText('Nombre'), 'Hija sintética');
+    await user.selectOptions(dialog.getByLabelText('Relación'), 'CHILD');
+    await user.click(dialog.getByLabelText(/No sé el año/));
+    await user.selectOptions(dialog.getByLabelText('Día'), '4');
+    await user.selectOptions(dialog.getByLabelText('Mes'), '5');
+    const save = dialog.getByRole('button', { name: 'Guardar' });
+    await user.dblClick(save);
+    expect(api.createFamilyMember).toHaveBeenCalledTimes(1);
+    const [body, key] = api.createFamilyMember.mock.calls[0] as [object, string];
+    expect(body).toEqual({ name: 'Hija sintética', relation: 'CHILD', birthDate: '--05-04' });
+    expect(JSON.stringify(body)).not.toMatch(/userId|owner/);
+    expect(key).toMatch(/^[0-9a-f]{32}$/);
+    resolve({ member: familyMember() });
+    expect(await screen.findByText(/se agregó a tu familia/)).toBeInTheDocument();
+  });
+
+  it('lista con fecha visible dd/mm/aaaa (o dd/mm sin año); editar, desactivar y reactivar', async () => {
+    const user = userEvent.setup();
+    api.fetchMyFamily.mockResolvedValue({
+      family: [
+        familyMember({
+          id: 'fam-1',
+          name: 'Pareja sintética',
+          relation: 'PARTNER',
+          birthDate: '1984-02-01',
+          age: { years: 42, months: 511 },
+        }),
+        familyMember({ id: 'fam-2', name: 'Vicky sintética', birthDate: '--03-10', seeded: true }),
+        familyMember({
+          id: 'fam-3',
+          name: 'Inactivo sintético',
+          birthDate: '2001-06-01',
+          active: false,
+        }),
+      ],
+    });
+    api.updateFamilyMember.mockResolvedValue({ member: familyMember() });
+    api.setFamilyMemberActive.mockResolvedValue({ member: familyMember() });
+    renderMore('/more/profile');
+    const list = within(await screen.findByRole('list', { name: 'Mi familia' }));
+    expect(list.getByText('Pareja · 01/02/1984 · 42 años')).toBeInTheDocument();
+    expect(list.getByText('Familia · 10/03')).toBeInTheDocument();
+    expect(list.getByText('Inactivo')).toBeInTheDocument();
+    // Los del seed se desactivan, no se eliminan.
+    expect(
+      list.queryByRole('button', { name: 'Eliminar a Vicky sintética' }),
+    ).not.toBeInTheDocument();
+
+    await user.click(list.getByRole('button', { name: 'Editar a Pareja sintética' }));
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByLabelText('Fecha de nacimiento')).toHaveValue('1984-02-01');
+    await user.selectOptions(dialog.getByLabelText('Relación'), 'OTHER');
+    await user.click(dialog.getByRole('button', { name: 'Guardar' }));
+    await waitFor(() =>
+      expect(api.updateFamilyMember).toHaveBeenCalledWith('fam-1', {
+        name: 'Pareja sintética',
+        relation: 'OTHER',
+        birthDate: '1984-02-01',
+      }),
+    );
+
+    await user.click(list.getByRole('button', { name: 'Desactivar a Pareja sintética' }));
+    await waitFor(() => expect(api.setFamilyMemberActive).toHaveBeenCalledWith('fam-1', false));
+    expect(
+      await screen.findByText('Pareja sintética ya no aparece en Eventos.'),
+    ).toBeInTheDocument();
+    await user.click(list.getByRole('button', { name: 'Reactivar a Inactivo sintético' }));
+    await waitFor(() => expect(api.setFamilyMemberActive).toHaveBeenCalledWith('fam-3', true));
+  });
+
+  it('eliminar pide confirmación irreversible y solo entonces llama al backend', async () => {
+    const user = userEvent.setup();
+    api.fetchMyFamily.mockResolvedValue({ family: [familyMember({ name: 'Error sintético' })] });
+    api.deleteFamilyMember.mockResolvedValue(undefined);
+    const { queryClient } = renderMore('/more/profile');
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    await user.click(await screen.findByRole('button', { name: 'Eliminar a Error sintético' }));
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByText(/No se puede deshacer/)).toBeInTheDocument();
+    expect(api.deleteFamilyMember).not.toHaveBeenCalled();
+    await user.click(dialog.getByRole('button', { name: 'Eliminar definitivamente' }));
+    await waitFor(() => expect(api.deleteFamilyMember).toHaveBeenCalledWith('fam-1'));
+    const keys = invalidate.mock.calls.map((call) => JSON.stringify(call[0]?.queryKey));
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        JSON.stringify(['session', 'u-a', 'more', 'family']),
+        JSON.stringify(['session', 'u-a', 'more', 'events']),
+        JSON.stringify(['session', 'u-a', 'dashboard']),
+      ]),
+    );
+    expect(keys.some((key) => /tasks|stock|pets|team/.test(key))).toBe(false);
+  });
+
+  it('el EMPLOYEE conserva su ficha de equipo e hijos (no ve Mi familia)', async () => {
+    asEmployee();
+    api.fetchMyProfile.mockResolvedValue(profileResponse());
+    renderMore('/more/profile');
+    expect(await screen.findByRole('button', { name: 'Guardar mis datos' })).toBeInTheDocument();
+    expect(screen.getByText(/Contacto de emergencia/)).toBeInTheDocument();
+    expect(screen.queryByText('Mi familia')).not.toBeInTheDocument();
+    expect(api.fetchMyFamily).not.toHaveBeenCalled();
+  });
+});
+
+describe('🪪 nombre visible del EMPLOYEE y del equipo (Etapa 5F)', () => {
+  it('EMPLOYEE corrige su nombre: va a Employee.displayName, se refleja en la sesión y refresca los nombres', async () => {
+    const user = userEvent.setup();
+    api.saveMyProfile.mockResolvedValue({
+      ...profileResponse(),
+      employee: { ...PERSON, displayName: 'Persona Renombrada', role: 'Doméstica' },
+    });
+    const { queryClient } = renderMore('/more/profile');
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    const field = await screen.findByLabelText('Nombre visible');
+    expect(field).toHaveValue('Persona sintética');
+    expect(screen.getByText('Así te ve el equipo en toda la app.')).toBeInTheDocument();
+    await user.clear(field);
+    await user.type(field, '  Persona   Renombrada ');
+    await user.click(screen.getByRole('button', { name: 'Guardar mis datos' }));
+    await waitFor(() => expect(api.saveMyProfile).toHaveBeenCalledTimes(1));
+    const body = api.saveMyProfile.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.displayName).toBe('Persona Renombrada');
+    for (const forbidden of ['userId', 'employeeId', 'username', 'role', 'code']) {
+      expect(body).not.toHaveProperty(forbidden);
+    }
+    await waitFor(() => expect(applyDisplayNameMock).toHaveBeenCalledWith('Persona Renombrada'));
+    const keys = invalidate.mock.calls.map((call) => JSON.stringify(call[0]?.queryKey));
+    for (const domain of ['tasks', 'performance', 'chickenCoop', 'stock', 'news', 'dashboard']) {
+      expect(
+        keys.some((key) => key.includes(domain)),
+        domain,
+      ).toBe(true);
+    }
+  });
+
+  it('EMPLOYEE sin cambiar el nombre: no invalida los otros módulos', async () => {
+    const user = userEvent.setup();
+    api.saveMyProfile.mockResolvedValue(profileResponse());
+    const { queryClient } = renderMore('/more/profile');
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    await user.click(await screen.findByRole('button', { name: 'Guardar mis datos' }));
+    await waitFor(() => expect(api.saveMyProfile).toHaveBeenCalledTimes(1));
+    await screen.findByText('Datos guardados ✓');
+    const keys = invalidate.mock.calls.map((call) => JSON.stringify(call[0]?.queryKey));
+    expect(keys.some((key) => /tasks|stock|chickenCoop|performance|pets/.test(key))).toBe(false);
+  });
+
+  it('ADMIN edita el nombre de una persona desde Datos del equipo con el endpoint existente', async () => {
+    asAdmin();
+    const user = userEvent.setup();
+    api.updateEmployee.mockResolvedValue({
+      employee: { ...employeesResponse().employees[0], displayName: 'Nombre Corregido' },
+    });
+    renderMore('/more/settings/team');
+    await user.click(
+      await screen.findByRole('button', {
+        name: `Editar nombre de ${teamResponse().team[0]?.displayName}`,
+      }),
+    );
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByText(/No cambia su usuario, su PIN ni su historial/)).toBeInTheDocument();
+    const field = dialog.getByLabelText('Nombre visible');
+    await user.clear(field);
+    await user.type(field, 'X');
+    await user.click(dialog.getByRole('button', { name: 'Guardar' }));
+    expect(await dialog.findByRole('alert')).toHaveTextContent('al menos 2 letras');
+    await user.clear(field);
+    await user.type(field, 'Nombre  Corregido');
+    await user.click(dialog.getByRole('button', { name: 'Guardar' }));
+    await waitFor(() =>
+      expect(api.updateEmployee).toHaveBeenCalledWith(teamResponse().team[0]?.id, {
+        displayName: 'Nombre Corregido',
+      }),
+    );
+    expect(await screen.findByText('Nombre actualizado: Nombre Corregido ✓')).toBeInTheDocument();
+  });
+});
+
 describe('reglas de presentación del prototipo', () => {
+  it('origen de un derivado: primera persona solo para su dueño; fechas sin año como dd/mm', () => {
+    expect(birthdayOriginLabel('USER_FAMILY', true)).toBe('desde Mi familia');
+    expect(birthdayOriginLabel('USER_FAMILY', false)).toBe('desde la familia del administrador');
+    expect(birthdayOriginLabel('USER_PROFILE', false)).toBe('desde el perfil del administrador');
+    expect(birthdayOriginLabel('ANIMAL', false)).toBe('desde la ficha de la mascota');
+    expect(familyBirthDateLabel('--03-10')).toBe('10/03');
+    expect(familyBirthDateLabel('1984-02-01')).toBe('01/02/1984');
+  });
+
   it('relativeDays / timeAgo / ageLabel', () => {
     expect([
       relativeDays(0),

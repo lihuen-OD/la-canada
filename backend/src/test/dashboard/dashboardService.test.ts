@@ -137,7 +137,7 @@ describe('getDashboard', () => {
   it('resuelve las seis ramas en paralelo y limita eventos/novedades al contrato', async () => {
     mocks.listTasks.mockResolvedValue({ tasks: [] });
     await getDashboard(actor);
-    expect(mocks.listUpcomingEvents).toHaveBeenCalledWith(3, expect.any(Date));
+    expect(mocks.listUpcomingEvents).toHaveBeenCalledWith(expect.anything(), 3, expect.any(Date));
     expect(mocks.news).toHaveBeenCalledWith(expect.objectContaining({ take: 3 }));
     expect(mocks.stockItems).toHaveBeenCalledTimes(1);
     expect(mocks.eggs).toHaveBeenCalledTimes(1);

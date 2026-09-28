@@ -7,6 +7,7 @@ import type { ManagedEmployee } from '../../api/moreTypes';
 import { queryKeys } from '../../api/queryKeys';
 import { useSessionScope } from '../../api/useSessionScope';
 import { useAuth } from '../../auth/useAuth';
+import { getUserDisplayName } from '../../auth/userDisplay';
 import { Avatar } from '../../components/ui/Avatar';
 import { Button } from '../../components/ui/Button';
 import { buttonClassName } from '../../components/ui/buttonStyles';
@@ -270,7 +271,7 @@ export default function SettingsScreen() {
       {dialog.kind === 'ownPin' && user ? (
         <PinDialog
           mode="reset"
-          targetDisplayName={user.employee?.displayName ?? 'Administrador'}
+          targetDisplayName={getUserDisplayName(user)}
           isSelf
           onCancel={close}
           onSubmit={async (pin) => {

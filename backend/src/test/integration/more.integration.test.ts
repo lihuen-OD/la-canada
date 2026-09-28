@@ -23,6 +23,11 @@ import { setWeatherFetcherForTests } from '../../more/weatherService';
 
 const RUN = `test-5x-${Date.now()}`;
 const TZ = config.businessTimeZone;
+/** Sufijo SOLO de letras para nombres visibles (la validación de 5F rechaza dígitos). */
+const NAME_TAG = RUN.replace(/\d/g, (digit) => 'abcdefghij'[Number(digit)] ?? 'x').replace(
+  /-/g,
+  ' ',
+);
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from(RUN)]);
 
 interface Actor {
@@ -128,7 +133,7 @@ beforeAll(async () => {
   const emp = await prisma.employee.create({
     data: {
       code: `${RUN}-emp`,
-      displayName: `Sintético ${RUN}`,
+      displayName: `Sintético ${NAME_TAG}`,
       role: 'Otro',
       colorHex: '#4a7c59',
     },
@@ -157,7 +162,7 @@ afterAll(async () => {
   setObjectStorageForTests(undefined);
   setWeatherFetcherForTests(null);
   const created = await prisma.employee.findMany({
-    where: { code: { startsWith: RUN } },
+    where: { OR: [{ code: { startsWith: RUN } }, { id: { in: employeeIds } }] },
     select: { id: true, user: { select: { id: true } } },
   });
   for (const row of created) {
@@ -298,16 +303,20 @@ describe('📅 Eventos y 🎂 cumpleaños derivados', () => {
       .set(as(admin))
       .send({ title: `${RUN} Mantenimiento viejo`, date: past(), type: 'MAINTENANCE' });
     const birth = formatLocalDate(addDays(localToday(), 1)).replace(/^\d{4}/, '1990');
-    const profile = await request(app).put('/api/v1/me/profile').set(as(employee)).send({
-      fullLegalName: null,
-      birthDate: birth,
-      maritalStatus: null,
-      phone: null,
-      taxId: null,
-      healthInsurance: null,
-      emergencyContactName: null,
-      emergencyContactPhone: null,
-    });
+    const profile = await request(app)
+      .put('/api/v1/me/profile')
+      .set(as(employee))
+      .send({
+        displayName: `Sintético ${NAME_TAG}`,
+        fullLegalName: null,
+        birthDate: birth,
+        maritalStatus: null,
+        phone: null,
+        taxId: null,
+        healthInsurance: null,
+        emergencyContactName: null,
+        emergencyContactPhone: null,
+      });
     expect(profile.status).toBe(200);
     const child = await request(app)
       .post('/api/v1/me/children')
@@ -331,9 +340,9 @@ describe('📅 Eventos y 🎂 cumpleaños derivados', () => {
       upcoming.some((item) => item.title === 'Cumpleaños de Vicky' && item.note === 'Familia'),
     ).toBe(true);
     expect(upcoming.some((item) => item.title === 'Cumpleaños de Felicitas')).toBe(true);
-    const mine = upcoming.find((item) => item.title === `Cumpleaños de Sintético ${RUN}`);
+    const mine = upcoming.find((item) => item.title === `Cumpleaños de Sintético ${NAME_TAG}`);
     expect(mine).toMatchObject({ kind: 'birthday', daysUntil: 1, note: 'Equipo' });
-    expect(upcoming.some((item) => item.note === `Hijo/a de Sintético ${RUN}`)).toBe(true);
+    expect(upcoming.some((item) => item.note === `Hijo/a de Sintético ${NAME_TAG}`)).toBe(true);
     expect(upcoming.every((item) => item.daysUntil >= 0)).toBe(true);
     expect(upcoming.map((item) => item.daysUntil)).toEqual(
       [...upcoming.map((item) => item.daysUntil)].sort((x, y) => x - y),
@@ -343,7 +352,8 @@ describe('📅 Eventos y 🎂 cumpleaños derivados', () => {
     expect(pastItems.find((item) => item.title === `${RUN} Mantenimiento viejo`)?.daysUntil).toBe(
       -3,
     );
-    expect(sql.length).toBeLessThanOrEqual(10);
+    // auth + 3 de eventos + 5 fuentes de cumpleaños (Etapa 5F: +1, perfil personal) + relaciones.
+    expect(sql.length).toBeLessThanOrEqual(11);
 
     const visits = await request(app).get('/api/v1/events?type=VISIT').set(as(employee));
     expect(visits.body.upcoming.every((item: { type: string }) => item.type === 'VISIT')).toBe(
@@ -442,8 +452,10 @@ describe('⚙️ Personas y 👤 Mi perfil', () => {
     const created = await request(app)
       .post('/api/v1/employees')
       .set(as(admin))
-      .send({ displayName: `${RUN}-p`, role: 'Parque', colorHex: '#2C5364' });
+      .send({ displayName: `Persona ${NAME_TAG}`, role: 'Parque', colorHex: '#2C5364' });
     expect(created.status).toBe(201);
+    // El código sale del nombre: se registra el id para que la limpieza lo encuentre.
+    employeeIds.push(created.body.employee.id);
     expect(created.body.employee).toMatchObject({
       role: 'Parque',
       colorHex: '#2c5364',

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { personDisplayNameSchema } from '../lib/personName';
 import { normalizeStockText } from '../stock/stockSchemas';
 
 /**
@@ -12,7 +13,6 @@ export const NEWS_TEXT_MAX = 500;
 export const EVENT_TITLE_MAX = 120;
 export const EVENT_NOTE_MAX = 300;
 export const PHOTO_TITLE_MAX = 80;
-export const EMPLOYEE_NAME_MAX = 40;
 /** Roles funcionales del `<select id="p-rol">` del prototipo. */
 export const EMPLOYEE_ROLES = ['Doméstica', 'Parque', 'Otro'] as const;
 /** Opciones del `<select id="mp-estado-civil">` del prototipo. */
@@ -149,7 +149,8 @@ const colorSchema = z
 
 export const createEmployeeBodySchema = z
   .object({
-    displayName: plainText('El nombre', EMPLOYEE_NAME_MAX),
+    /** Etapa 5F: la validación única del nombre visible (antes texto libre de 40). */
+    displayName: personDisplayNameSchema,
     role: z.enum(EMPLOYEE_ROLES, { message: 'Elegí un rol de la lista.' }),
     colorHex: colorSchema,
   })
@@ -186,6 +187,8 @@ const phoneSchema = (label: string) =>
 /** "Guardar mis datos": el formulario completo (cada campo vacío se guarda como vacío). */
 export const updateProfileBodySchema = z
   .object({
+    /** Etapa 5F: nombre visible propio → `Employee.displayName` (nunca `code`/`username`). */
+    displayName: personDisplayNameSchema,
     fullLegalName: optionalText('El nombre completo', 120),
     birthDate: z.union([z.null(), z.literal(''), dateSchema]).transform((value) => value || null),
     maritalStatus: z
@@ -208,6 +211,51 @@ export const updateProfileBodySchema = z
     emergencyContactPhone: phoneSchema('El teléfono de emergencia'),
   })
   .strict();
+
+// ── 👤 Mi perfil personal y 👨‍👩‍👧‍👦 Mi familia (usuario sin Employee, Etapa 5F) ──
+
+export const FAMILY_RELATIONS = ['PARTNER', 'CHILD', 'FAMILY', 'OTHER'] as const;
+export const FAMILY_NAME_MAX = 60;
+
+/** "🎂 Mi cumpleaños" + nombre visible propio (obligatorio al guardar; fecha vacía = sin dato). */
+export const updatePersonalProfileBodySchema = z
+  .object({
+    displayName: personDisplayNameSchema,
+    birthDate: z.union([z.null(), z.literal(''), dateSchema]).transform((value) => value || null),
+  })
+  .strict();
+
+/**
+ * Fecha de nacimiento de un familiar: `YYYY-MM-DD` (año conocido, lo que envía
+ * `<input type="date">`) o `--MM-DD` (ISO 8601 sin año, cuando no se conoce —
+ * nunca un año de relleno). El servicio valida que sea una fecha real.
+ */
+export const familyBirthDateSchema = z
+  .string({ message: 'Ingresá la fecha de nacimiento.' })
+  .regex(/^(\d{4}|-)-\d{2}-\d{2}$/, 'La fecha debe tener formato YYYY-MM-DD o --MM-DD.');
+
+const familyRelationSchema = z.enum(FAMILY_RELATIONS, { message: 'Elegí una relación.' });
+
+export const createFamilyMemberBodySchema = z
+  .object({
+    name: plainText('El nombre', FAMILY_NAME_MAX),
+    relation: familyRelationSchema,
+    birthDate: familyBirthDateSchema,
+  })
+  .strict();
+
+export const updateFamilyMemberBodySchema = z
+  .object({
+    name: createFamilyMemberBodySchema.shape.name.optional(),
+    relation: familyRelationSchema.optional(),
+    birthDate: familyBirthDateSchema.optional(),
+  })
+  .strict()
+  .refine((body) => Object.values(body).some((value) => value !== undefined), {
+    message: 'No hay cambios para aplicar.',
+  });
+
+export const familyStatusBodySchema = z.object({ active: z.boolean() }).strict();
 
 export const createChildBodySchema = z
   .object({

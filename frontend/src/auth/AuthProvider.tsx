@@ -20,7 +20,8 @@ type AuthAction =
   | { type: 'LOGIN_START' }
   | { type: 'LOGIN_SUCCESS'; user: AuthenticatedUser }
   | { type: 'LOGIN_FAILURE' }
-  | { type: 'LOGGED_OUT' };
+  | { type: 'LOGGED_OUT' }
+  | { type: 'DISPLAY_NAME_CHANGED'; displayName: string };
 
 function authReducer(state: AuthState, action: AuthAction): AuthState {
   switch (action.type) {
@@ -38,6 +39,18 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
       return { status: 'anonymous', user: null };
     case 'LOGGED_OUT':
       return { status: 'anonymous', user: null };
+    case 'DISPLAY_NAME_CHANGED':
+      if (!state.user) return state;
+      return {
+        ...state,
+        user: {
+          ...state.user,
+          displayName: action.displayName,
+          employee: state.user.employee
+            ? { ...state.user.employee, displayName: action.displayName }
+            : null,
+        },
+      };
     default:
       return state;
   }
@@ -150,6 +163,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
     [state.user],
   );
 
+  const applyDisplayName = useCallback((displayName: string): void => {
+    dispatch({ type: 'DISPLAY_NAME_CHANGED', displayName });
+  }, []);
+
   const value: AuthContextValue = {
     status: state.status,
     user: state.user,
@@ -157,6 +174,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     logout,
     retryBootstrap,
     hasRole,
+    applyDisplayName,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
 import { deleteEvent, fetchEvents } from '../../api/moreApi';
-import type { CalendarEvent, EventListItem, EventType } from '../../api/moreTypes';
+import type { BirthdayEvent, CalendarEvent, EventListItem, EventType } from '../../api/moreTypes';
 import { queryKeys } from '../../api/queryKeys';
 import { useSessionScope } from '../../api/useSessionScope';
 import { useAuth } from '../../auth/useAuth';
 import { Button } from '../../components/ui/Button';
+import { buttonClassName } from '../../components/ui/buttonStyles';
 import { Card } from '../../components/ui/Card';
 import { Chip } from '../../components/ui/Chip';
 import { PageHeader } from '../../components/ui/PageHeader';
@@ -14,7 +16,14 @@ import { ConfirmDialog } from '../admin/ConfirmDialog';
 import { errorMessageOf, humanError, isSessionExpired } from '../pets/petErrors';
 import { EventFormDialog } from './EventFormDialog';
 import { MoreBackLink } from './MoreBackLink';
-import { EVENT_FILTERS, EVENT_ICON, EVENT_LABEL, dateParts, relativeDays } from './moreLabels';
+import {
+  EVENT_FILTERS,
+  EVENT_ICON,
+  EVENT_LABEL,
+  birthdayOriginLabel,
+  dateParts,
+  relativeDays,
+} from './moreLabels';
 import { useMoreCache } from './useMoreCache';
 
 const PAST_PAGE_SIZE = 20;
@@ -25,10 +34,29 @@ type Dialog =
   | { kind: 'delete'; event: CalendarEvent };
 
 /**
+ * Acceso a la fuente de un cumpleaños derivado según quién mira (el backend
+ * decide `sourceRef`): nunca un "Eliminar", y solo "Editar" donde esa persona
+ * realmente puede editar (su perfil; la ficha de la mascota si es ADMIN).
+ */
+function sourceLink(item: BirthdayEvent, isAdmin: boolean): { to: string; label: string } | null {
+  const ref = item.sourceRef;
+  if (!ref) return null;
+  if (ref.kind === 'MY_PROFILE') {
+    return {
+      to: '/more/profile',
+      label: item.origin === 'USER_FAMILY' ? 'Editar en Mi familia' : 'Editar perfil',
+    };
+  }
+  if (ref.kind === 'TEAM_PROFILES') return { to: '/more/settings/team', label: 'Ver perfil' };
+  return { to: `/pets/${ref.id}`, label: isAdmin ? 'Editar ficha' : 'Ver ficha' };
+}
+
+/**
  * 📅 Eventos (`pg-eventos`): chips por tipo, "Próximos" (eventos desde hoy
  * y cumpleaños calculados por el backend) y "Pasados" atenuados y
- * paginados. Crear, editar y eliminar es solo de ADMIN; los cumpleaños no se
- * editan acá (salen de Mi perfil y de la ficha de cada mascota).
+ * paginados. Crear, editar y eliminar eventos (incluidos los cumpleaños
+ * cargados a mano) es solo de ADMIN; los cumpleaños derivados muestran su
+ * origen y se corrigen en su fuente (Mi perfil, Mi familia, la mascota).
  */
 export function EventsScreen() {
   const { user, logout } = useAuth();
@@ -67,6 +95,7 @@ export function EventsScreen() {
 
   const renderItem = (item: EventListItem) => {
     const { day, monthShort } = dateParts(item.date);
+    const link = item.kind === 'birthday' ? sourceLink(item, isAdmin) : null;
     return (
       <li key={item.id} className="event-item">
         <span className="event-item__date" aria-hidden="true">
@@ -85,6 +114,27 @@ export function EventsScreen() {
             <span>{relativeDays(item.daysUntil)}</span>
           </p>
           {item.note ? <p className="event-item__note">{item.note}</p> : null}
+          {item.kind === 'birthday' ? (
+            <p className="event-item__origin">
+              🔁 Automático{' '}
+              {birthdayOriginLabel(item.origin, item.sourceRef?.kind === 'MY_PROFILE')}
+            </p>
+          ) : item.type === 'BIRTHDAY' ? (
+            <p className="event-item__origin">Cargado a mano</p>
+          ) : null}
+          {link ? (
+            <Link
+              to={link.to}
+              className={buttonClassName({
+                variant: 'ghost',
+                size: 'sm',
+                className: 'event-item__source',
+              })}
+              aria-label={`${link.label}: ${item.title}`}
+            >
+              {link.label}
+            </Link>
+          ) : null}
         </div>
         {isAdmin && item.kind === 'event' ? (
           <div className="event-item__actions">
