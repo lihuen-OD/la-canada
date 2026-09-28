@@ -239,7 +239,13 @@ function PerformanceCard({ performance }: { performance: DashboardResponse['perf
         <EmptyText>Sin información de desempeño</EmptyText>
       ) : mine ? (
         <div className="home-mine">
-          <p className="home-mine__score">
+          <p
+            className={
+              mine.percentage === null
+                ? 'home-mine__score home-mine__score--empty'
+                : 'home-mine__score'
+            }
+          >
             <strong>{formatPercentage(mine.percentage)}</strong>
             <span>Cumplimiento personal</span>
           </p>
@@ -253,15 +259,15 @@ function PerformanceCard({ performance }: { performance: DashboardResponse['perf
               <dd>{mine.completedPersonally}</dd>
             </div>
             <div>
-              <dt>Pendientes</dt>
+              <dt>Sin completar</dt>
               <dd>{mine.pending}</dd>
             </div>
             <div>
-              <dt>Coberturas recibidas</dt>
+              <dt>Le cubrieron</dt>
               <dd>{mine.coverageReceived}</dd>
             </div>
             <div>
-              <dt>Coberturas realizadas</dt>
+              <dt>Cubrió a otros</dt>
               <dd>{mine.coverageGiven}</dd>
             </div>
           </dl>
@@ -274,12 +280,17 @@ function PerformanceCard({ performance }: { performance: DashboardResponse['perf
               <span className="home-progress__name">
                 {row.employee.displayName}
                 <small>
-                  {row.completedPersonally}/{row.assigned} realizadas personalmente · Pendientes{' '}
-                  {row.pending} · Coberturas recibidas {row.coverageReceived} · realizadas{' '}
+                  {row.completedPersonally}/{row.assigned} realizadas personalmente · Sin completar{' '}
+                  {row.pending} · Le cubrieron {row.coverageReceived} · Cubrió a otros{' '}
                   {row.coverageGiven}
                 </small>
               </span>
-              <span className="home-progress__bar" aria-hidden="true">
+              <span
+                className={
+                  row.percentage === null ? 'home-progress__bar is-neutral' : 'home-progress__bar'
+                }
+                aria-hidden="true"
+              >
                 <span style={{ width: `${row.percentage ?? 0}%` }} />
               </span>
               <strong aria-label={`Cumplimiento personal: ${formatPercentage(row.percentage)}`}>

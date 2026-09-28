@@ -19,7 +19,6 @@ export interface PerformanceMetrics {
 
 export interface PerformanceEmployee extends PerformanceMetrics {
   employee: TaskEmployee & { role: string };
-  dailyStreak: number | null;
 }
 
 export interface PerformanceOccurrence {

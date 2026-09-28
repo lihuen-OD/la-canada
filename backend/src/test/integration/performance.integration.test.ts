@@ -15,9 +15,10 @@ import { defaultPerformanceRange, getPerformance } from '../../performance/perfo
 const RUN = `test-perf-${Date.now()}`;
 const tz = config.businessTimeZone;
 const today = toLocalDate(new Date(), tz);
-const from = addDays(today, -11);
+// Rango público de 14 días (15 a 2 días atrás); la diaria de Juan cubre sus últimos 10.
+const from = addDays(today, -15);
 const to = addDays(today, -2);
-const days = Array.from({ length: 10 }, (_, i) => addDays(from, i));
+const days = Array.from({ length: 10 }, (_, i) => addDays(from, i + 4));
 const at = (day: ReturnType<typeof addDays>, hours = 15) =>
   new Date(startOfLocalDay(day, tz).getTime() + hours * 3_600_000);
 
@@ -76,7 +77,7 @@ beforeAll(async () => {
   userId = user.id;
 
   const planStart = startOfLocalDay(addDays(from, -5), tz);
-  const daily = await task(juan, 'DAILY', 'diaria de Juan', planStart);
+  const daily = await task(juan, 'DAILY', 'diaria de Juan', startOfLocalDay(days[0]!, tz));
   // Días 1–8 los hace Juan, el 9 lo cubre Coke, el 10 se completó y se revirtió (pendiente).
   for (const [i, day] of days.entries()) {
     const reverted = i === 9;

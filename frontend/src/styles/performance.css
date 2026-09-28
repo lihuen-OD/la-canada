@@ -168,3 +168,17 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
+
+/* Sin tareas en el período: barra neutra (nunca un 0% coloreado). */
+.performance-person__bar--neutral::-webkit-progress-value {
+  background: transparent;
+}
+
+.performance-person__bar--neutral::-moz-progress-bar {
+  background: transparent;
+}
+
+.performance-person__score--neutral strong {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}

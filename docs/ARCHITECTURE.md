@@ -623,7 +623,7 @@ Endpoint propio y liviano. Diarias y semanales: un slot por período con `expect
 
 `TaskPlanningInterval` versiona responsable, frecuencia y vigencia. Crear/reactivar abre; reasignar o cambiar frecuencia cierra y abre; desactivar cierra, siempre dentro de la transacción de `Task`. Un índice parcial permite un solo intervalo abierto.
 
-`GET /performance/summary?from&to` y `GET /performance/employees/:employeeId?from&to` aceptan hasta 90 días y usan `BUSINESS_TIME_ZONE`. ADMIN ve el equipo; EMPLOYEE queda forzado al Employee de su sesión. El backend genera ocurrencias y DTO; el frontend no recalcula métricas.
+`GET /performance/summary?from&to` y `GET /performance/employees/:employeeId?from&to` aceptan únicamente rangos de 7, 14 o 30 días (`PERFORMANCE_RANGE_DAYS`; cualquier otro largo, incluido 90, responde 400) y usan `BUSINESS_TIME_ZONE`. ADMIN ve el equipo; EMPLOYEE queda forzado al Employee de su sesión. El backend genera ocurrencias y DTO; el frontend no recalcula métricas.
 
 **Etapa 5D** (regla definitiva, `docs/BUSINESS_RULES.md`): `buildSingleOccurrences` agrega URGENT/ONE_TIME como una obligación por tarea y `computeMetrics` separa cumplimiento personal de coberturas. Una sola lectura de ejecuciones vigentes cubre los períodos del rango y la finalización de URGENT/ONE_TIME planificadas en el rango (filtro por relación dentro de la misma sentencia); desaparece la consulta aparte de "especiales". Medido contra `demo`: resumen 5 sentencias (antes 7 por estructura), detalle 6 (antes 8), constantes, sin N+1. Sin migración. El detalle expone `status` (`personal`/`covered`/`pending`) por obligación.
 

@@ -20,13 +20,14 @@ import type { TaskActor } from '../tasks/tasksService';
 import {
   buildRecurringOccurrences,
   buildSingleOccurrences,
-  computeDailyStreak,
   computeMetrics,
   occurrenceStatus,
   percentage,
 } from './performanceCalculator';
 
-const MAX_RANGE_DAYS = 90;
+/** Únicos rangos públicos de Desempeño (chips "7 días", "14 días", "30 días"). */
+export const PERFORMANCE_RANGE_DAYS = [7, 14, 30] as const;
+const MAX_RANGE_DAYS = 30;
 /** Rango con el que abre Tareas → Desempeño (chip "7 días") y que usa Inicio. */
 export const DEFAULT_RANGE_DAYS = 7;
 
@@ -48,11 +49,15 @@ function rangeOrThrow(fromText: string, toText: string, now: Date) {
   const today = toLocalDate(now, config.businessTimeZone);
   if (compareLocalDates(from, today) > 0)
     throw new ValidationError('El rango no puede comenzar en el futuro.');
+  // El largo pedido (desde–hasta inclusive) debe ser exactamente 7, 14 o 30 días.
+  let span = 1;
+  for (let day = from; compareLocalDates(day, requestedTo) < 0 && span <= MAX_RANGE_DAYS;) {
+    day = addDays(day, 1);
+    span += 1;
+  }
+  if (!(PERFORMANCE_RANGE_DAYS as readonly number[]).includes(span))
+    throw new ValidationError('El rango debe ser de 7, 14 o 30 días.');
   const to = compareLocalDates(requestedTo, today) > 0 ? today : requestedTo;
-  let count = 1;
-  for (let day = from; compareLocalDates(day, to) < 0; day = addDays(day, 1)) count += 1;
-  if (count > MAX_RANGE_DAYS)
-    throw new ValidationError(`El rango no puede superar ${MAX_RANGE_DAYS} días.`);
   return { from, to, today };
 }
 
@@ -194,7 +199,6 @@ export async function getPerformance(
   const employeeMetrics = visibleEmployees.map((employee) => ({
     employee,
     ...computeMetrics(visibleOccurrences, employee.id),
-    dailyStreak: computeDailyStreak(visibleOccurrences, employee.id, today),
   }));
   const team = computeMetrics(visibleOccurrences);
   // Tendencia por período recurrente (las únicas/urgentes no tienen período),

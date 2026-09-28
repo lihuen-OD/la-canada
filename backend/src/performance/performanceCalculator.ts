@@ -5,7 +5,6 @@ import {
   addDays,
   compareLocalDates,
   formatLocalDate,
-  parseLocalDate,
   startOfLocalDay,
   startOfWeek,
   type LocalDate,
@@ -248,35 +247,4 @@ export function computeMetrics(occurrences: Occurrence[], employeeId?: string) {
 
 export function percentage(completed: number, expected: number): number | null {
   return expected === 0 ? null : Math.round((completed / expected) * 1000) / 10;
-}
-
-export function computeDailyStreak(
-  occurrences: Occurrence[],
-  employeeId: string,
-  today: LocalDate,
-): number | null {
-  // Racha personal: un día cuenta solo si la persona hizo ella misma todas sus diarias.
-  const daily = occurrences.filter(
-    (item) => item.frequency === 'DAILY' && item.assignedEmployeeId === employeeId,
-  );
-  const done = (item: Occurrence) => occurrenceStatus(item) === 'personal';
-  if (daily.length === 0) return null;
-  const byDay = new Map<string, Occurrence[]>();
-  for (const item of daily) byDay.set(item.periodKey, [...(byDay.get(item.periodKey) ?? []), item]);
-  let cursor = today;
-  const todayItems = byDay.get(formatLocalDate(today));
-  if (todayItems && !todayItems.every(done)) cursor = addDays(cursor, -1);
-  let streak = 0;
-  while (true) {
-    const items = byDay.get(formatLocalDate(cursor));
-    if (!items) {
-      cursor = addDays(cursor, -1);
-      if (compareLocalDates(cursor, parseLocalDate(daily[0]!.periodKey)!) < 0) break;
-      continue;
-    }
-    if (!items.every(done)) break;
-    streak += 1;
-    cursor = addDays(cursor, -1);
-  }
-  return streak;
 }

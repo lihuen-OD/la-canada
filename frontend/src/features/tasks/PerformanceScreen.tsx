@@ -17,15 +17,17 @@ import type { PerformanceOccurrence } from '../../api/performanceTypes';
 
 /** Rótulo del estado que ya calculó el backend, visto desde la persona del detalle. */
 function occurrenceLabel(item: PerformanceOccurrence, personId: string): string {
-  if (item.assignedEmployeeId !== personId) return '🤝 Cobertura realizada';
+  if (item.assignedEmployeeId !== personId) return '🤝 Cubrió a otros';
   if (item.status === 'personal') return '✅ Propia';
-  if (item.status === 'covered') return '🤝 Cubierta por otra persona';
-  return 'Pendiente';
+  if (item.status === 'covered') return '🤝 Le cubrieron';
+  return 'Sin completar';
 }
 
-type Preset = 7 | 30 | 90;
+/** Únicos rangos públicos de Desempeño (el backend rechaza cualquier otro). */
+const PRESETS = [7, 14, 30] as const;
+type Preset = (typeof PRESETS)[number];
 /** Etiquetas de período del prototipo ("7 días", …); los rangos son los aprobados. */
-const PRESET_LABEL: Record<Preset, string> = { 7: '7 días', 30: '30 días', 90: '3 meses' };
+const PRESET_LABEL: Record<Preset, string> = { 7: '7 días', 14: '14 días', 30: '30 días' };
 type Tone = 'positive' | 'earth' | 'danger' | 'info' | 'neutral';
 /** Color del prototipo según cumplimiento: ≥80% verde, ≥50% tierra, resto rojo. Siempre con el número. */
 const scoreTone = (value: number | null): Tone =>
@@ -35,7 +37,15 @@ const scoreTone = (value: number | null): Tone =>
 function Kpi({ tone, value, label }: { tone: Tone; value: string | number; label: string }) {
   return (
     <div className={`kpi kpi--${tone}`}>
-      <strong className="kpi__value">{value}</strong>
+      <strong
+        className={
+          typeof value === 'string' && !value.endsWith('%')
+            ? 'kpi__value kpi__value--text'
+            : 'kpi__value'
+        }
+      >
+        {value}
+      </strong>
       <span className="kpi__label">{label}</span>
     </div>
   );
@@ -106,7 +116,7 @@ export function PerformanceScreen() {
       />
       <TasksSubnav />
       <div className="filter-scroller" role="group" aria-label="Período">
-        {([7, 30, 90] as const).map((days) => (
+        {PRESETS.map((days) => (
           <Chip
             key={days}
             selected={preset === days}
@@ -154,7 +164,7 @@ export function PerformanceScreen() {
             <Kpi
               tone={data.team.pending > 0 ? 'earth' : 'positive'}
               value={data.team.pending}
-              label="⏳ Pendientes"
+              label="⏳ Sin completar"
             />
             {data.special.urgentPending !== null ? (
               <Kpi
@@ -203,13 +213,13 @@ export function PerformanceScreen() {
                       <progress
                         className={`performance-person__bar performance-person__bar--${scoreTone(row.percentage)}`}
                         max="100"
+                        // Sin tareas: barra neutra vacía (no es un 0% real).
                         value={row.percentage ?? 0}
                         aria-label={`Cumplimiento de ${row.employee.displayName}: ${percentageLabel(row.percentage)}`}
                       />
                       <span className="performance-person__facts">
-                        Pendientes {row.pending} · Coberturas recibidas {row.coverageReceived} ·
-                        Coberturas realizadas {row.coverageGiven} · 🔥{' '}
-                        {row.dailyStreak === null ? 'Sin datos' : `${row.dailyStreak} días`}
+                        Sin completar {row.pending} · Le cubrieron {row.coverageReceived} · Cubrió a
+                        otros {row.coverageGiven}
                       </span>
                     </button>
                   </li>

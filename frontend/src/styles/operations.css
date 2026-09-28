@@ -245,3 +245,11 @@
   gap: var(--space-3);
   align-items: start;
 }
+
+/* KPI sin porcentaje ("Sin tareas en el período"): texto, no cifra. */
+.kpi__value--text {
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+}

@@ -270,14 +270,15 @@ Repetido aquí por completitud del pedido original — el detalle completo y el 
 - Denominador: DAILY/WEEKLY/MONTHLY esperadas según planificación histórica. URGENT/ONE_TIME se informan aparte.
 - Cumplimiento = completadas asignadas / esperadas asignadas; el equipo usa totales ponderados. Cero esperadas devuelve `null` ("Sin datos").
 - Una completada usa `assignedEmployeeId`; un pendiente usa el responsable vigente al cierre, o ahora si sigue abierto. La cobertura suma trabajo a quien realizó y cumplimiento/ayuda a quien la tenía asignada.
-- Reversiones no cuentan. La racha considera solo DAILY: hoy incompleto no rompe la racha cerrada ayer y un día sin tareas no suma ni corta.
+- Reversiones no cuentan. (La racha de la Etapa 4B se retiró en 5D.2.)
 
 ## Actualización Etapa 5D — Regla definitiva de Desempeño (reemplaza lo anterior donde difiera)
 
 - **Cumplimiento personal** = obligaciones propias realizadas por la misma persona / obligaciones asignadas. Si Coke completa una tarea asignada a Juan, la ejecución conserva `assignedEmployeeId = Juan` y `completedByEmployeeId = Coke`: la tarea queda terminada, sigue en el denominador de Juan, no suma a su numerador y no altera el porcentaje de Coke; se informa como **cobertura recibida** (Juan) y **cobertura realizada** (Coke). Ejemplo: 10 asignadas, 8 propias, 1 cubierta, 1 pendiente → 80%.
 - **Los cinco tipos cuentan.** DAILY/WEEKLY/MONTHLY: una obligación por día/semana/mes planificado según `TaskPlanningInterval` (altas, bajas, reasignaciones y cambios de frecuencia), nunca fuera de lo planificado. URGENT/ONE_TIME: **una sola** obligación por tarea, si su ventana (desde la planificación hasta la finalización vigente, o hasta el cierre de la planificación si sigue pendiente) se superpone con el rango: completada antes del rango o creada después → no entra; completada durante el rango → entra; completada después del fin del rango → entra como pendiente.
 - Responsable: siempre el snapshot `assignedEmployeeId` de la ejecución; si está pendiente, el de la planificación vigente al cierre. Nunca se deduce por nombres ni por el responsable actual, y ninguna ejecución histórica se modifica.
-- Métricas del DTO: `assigned`, `completedPersonally`, `percentage`, `pending`, `coverageReceived`, `coverageGiven` y `operationalCompleted` (trabajo terminado por la persona, propio + coberturas, fuera del porcentaje). La racha diaria solo cuenta días hechos por la propia persona. Reversiones no suman ni cuentan como cobertura. Sin puntos, premios ni ponderaciones.
+- Métricas del DTO: `assigned`, `completedPersonally`, `percentage`, `pending`, `coverageReceived`, `coverageGiven` y `operationalCompleted` (trabajo terminado por la persona, propio + coberturas, fuera del porcentaje). Reversiones no suman ni cuentan como cobertura. Sin puntos, premios ni ponderaciones.
+- **Simplificación (5D.2)**: sin racha (se retiró del cálculo, del DTO y de la pantalla). Etiquetas visibles: **Sin completar** (asignadas que nadie terminó), **Le cubrieron** (propias hechas por otra persona) y **Cubrió a otros** (ajenas hechas por la persona); el porcentaje sigue siendo realizadas personalmente / asignadas (Cami: 2 asignadas, 1 propia, 1 cubierta → 50%, Sin completar 0, Le cubrieron 1). Rangos públicos: 7, 14 y 30 días (predeterminado e Inicio: 7). Con 0 obligaciones asignadas no hay denominador: se muestra «Sin tareas en el período» (nunca «0%» ni «Sin datos») con barra neutra; con asignadas y ninguna realizada sí es «0%».
 
 ## 20. Otras reglas encontradas
 

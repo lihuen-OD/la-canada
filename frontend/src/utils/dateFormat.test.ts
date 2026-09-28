@@ -51,9 +51,10 @@ describe('formatDateRange', () => {
 });
 
 describe('formatPercentage', () => {
-  it('coma decimal argentina y Sin datos', () => {
+  it('coma decimal argentina; sin asignadas no hay porcentaje', () => {
     expect(formatPercentage(66.7)).toBe('66,7%');
     expect(formatPercentage(80)).toBe('80%');
-    expect(formatPercentage(null)).toBe('Sin datos');
+    expect(formatPercentage(null)).toBe('Sin tareas en el período');
+    expect(formatPercentage(0)).toBe('0%');
   });
 });

@@ -10,3 +10,6 @@ package-lock.json
 
 # Prisma gestiona el formato de su propio schema con `prisma format`.
 **/*.prisma
+
+# Configuración local de Claude Code (ignorada por git).
+.claude/settings.local.json

@@ -30,7 +30,7 @@ const admin = { userId: 'u-admin', role: 'ADMIN' as const, employeeId: null };
 const juanActor = { userId: 'u-juan', role: 'EMPLOYEE' as const, employeeId: JUAN };
 // Rango 20–24/09 cerrado; "ahora" es el 28/09 en Buenos Aires.
 const NOW = new Date('2026-09-28T15:00:00Z');
-const RANGE = { from: '2026-09-15', to: '2026-09-24' };
+const RANGE = { from: '2026-09-11', to: '2026-09-24' }; // 14 días
 const DAYS = Array.from({ length: 10 }, (_, i) => `2026-09-${String(15 + i).padStart(2, '0')}`);
 
 /** Juan: una DAILY (10 días en el rango). 8 las hace él, el día 9 lo cubre Coke, el 10 queda pendiente. */
@@ -41,7 +41,8 @@ function scenario() {
       taskId: 't-juan',
       employeeId: JUAN,
       frequency: 'DAILY',
-      validFrom: new Date('2026-09-01T03:00:00Z'),
+      // Planificada desde el 15/09: 10 días dentro del rango de 14.
+      validFrom: new Date('2026-09-15T03:00:00Z'),
       validTo: null,
       task: { description: 'Regar (sintética)' },
     },
@@ -142,7 +143,7 @@ describe('getPerformance — regla personal y permisos', () => {
     }
     const where = mocks.executions.mock.calls[0]![0].where;
     expect(where.revertedAt).toBeNull();
-    expect(where.OR[0].periodKey).toEqual({ gte: '2026-09-15', lte: '2026-09-24' });
+    expect(where.OR[0].periodKey).toEqual({ gte: '2026-09-11', lte: '2026-09-24' });
     expect(where.OR[1].periodKey).toEqual({ in: ['URGENT', 'ONE_TIME'] });
     expect(where.OR[1].task.planningIntervals.some.frequency).toEqual({
       in: ['URGENT', 'ONE_TIME'],
@@ -189,5 +190,34 @@ describe('getPerformance — regla personal y permisos', () => {
     });
     expect(result.special).toMatchObject({ urgentCompleted: 1, oneTimeCompleted: 0 });
     expect(result.trend).toEqual([]);
+  });
+
+  it.each([7, 14, 30])('acepta exactamente %i días', async (days) => {
+    const to = new Date(Date.UTC(2026, 8, 24));
+    const from = new Date(to.getTime() - (days - 1) * 86_400_000);
+    await expect(
+      getPerformance(
+        admin,
+        { from: from.toISOString().slice(0, 10), to: '2026-09-24' },
+        undefined,
+        NOW,
+      ),
+    ).resolves.toMatchObject({ range: { maxDays: 30 } });
+  });
+
+  it.each([
+    ['90 días (ya no es público)', '2026-06-27'],
+    ['10 días', '2026-09-15'],
+    ['31 días', '2026-08-25'],
+  ])('rechaza %s', async (_label, from) => {
+    await expect(getPerformance(admin, { from, to: '2026-09-24' }, undefined, NOW)).rejects.toThrow(
+      'El rango debe ser de 7, 14 o 30 días.',
+    );
+    expect(mocks.executions).not.toHaveBeenCalled();
+  });
+
+  it('ya no expone racha en ninguna fila', async () => {
+    const result = await getPerformance(admin, RANGE, undefined, NOW);
+    for (const row of result.employees) expect(row).not.toHaveProperty('dailyStreak');
   });
 });

@@ -55,7 +55,6 @@ describe('getDashboard', () => {
           coverageReceived: 1,
           coverageGiven: 0,
           operationalCompleted: 8,
-          dailyStreak: 2,
         },
       ],
     });

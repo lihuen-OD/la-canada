@@ -462,7 +462,8 @@ Cambios de esta revisión:
 
 ## Etapa 5D — Desempeño: regla personal y cinco tipos 🟡 sin commit — pendiente de revisión
 
-- Numerador personal (solo propias hechas por el responsable), coberturas separadas, URGENT/ONE_TIME como una obligación por tarea, racha personal. DTO renombrado a campos explícitos (`assigned`, `completedPersonally`, `pending`, `coverageReceived`, `coverageGiven`, `operationalCompleted`; `trend` con `assigned`/`completedPersonally`; `occurrences[].status`).
+- Numerador personal (solo propias hechas por el responsable), coberturas separadas, URGENT/ONE_TIME como una obligación por tarea. DTO renombrado a campos explícitos (`assigned`, `completedPersonally`, `pending`, `coverageReceived`, `coverageGiven`, `operationalCompleted`; `trend` con `assigned`/`completedPersonally`; `occurrences[].status`).
 - Sin migración: `assignedEmployeeId`, `completedByEmployeeId`, `revertedAt` y `TaskPlanningInterval` ya conservan la historia necesaria.
 - Validación: tests del calculador y del servicio, integración dirigida `performance.integration.test.ts` contra `demo` (fixtures `test-perf-<RUN>`, 0 residuos), tests frontend de Desempeño e invalidación tras completar URGENT/ONE_TIME o revertir.
 - **Inicio = Desempeño** y **fechas `dd/mm/aaaa`**: el Dashboard reutiliza `getPerformance` (sin fórmula propia; test de consistencia con los cinco tipos y la integración contra `demo`); utilidad única de fechas en el frontend, CSV de Stock en `dd/mm/aaaa`.
+- **5D.2 (sin commit)**: se retira la racha end-to-end (solo cálculo en memoria: no cambia ninguna sentencia SQL; resumen 5, detalle 6); etiquetas «Sin completar», «Le cubrieron», «Cubrió a otros»; rangos públicos 7/14/30 (90 rechazado por el backend); Inicio sigue en 7 días.

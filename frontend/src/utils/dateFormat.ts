@@ -49,9 +49,16 @@ export function formatDateRange(
   return start === end ? start : `${start} al ${end}`;
 }
 
-/** Porcentaje del backend (0–100, un decimal o `null`) con coma decimal argentina. */
+/** Texto cuando no hay obligaciones asignadas: sin denominador no existe porcentaje (ni 0%). */
+export const NO_TASKS_LABEL = 'Sin tareas en el período';
+
+/**
+ * Porcentaje del backend (0–100, un decimal) con coma decimal argentina.
+ * `null` = 0 obligaciones asignadas → `NO_TASKS_LABEL`. Con asignadas y
+ * ninguna realizada el backend manda `0` → "0%".
+ */
 export function formatPercentage(value: number | null): string {
-  return value === null ? 'Sin datos' : `${value.toLocaleString('es-AR')}%`;
+  return value === null ? NO_TASKS_LABEL : `${value.toLocaleString('es-AR')}%`;
 }
 
 function zonedParts(value: string, timeZone: string) {

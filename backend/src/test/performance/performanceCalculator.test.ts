@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   buildRecurringOccurrences,
   buildSingleOccurrences,
-  computeDailyStreak,
   computeMetrics,
   percentage,
   type ExecutionRow,
@@ -108,24 +107,6 @@ describe('performanceCalculator', () => {
     expect(percentage(0, 0)).toBeNull();
     expect(percentage(2, 3)).toBe(66.7);
   });
-  it('racha completa, día sin tareas y día actual parcial', () => {
-    const complete = build(
-      [plan()],
-      undefined,
-      ['2026-09-20', '2026-09-21', '2026-09-22', '2026-09-23'].map((periodKey, i) => ({
-        id: String(i),
-        taskId: 'task-1',
-        periodKey,
-        assignedEmployeeId: 'employee-1',
-        completedByEmployeeId: 'employee-1',
-        completedAt: new Date(`${periodKey}T15:00:00Z`),
-      })),
-    );
-    expect(computeDailyStreak(complete, 'employee-1', date('2026-09-24'))).toBe(4);
-    expect(computeDailyStreak([], 'employee-1', date('2026-09-24'))).toBeNull();
-  });
-  it('corta la racha ante un día pasado pendiente', () =>
-    expect(computeDailyStreak(build([plan()]), 'employee-1', date('2026-09-24'))).toBe(0));
   it('usa la fecha argentina cerca de medianoche UTC', () =>
     expect(build([plan()], new Date('2026-09-25T02:30:00Z')).at(-1)?.periodKey).toBe('2026-09-24'));
 });
@@ -494,20 +475,35 @@ describe('Desempeño personal: los cinco tipos y las coberturas', () => {
     });
   });
 
-  it('la racha diaria solo cuenta días hechos por la propia persona', () => {
-    const days = ['2026-09-20', '2026-09-21', '2026-09-22', '2026-09-23'];
-    const rows = build(
-      [plan({ employeeId: JUAN })],
-      undefined,
-      days.map((periodKey, i) =>
-        exec({
-          id: String(i),
-          periodKey,
-          completedByEmployeeId: periodKey === '2026-09-22' ? COKE : JUAN,
-          completedAt: new Date(`${periodKey}T15:00:00Z`),
-        }),
-      ),
-    );
-    expect(computeDailyStreak(rows, JUAN, date('2026-09-24'))).toBe(1);
+  it('caso Cami: 2 asignadas, 1 hecha por ella y 1 cubierta → 50%, Le cubrieron 1, Sin completar 0', () => {
+    const CAMI = 'employee-cami';
+    const rows = [
+      occurrence({
+        taskId: 'c1',
+        assignedEmployeeId: CAMI,
+        completed: true,
+        completedByEmployeeId: CAMI,
+      }),
+      occurrence({
+        taskId: 'c2',
+        assignedEmployeeId: CAMI,
+        completed: true,
+        completedByEmployeeId: COKE,
+      }),
+    ];
+    expect(computeMetrics(rows, CAMI)).toEqual({
+      assigned: 2,
+      completedPersonally: 1,
+      percentage: 50,
+      pending: 0,
+      coverageReceived: 1,
+      coverageGiven: 0,
+      operationalCompleted: 1,
+    });
+    expect(computeMetrics(rows, COKE)).toMatchObject({
+      assigned: 0,
+      percentage: null,
+      coverageGiven: 1,
+    });
   });
 });

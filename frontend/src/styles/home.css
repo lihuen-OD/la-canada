@@ -301,3 +301,12 @@
     align-items: start;
   }
 }
+/* Sin tareas en el período: barra neutra y texto en lugar de cifra. */
+.home-progress__bar.is-neutral > span {
+  background: transparent;
+}
+.home-mine__score--empty strong {
+  font-family: var(--font-body);
+  font-size: var(--font-size-md);
+  color: var(--color-text-muted);
+}

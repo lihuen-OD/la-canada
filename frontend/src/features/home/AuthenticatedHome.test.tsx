@@ -122,7 +122,7 @@ describe('Dashboard de Inicio', () => {
     expect(within(card).getByLabelText('Cumplimiento personal: 80%')).toBeInTheDocument();
     expect(within(card).getByLabelText('Cumplimiento personal: 66,7%')).toBeInTheDocument();
     expect(card).toHaveTextContent(
-      '8/10 realizadas personalmente · Pendientes 1 · Coberturas recibidas 1',
+      '8/10 realizadas personalmente · Sin completar 1 · Le cubrieron 1 · Cubrió a otros 0',
     );
     expect(document.body.textContent).not.toMatch(/\b\d{4}-\d{2}-\d{2}\b/);
     expect(within(card).getByRole('link', { name: 'Ver desempeño' })).toHaveAttribute(
@@ -149,15 +149,67 @@ describe('Dashboard de Inicio', () => {
     const facts: [string, string][] = [
       ['Asignadas', '10'],
       ['Realizadas personalmente', '8'],
-      ['Pendientes', '1'],
-      ['Coberturas recibidas', '1'],
-      ['Coberturas realizadas', '0'],
+      ['Sin completar', '1'],
+      ['Le cubrieron', '1'],
+      ['Cubrió a otros', '0'],
     ];
     for (const [label, value] of facts) {
       expect(within(card).getByText(label).nextSibling).toHaveTextContent(value);
     }
     expect(card).not.toHaveTextContent('Coke');
     expect(screen.queryByRole('heading', { name: '👥 Avance del equipo' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [
+      'A. 0 asignadas',
+      { assigned: 0, pending: 0, percentage: null },
+      'Sin tareas en el período',
+      'Sin completar 0',
+    ],
+    [
+      'B. 5 asignadas y 0 realizadas',
+      { assigned: 5, pending: 5, percentage: 0 },
+      '0%',
+      'Sin completar 5',
+    ],
+  ] as const)('%s en Inicio (ADMIN y EMPLOYEE)', async (_case, metrics, shown, pendingText) => {
+    const row = {
+      ...dashboard.performance!.employees[0]!,
+      completedPersonally: 0,
+      coverageReceived: 0,
+      coverageGiven: 0,
+      ...metrics,
+    };
+    mocks.getDashboard.mockResolvedValueOnce({
+      ...dashboard,
+      performance: { ...dashboard.performance!, employees: [row] },
+    });
+    const view = renderHome();
+    const team = (await screen.findByRole('heading', { name: '👥 Avance del equipo' })).closest(
+      'section',
+    ) as HTMLElement;
+    expect(within(team).getByLabelText(`Cumplimiento personal: ${shown}`)).toBeInTheDocument();
+    expect(team).toHaveTextContent(pendingText);
+    expect(team.querySelector('.home-progress__bar')?.classList.contains('is-neutral')).toBe(
+      metrics.percentage === null,
+    );
+    if (metrics.percentage === null) expect(team.textContent).not.toMatch(/\d%|Sin datos/);
+    else expect(team).not.toHaveTextContent('Sin tareas en el período');
+    view.unmount();
+
+    mocks.getDashboard.mockResolvedValueOnce({
+      ...dashboard,
+      performance: { ...dashboard.performance!, scope: 'self', employees: [row] },
+    });
+    renderHome();
+    const mine = (await screen.findByRole('heading', { name: '🏆 Mi desempeño' })).closest(
+      'section',
+    ) as HTMLElement;
+    expect(within(mine).getByText(shown)).toBeInTheDocument();
+    expect(within(mine).getByText('Sin completar').nextSibling).toHaveTextContent(
+      String(metrics.pending),
+    );
   });
 
   it('muestra los estados vacíos reales', async () => {
