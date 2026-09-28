@@ -645,6 +645,9 @@ describe('Stock — detalle e historial', () => {
     expect(
       within(dialog).getByRole('region', { name: /historial de movimientos/i }),
     ).toBeInTheDocument();
+    // Fecha visible en dd/mm/aaaa; ningún ISO en el texto (atributos e inputs no cuentan).
+    expect(await within(dialog).findByText('20/09/2026')).toBeInTheDocument();
+    expect(dialog.textContent).not.toMatch(/\b\d{4}-\d{2}-\d{2}\b/);
     expect(api.fetchStockItemMovements).toHaveBeenCalledWith(
       OK_ITEM.id,
       expect.objectContaining({ page: 1 }),

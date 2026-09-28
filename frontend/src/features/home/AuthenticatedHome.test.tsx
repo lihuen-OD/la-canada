@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { DashboardResponse } from '../../api/dashboardTypes';
-import { createTestQueryClient, render, screen, waitFor } from '../../test/render';
+import { createTestQueryClient, render, screen, waitFor, within } from '../../test/render';
 
 const mocks = vi.hoisted(() => ({ getDashboard: vi.fn(), logout: vi.fn() }));
 vi.mock('../../api/dashboardApi', () => ({ getDashboard: mocks.getDashboard }));
@@ -28,14 +28,30 @@ const dashboard: DashboardResponse = {
       assignee: { id: 'e1', displayName: 'Coke', colorHex: '#4a7c59' },
     },
   ],
-  teamProgress: [
-    {
-      employee: { id: 'e1', displayName: 'Coke', colorHex: '#4a7c59' },
-      completed: 3,
-      total: 5,
-      percentage: 60,
-    },
-  ],
+  performance: {
+    scope: 'team',
+    range: { from: '2026-09-19', to: '2026-09-25', timeZone: 'America/Argentina/Buenos_Aires' },
+    employees: [
+      {
+        employee: { id: 'e2', displayName: 'Juan (sintético)', colorHex: '#2c5364' },
+        assigned: 10,
+        completedPersonally: 8,
+        percentage: 80,
+        pending: 1,
+        coverageReceived: 1,
+        coverageGiven: 0,
+      },
+      {
+        employee: { id: 'e1', displayName: 'Coke', colorHex: '#4a7c59' },
+        assigned: 3,
+        completedPersonally: 2,
+        percentage: 66.7,
+        pending: 1,
+        coverageReceived: 0,
+        coverageGiven: 1,
+      },
+    ],
+  },
   stockAlerts: [
     {
       id: 's1',
@@ -96,11 +112,59 @@ describe('Dashboard de Inicio', () => {
     expect(screen.queryByText(/clima|mascotas/i)).not.toBeInTheDocument();
   });
 
+  it('ADMIN: avance del equipo con las métricas canónicas del backend, período y enlace a Desempeño', async () => {
+    mocks.getDashboard.mockResolvedValueOnce(dashboard);
+    renderHome();
+    const card = (await screen.findByRole('heading', { name: '👥 Avance del equipo' })).closest(
+      'section',
+    ) as HTMLElement;
+    expect(within(card).getByText('Últimos 7 días · 19/09/2026 al 25/09/2026')).toBeInTheDocument();
+    expect(within(card).getByLabelText('Cumplimiento personal: 80%')).toBeInTheDocument();
+    expect(within(card).getByLabelText('Cumplimiento personal: 66,7%')).toBeInTheDocument();
+    expect(card).toHaveTextContent(
+      '8/10 realizadas personalmente · Pendientes 1 · Coberturas recibidas 1',
+    );
+    expect(document.body.textContent).not.toMatch(/\b\d{4}-\d{2}-\d{2}\b/);
+    expect(within(card).getByRole('link', { name: 'Ver desempeño' })).toHaveAttribute(
+      'href',
+      '/tasks/performance',
+    );
+  });
+
+  it('EMPLOYEE: «Mi desempeño» solo con sus propias cifras', async () => {
+    mocks.getDashboard.mockResolvedValueOnce({
+      ...dashboard,
+      performance: {
+        ...dashboard.performance!,
+        scope: 'self',
+        employees: [dashboard.performance!.employees[0]!],
+      },
+    });
+    renderHome();
+    const card = (await screen.findByRole('heading', { name: '🏆 Mi desempeño' })).closest(
+      'section',
+    ) as HTMLElement;
+    expect(within(card).getByText('80%')).toBeInTheDocument();
+    expect(within(card).getByText('Cumplimiento personal')).toBeInTheDocument();
+    const facts: [string, string][] = [
+      ['Asignadas', '10'],
+      ['Realizadas personalmente', '8'],
+      ['Pendientes', '1'],
+      ['Coberturas recibidas', '1'],
+      ['Coberturas realizadas', '0'],
+    ];
+    for (const [label, value] of facts) {
+      expect(within(card).getByText(label).nextSibling).toHaveTextContent(value);
+    }
+    expect(card).not.toHaveTextContent('Coke');
+    expect(screen.queryByRole('heading', { name: '👥 Avance del equipo' })).not.toBeInTheDocument();
+  });
+
   it('muestra los estados vacíos reales', async () => {
     mocks.getDashboard.mockResolvedValueOnce({
       ...dashboard,
       urgentTasks: [],
-      teamProgress: [],
+      performance: { ...dashboard.performance!, employees: [] },
       stockAlerts: [],
       upcomingEvents: [],
       latestNews: [],

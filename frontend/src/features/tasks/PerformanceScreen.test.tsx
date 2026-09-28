@@ -21,12 +21,13 @@ const response = {
     maxDays: 90,
   },
   team: {
-    expected: 2,
-    completed: 0,
+    assigned: 2,
+    completedPersonally: 0,
     percentage: 0,
-    performed: 1,
-    coveredOthers: 1,
-    receivedHelp: 1,
+    pending: 1,
+    coverageReceived: 1,
+    coverageGiven: 1,
+    operationalCompleted: 1,
   },
   special: { urgentCompleted: 0, oneTimeCompleted: 0, urgentPending: 1 },
   employees: [
@@ -37,12 +38,13 @@ const response = {
         role: 'Rol',
         colorHex: '#466547',
       },
-      expected: 2,
-      completed: 0,
+      assigned: 2,
+      completedPersonally: 0,
       percentage: 0,
-      performed: 1,
-      coveredOthers: 1,
-      receivedHelp: 1,
+      pending: 1,
+      coverageReceived: 1,
+      coverageGiven: 0,
+      operationalCompleted: 0,
       dailyStreak: null,
     },
   ],
@@ -83,8 +85,8 @@ describe('PerformanceScreen', () => {
   it('representa porcentaje null como Sin datos', async () => {
     fetchPerformance.mockResolvedValue({
       ...response,
-      team: { ...response.team, expected: 0, percentage: null },
-      employees: [{ ...response.employees[0], expected: 0, percentage: null }],
+      team: { ...response.team, assigned: 0, percentage: null },
+      employees: [{ ...response.employees[0], assigned: 0, percentage: null }],
     });
     render(
       <MemoryRouter>
@@ -92,5 +94,70 @@ describe('PerformanceScreen', () => {
       </MemoryRouter>,
     );
     expect((await screen.findAllByText('Sin datos')).length).toBeGreaterThan(1);
+  });
+  it('muestra las métricas personales del backend (8/10 = 80%) y las coberturas por separado', async () => {
+    const juan = {
+      ...response.employees[0]!,
+      assigned: 10,
+      completedPersonally: 8,
+      percentage: 80,
+      pending: 1,
+      coverageReceived: 1,
+      coverageGiven: 0,
+      operationalCompleted: 8,
+    };
+    const occurrence = (
+      status: 'personal' | 'covered' | 'pending',
+      assignedEmployeeId = juan.employee.id,
+    ) => ({
+      taskId: `t-${status}-${assignedEmployeeId}`,
+      description: `Tarea ${status} (sintética)`,
+      frequency: 'URGENT' as const,
+      periodKey: 'URGENT',
+      assignedEmployeeId,
+      completed: status !== 'pending',
+      completedByEmployeeId: null,
+      assignedEmployee: null,
+      completedByEmployee: null,
+      completedAt: null,
+      status,
+    });
+    fetchPerformance.mockResolvedValue({ ...response, employees: [juan] });
+    fetchEmployeePerformance.mockResolvedValue({
+      ...response,
+      employees: [juan],
+      occurrences: [
+        occurrence('personal'),
+        occurrence('covered'),
+        occurrence('pending'),
+        occurrence('personal', 'otra-persona'),
+        {
+          ...occurrence('personal'),
+          taskId: 't-daily',
+          frequency: 'DAILY' as const,
+          periodKey: '2026-09-22',
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <PerformanceScreen />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText('80%')).toBeInTheDocument();
+    expect(screen.getByText('8/10')).toBeInTheDocument();
+    expect(screen.getByText(/Coberturas recibidas 1/)).toBeInTheDocument();
+    expect(screen.getByText('Cumplimiento personal')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Persona sintética/ }));
+    expect(await screen.findAllByText('✅ Propia')).toHaveLength(2);
+    expect(screen.getByText('🤝 Cubierta por otra persona')).toBeInTheDocument();
+    expect(screen.getByText('Pendiente')).toBeInTheDocument();
+    expect(screen.getByText('🤝 Cobertura realizada')).toBeInTheDocument();
+    const detail = screen
+      .getByRole('heading', { name: 'Detalle' })
+      .closest('section') as HTMLElement;
+    expect(detail).toHaveTextContent('22/09/2026 · Diaria');
+    expect(detail.textContent).not.toMatch(/\b\d{4}-\d{2}-\d{2}\b/);
   });
 });

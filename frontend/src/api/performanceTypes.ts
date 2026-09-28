@@ -1,12 +1,20 @@
 import type { TaskEmployee, TaskFrequency } from './taskTypes';
 
+/**
+ * Métricas de Desempeño calculadas SOLO por el backend (regla definitiva):
+ * `percentage` = `completedPersonally / assigned`; una cobertura no suma al
+ * responsable ni a quien cubrió — se informa en `coverageReceived` /
+ * `coverageGiven`. `operationalCompleted` es trabajo terminado por la persona
+ * (propio + coberturas), nunca parte del porcentaje.
+ */
 export interface PerformanceMetrics {
-  expected: number;
-  completed: number;
+  assigned: number;
+  completedPersonally: number;
   percentage: number | null;
-  performed: number;
-  coveredOthers: number;
-  receivedHelp: number;
+  pending: number;
+  coverageReceived: number;
+  coverageGiven: number;
+  operationalCompleted: number;
 }
 
 export interface PerformanceEmployee extends PerformanceMetrics {
@@ -17,7 +25,9 @@ export interface PerformanceEmployee extends PerformanceMetrics {
 export interface PerformanceOccurrence {
   taskId: string;
   description: string;
-  frequency: Extract<TaskFrequency, 'DAILY' | 'WEEKLY' | 'MONTHLY'>;
+  frequency: TaskFrequency;
+  /** Para el responsable: hecha por él/ella, cubierta por otra persona o pendiente. */
+  status: 'personal' | 'covered' | 'pending';
   periodKey: string;
   assignedEmployeeId: string;
   completed: boolean;
@@ -38,6 +48,11 @@ export interface PerformanceResponse {
   team: PerformanceMetrics;
   special: { urgentCompleted: number; oneTimeCompleted: number; urgentPending: number | null };
   employees: PerformanceEmployee[];
-  trend: { periodKey: string; expected: number; completed: number; percentage: number | null }[];
+  trend: {
+    periodKey: string;
+    assigned: number;
+    completedPersonally: number;
+    percentage: number | null;
+  }[];
   occurrences?: PerformanceOccurrence[];
 }

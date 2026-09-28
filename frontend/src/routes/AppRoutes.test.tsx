@@ -90,7 +90,7 @@ describe('AppRoutes (con app shell real)', () => {
         goodEggsToday: 0,
       },
       urgentTasks: [],
-      teamProgress: [],
+      performance: null,
       stockAlerts: [],
       upcomingEvents: [],
       latestNews: [],

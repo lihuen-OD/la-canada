@@ -23,7 +23,7 @@ const pad = (value: number) => String(value).padStart(2, '0');
 export function formatDayHeading(date: string): string {
   const { year, month, day } = parts(date);
   const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
-  return `${WEEKDAYS[weekday]} ${day}/${pad(month)}/${year}`;
+  return `${WEEKDAYS[weekday]} ${pad(day)}/${pad(month)}/${year}`;
 }
 
 /** "25/09" — etiquetas del gráfico. */

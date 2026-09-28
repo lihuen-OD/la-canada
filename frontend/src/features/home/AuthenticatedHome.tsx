@@ -12,6 +12,7 @@ import { Avatar } from '../../components/ui/Avatar';
 import { Card } from '../../components/ui/Card';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { ErrorState } from '../../components/ui/StateMessage';
+import { formatDateRange, formatPercentage } from '../../utils/dateFormat';
 
 const EVENT_ICON: Record<string, string> = {
   VISIT: '👥',
@@ -114,32 +115,7 @@ function DashboardContent({ data, refreshing }: { data: DashboardResponse; refre
               <EmptyText>Sin urgentes 🎉</EmptyText>
             )}
           </DashboardCard>
-          <DashboardCard
-            title="👥 Avance del equipo"
-            to="/tasks/performance"
-            linkLabel="Ver desempeño"
-          >
-            {data.teamProgress.length ? (
-              <ul className="home-list">
-                {data.teamProgress.map((progress) => (
-                  <li className="home-progress" key={progress.employee.id}>
-                    <Avatar
-                      name={progress.employee.displayName}
-                      colorHex={progress.employee.colorHex}
-                      size="sm"
-                    />
-                    <span className="home-progress__name">{progress.employee.displayName}</span>
-                    <span className="home-progress__bar" aria-hidden="true">
-                      <span style={{ width: `${progress.percentage}%` }} />
-                    </span>
-                    <strong>{progress.percentage}%</strong>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <EmptyText>Sin personas activas</EmptyText>
-            )}
-          </DashboardCard>
+          <PerformanceCard performance={data.performance} />
         </div>
         <div className="home-dashboard__column">
           <DashboardCard title="⚠️ Stock bajo" to="/stock/purchases" linkLabel="Ver stock">
@@ -238,6 +214,82 @@ function DashboardContent({ data, refreshing }: { data: DashboardResponse; refre
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Desempeño de Inicio: las cifras llegan ya calculadas por el backend con la
+ * misma función que Tareas → Desempeño (acá no se recalcula nada). ADMIN ve
+ * "Avance del equipo"; EMPLOYEE, "Mi desempeño" con sus propios números.
+ */
+function PerformanceCard({ performance }: { performance: DashboardResponse['performance'] }) {
+  const self = performance?.scope === 'self';
+  const period = performance
+    ? `Últimos 7 días · ${formatDateRange(performance.range.from, performance.range.to)}`
+    : null;
+  const mine = self ? performance?.employees[0] : undefined;
+  return (
+    <DashboardCard
+      title={self ? '🏆 Mi desempeño' : '👥 Avance del equipo'}
+      to="/tasks/performance"
+      linkLabel="Ver desempeño"
+    >
+      {period ? <p className="home-period">{period}</p> : null}
+      {!performance || performance.employees.length === 0 ? (
+        <EmptyText>Sin información de desempeño</EmptyText>
+      ) : mine ? (
+        <div className="home-mine">
+          <p className="home-mine__score">
+            <strong>{formatPercentage(mine.percentage)}</strong>
+            <span>Cumplimiento personal</span>
+          </p>
+          <dl className="home-mine__facts">
+            <div>
+              <dt>Asignadas</dt>
+              <dd>{mine.assigned}</dd>
+            </div>
+            <div>
+              <dt>Realizadas personalmente</dt>
+              <dd>{mine.completedPersonally}</dd>
+            </div>
+            <div>
+              <dt>Pendientes</dt>
+              <dd>{mine.pending}</dd>
+            </div>
+            <div>
+              <dt>Coberturas recibidas</dt>
+              <dd>{mine.coverageReceived}</dd>
+            </div>
+            <div>
+              <dt>Coberturas realizadas</dt>
+              <dd>{mine.coverageGiven}</dd>
+            </div>
+          </dl>
+        </div>
+      ) : (
+        <ul className="home-list" aria-label="Cumplimiento personal por persona">
+          {performance.employees.map((row) => (
+            <li className="home-progress" key={row.employee.id}>
+              <Avatar name={row.employee.displayName} colorHex={row.employee.colorHex} size="sm" />
+              <span className="home-progress__name">
+                {row.employee.displayName}
+                <small>
+                  {row.completedPersonally}/{row.assigned} realizadas personalmente · Pendientes{' '}
+                  {row.pending} · Coberturas recibidas {row.coverageReceived} · realizadas{' '}
+                  {row.coverageGiven}
+                </small>
+              </span>
+              <span className="home-progress__bar" aria-hidden="true">
+                <span style={{ width: `${row.percentage ?? 0}%` }} />
+              </span>
+              <strong aria-label={`Cumplimiento personal: ${formatPercentage(row.percentage)}`}>
+                {formatPercentage(row.percentage)}
+              </strong>
+            </li>
+          ))}
+        </ul>
+      )}
+    </DashboardCard>
   );
 }
 

@@ -1,4 +1,5 @@
 import type { BadgeTone } from '../../components/ui/Badge';
+import { formatDate } from '../../utils/dateFormat';
 import type {
   DestinationType,
   OperationalMovementType,
@@ -85,19 +86,9 @@ export const MOVEMENT_PLURAL: Record<StockMovementType, string> = {
   ADJUSTMENT_DECREASE: 'Ajustes a la baja',
 };
 
-/** `YYYY-MM-DD` → "lun 22 sep" (la fecha ya es de calendario; se formatea en UTC para no desplazarla). */
+/** `YYYY-MM-DD` (día de calendario del movimiento) → `dd/mm/aaaa`. */
 export function formatStockDay(key: string): string {
-  return new Intl.DateTimeFormat('es-AR', {
-    timeZone: 'UTC',
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-  }).format(new Date(`${key}T00:00:00Z`));
-}
-
-/** `YYYY-MM-DD` de `createdAt` para el detalle del movimiento (día calendario, sin hora local). */
-export function formatIsoDay(iso: string): string {
-  return iso.slice(0, 10);
+  return formatDate(key);
 }
 
 export interface StockItemGroup {

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   stockItems: vi.fn(),
   eggs: vi.fn(),
   news: vi.fn(),
+  getPerformance: vi.fn(),
 }));
 
 vi.mock('../../tasks/tasksService', () => ({
@@ -14,6 +15,10 @@ vi.mock('../../tasks/tasksService', () => ({
   listTaskEmployees: mocks.listTaskEmployees,
 }));
 vi.mock('../../more/eventsService', () => ({ listUpcomingEvents: mocks.listUpcomingEvents }));
+vi.mock('../../performance/performanceService', () => ({
+  getPerformance: mocks.getPerformance,
+  defaultPerformanceRange: () => ({ from: '2026-09-19', to: '2026-09-25' }),
+}));
 vi.mock('../../lib/prisma', () => ({
   prisma: {
     stockItem: { findMany: mocks.stockItems },
@@ -38,7 +43,22 @@ const actor = {
 describe('getDashboard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.listTaskEmployees.mockResolvedValue({ employees: [employee] });
+    mocks.getPerformance.mockResolvedValue({
+      range: { from: '2026-09-19', to: '2026-09-25', timeZone: 'America/Argentina/Buenos_Aires' },
+      employees: [
+        {
+          employee: { ...employee, role: 'Rol' },
+          assigned: 10,
+          completedPersonally: 8,
+          percentage: 80,
+          pending: 1,
+          coverageReceived: 1,
+          coverageGiven: 0,
+          operationalCompleted: 8,
+          dailyStreak: 2,
+        },
+      ],
+    });
     mocks.listUpcomingEvents.mockResolvedValue([]);
     mocks.stockItems.mockResolvedValue([]);
     mocks.eggs.mockResolvedValue({ _sum: { goodEggsCount: null } });
@@ -83,8 +103,36 @@ describe('getDashboard', () => {
       stockAlerts: 1,
       goodEggsToday: 6,
     });
-    expect(result.teamProgress[0]).toMatchObject({ completed: 1, total: 2, percentage: 50 });
+    // El desempeño viene tal cual del calculador canónico, sin campos operativos ni detalle.
+    expect(mocks.getPerformance).toHaveBeenCalledWith(
+      actor,
+      { from: '2026-09-19', to: '2026-09-25' },
+      undefined,
+      expect.any(Date),
+    );
+    expect(result.performance).toEqual({
+      scope: 'self',
+      range: { from: '2026-09-19', to: '2026-09-25', timeZone: 'America/Argentina/Buenos_Aires' },
+      employees: [
+        {
+          employee,
+          assigned: 10,
+          completedPersonally: 8,
+          percentage: 80,
+          pending: 1,
+          coverageReceived: 1,
+          coverageGiven: 0,
+        },
+      ],
+    });
     expect(mocks.listTasks).toHaveBeenCalledWith(actor, { status: 'active' }, expect.any(Date));
+  });
+
+  it('EMPLOYEE sin empleado vinculado: sin desempeño y sin consultarlo', async () => {
+    mocks.listTasks.mockResolvedValue({ tasks: [] });
+    const result = await getDashboard({ ...actor, employeeId: null });
+    expect(result.performance).toBeNull();
+    expect(mocks.getPerformance).not.toHaveBeenCalled();
   });
 
   it('resuelve las seis ramas en paralelo y limita eventos/novedades al contrato', async () => {

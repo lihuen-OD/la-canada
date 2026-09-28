@@ -12,12 +12,24 @@ export interface DashboardResponse {
     goodEggsToday: number;
   };
   urgentTasks: { id: string; description: string; assignee: PersonRef }[];
-  teamProgress: {
-    employee: PersonRef;
-    completed: number;
-    total: number;
-    percentage: number;
-  }[];
+  /**
+   * Desempeño canónico (el MISMO cálculo de Tareas → Desempeño, rango
+   * predeterminado de 7 días). `team`: ADMIN, todas las personas; `self`:
+   * EMPLOYEE, solo su fila. `null` si la cuenta no tiene empleado vinculado.
+   */
+  performance: {
+    scope: 'team' | 'self';
+    range: { from: string; to: string; timeZone: string };
+    employees: {
+      employee: PersonRef;
+      assigned: number;
+      completedPersonally: number;
+      percentage: number | null;
+      pending: number;
+      coverageReceived: number;
+      coverageGiven: number;
+    }[];
+  } | null;
   stockAlerts: {
     id: string;
     name: string;

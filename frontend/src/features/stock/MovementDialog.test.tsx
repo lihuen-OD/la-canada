@@ -80,6 +80,8 @@ describe('MovementDialog — decimal estricto y contrato del body', () => {
   it('EMPLOYEE usa su identidad de sesión, puede elegir fecha/destino y no inyecta persona ni producto', async () => {
     const { onSuccess } = renderDialog();
     const date = screen.getByLabelText(/fecha/i);
+    // El input nativo conserva el valor técnico ISO; solo la presentación es dd/mm/aaaa.
+    expect((date as HTMLInputElement).value).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(screen.getByLabelText(/destino/i)).toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: /quién/i })).not.toBeInTheDocument();
     await userEvent.setup().type(screen.getByLabelText('Cantidad'), '2.50');

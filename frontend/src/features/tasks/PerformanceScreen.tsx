@@ -10,7 +10,18 @@ import { Card } from '../../components/ui/Card';
 import { Chip } from '../../components/ui/Chip';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
+import { formatDate, formatPercentage } from '../../utils/dateFormat';
 import { TasksSubnav } from './TasksSubnav';
+import { FREQUENCY_LABEL } from './taskLabels';
+import type { PerformanceOccurrence } from '../../api/performanceTypes';
+
+/** Rótulo del estado que ya calculó el backend, visto desde la persona del detalle. */
+function occurrenceLabel(item: PerformanceOccurrence, personId: string): string {
+  if (item.assignedEmployeeId !== personId) return '🤝 Cobertura realizada';
+  if (item.status === 'personal') return '✅ Propia';
+  if (item.status === 'covered') return '🤝 Cubierta por otra persona';
+  return 'Pendiente';
+}
 
 type Preset = 7 | 30 | 90;
 /** Etiquetas de período del prototipo ("7 días", …); los rangos son los aprobados. */
@@ -41,8 +52,7 @@ const presetRange = (days: Preset) => {
   from.setDate(from.getDate() - days + 1);
   return { from: localDate(from), to: localDate(to) };
 };
-const percentageLabel = (value: number | null) =>
-  value === null ? 'Sin datos' : `${value.toLocaleString('es-AR')}%`;
+const percentageLabel = formatPercentage;
 
 const isUnauthorized = (reason: unknown) =>
   Boolean(reason && typeof reason === 'object' && 'status' in reason && reason.status === 401);
@@ -132,11 +142,20 @@ export function PerformanceScreen() {
             <Kpi
               tone={scoreTone(data.team.percentage)}
               value={percentageLabel(data.team.percentage)}
-              label="Cumplimiento"
+              label="Cumplimiento personal"
             />
-            <Kpi tone="info" value={data.team.expected} label="📅 Esperadas" />
-            <Kpi tone="positive" value={data.team.completed} label="✅ Completadas" />
-            <Kpi tone="info" value={data.team.coveredOthers} label="🤝 Coberturas" />
+            <Kpi tone="info" value={data.team.assigned} label="📅 Asignadas" />
+            <Kpi
+              tone="positive"
+              value={data.team.completedPersonally}
+              label="✅ Realizadas personalmente"
+            />
+            <Kpi tone="info" value={data.team.coverageGiven} label="🤝 Coberturas" />
+            <Kpi
+              tone={data.team.pending > 0 ? 'earth' : 'positive'}
+              value={data.team.pending}
+              label="⏳ Pendientes"
+            />
             {data.special.urgentPending !== null ? (
               <Kpi
                 tone={data.special.urgentPending > 0 ? 'danger' : 'positive'}
@@ -178,7 +197,7 @@ export function PerformanceScreen() {
                       >
                         <strong>{percentageLabel(row.percentage)}</strong>
                         <small>
-                          {row.completed}/{row.expected}
+                          {row.completedPersonally}/{row.assigned}
                         </small>
                       </span>
                       <progress
@@ -188,8 +207,8 @@ export function PerformanceScreen() {
                         aria-label={`Cumplimiento de ${row.employee.displayName}: ${percentageLabel(row.percentage)}`}
                       />
                       <span className="performance-person__facts">
-                        Realizó {row.performed} · Cubrió {row.coveredOthers} · Recibió ayuda{' '}
-                        {row.receivedHelp} · 🔥{' '}
+                        Pendientes {row.pending} · Coberturas recibidas {row.coverageReceived} ·
+                        Coberturas realizadas {row.coverageGiven} · 🔥{' '}
                         {row.dailyStreak === null ? 'Sin datos' : `${row.dailyStreak} días`}
                       </span>
                     </button>
@@ -221,14 +240,16 @@ export function PerformanceScreen() {
                     <span>
                       <strong>{item.description}</strong>
                       <small>
-                        {item.periodKey} · {item.frequency} · asignada a{' '}
-                        {item.assignedEmployee?.displayName ?? 'Sin responsable'}
+                        {item.frequency === 'URGENT' || item.frequency === 'ONE_TIME'
+                          ? FREQUENCY_LABEL[item.frequency]
+                          : `${formatDate(item.periodKey)} · ${FREQUENCY_LABEL[item.frequency]}`}{' '}
+                        · asignada a {item.assignedEmployee?.displayName ?? 'Sin responsable'}
                         {item.completedByEmployee
                           ? ` · realizada por ${item.completedByEmployee.displayName}`
                           : ''}
                       </small>
                     </span>
-                    <span>{item.completed ? '✅ Completada' : 'Pendiente'}</span>
+                    <span>{occurrenceLabel(item, selected)}</span>
                   </li>
                 ))}
               </ul>

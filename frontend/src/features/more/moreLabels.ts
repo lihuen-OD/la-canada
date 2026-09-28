@@ -1,4 +1,5 @@
 import type { Age, EventType, GalleryCategory } from '../../api/moreTypes';
+import { formatDate } from '../../utils/dateFormat';
 
 /** Textos y emojis del prototipo (`EV_LBL`, `EV_IC`, `MESC`, `DIAS3`, `ago`, `calcEdad`). */
 
@@ -108,10 +109,9 @@ export function timeAgo(iso: string, now: number = Date.now()): string {
   return `hace ${days} día${days === 1 ? '' : 's'}`;
 }
 
-/** "4/5/1990" (formato del prototipo en fichas y listas). */
+/** `dd/mm/aaaa` en fichas y listas (utilidad única de fechas). */
 export function shortDate(date: string): string {
-  const { year, month, day } = dateParts(date);
-  return `${day}/${month}/${year}`;
+  return formatDate(date);
 }
 
 /** `calcEdad`: años si tiene al menos uno; si no, meses. */

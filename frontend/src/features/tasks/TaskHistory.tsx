@@ -9,6 +9,7 @@ import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
 import { isSessionExpired } from './dialogErrors';
+import { formatDate } from '../../utils/dateFormat';
 import { FREQUENCY_LABEL, FREQUENCY_TONE, formatCompletedAt, formatLocalDay } from './taskLabels';
 
 const WEEKS_TO_OFFER = 8; // mismas "últimas 8 semanas" que el prototipo
@@ -234,9 +235,7 @@ export function TaskHistory({
         >
           {weeks.map((monday, index) => (
             <option key={monday} value={monday}>
-              {index === 0
-                ? 'Esta semana'
-                : `Semana del ${formatLocalDay(monday, { weekday: undefined })}`}
+              {index === 0 ? 'Esta semana' : `Semana del ${formatDate(monday)}`}
             </option>
           ))}
         </select>

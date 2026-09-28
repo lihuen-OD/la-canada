@@ -28,6 +28,7 @@ import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { Chip } from '../../components/ui/Chip';
+import { formatDateRange } from '../../utils/dateFormat';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
 import { StockPage } from './StockPage';
 import { useSessionExpiry } from './stockHooks';
@@ -298,7 +299,7 @@ export function ReportsView() {
       ) : (
         <div className={['stock-reports', stale].filter(Boolean).join(' ')}>
           <p className="stock-reports__range">
-            Período: {formatStockDay(summary.range.from)} al {formatStockDay(summary.range.to)}
+            Período: {formatDateRange(summary.range.from, summary.range.to)}
             {summary.range.includesCurrentDay ? ' (incluye hoy)' : ''}.
           </p>
           <ReportSummaryCards summary={summary} />

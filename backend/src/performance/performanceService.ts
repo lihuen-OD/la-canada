@@ -7,6 +7,8 @@ import {
 } from '../errors/AppError';
 import { prisma } from '../lib/prisma';
 import {
+  ONE_TIME_PERIOD_KEY,
+  URGENT_PERIOD_KEY,
   addDays,
   compareLocalDates,
   formatLocalDate,
@@ -17,12 +19,25 @@ import {
 import type { TaskActor } from '../tasks/tasksService';
 import {
   buildRecurringOccurrences,
+  buildSingleOccurrences,
   computeDailyStreak,
+  computeMetrics,
+  occurrenceStatus,
   percentage,
-  type Occurrence,
 } from './performanceCalculator';
 
 const MAX_RANGE_DAYS = 90;
+/** Rango con el que abre Tareas → Desempeño (chip "7 días") y que usa Inicio. */
+export const DEFAULT_RANGE_DAYS = 7;
+
+/** Últimos `DEFAULT_RANGE_DAYS` días hasta hoy, en `BUSINESS_TIME_ZONE`. */
+export function defaultPerformanceRange(now = new Date()) {
+  const today = toLocalDate(now, config.businessTimeZone);
+  return {
+    from: formatLocalDate(addDays(today, -(DEFAULT_RANGE_DAYS - 1))),
+    to: formatLocalDate(today),
+  };
+}
 
 function rangeOrThrow(fromText: string, toText: string, now: Date) {
   const from = parseLocalDate(fromText);
@@ -42,40 +57,6 @@ function rangeOrThrow(fromText: string, toText: string, now: Date) {
 }
 
 const employeeSelect = { id: true, displayName: true, role: true, colorHex: true } as const;
-
-function metricsFor(occurrences: Occurrence[], employeeId?: string) {
-  const assigned = employeeId
-    ? occurrences.filter((item) => item.assignedEmployeeId === employeeId)
-    : occurrences;
-  const completed = assigned.filter((item) => item.completed);
-  const performed = employeeId
-    ? occurrences.filter((item) => item.completedByEmployeeId === employeeId).length
-    : occurrences.filter((item) => item.completed).length;
-  const coveredOthers = employeeId
-    ? occurrences.filter(
-        (item) =>
-          item.completedByEmployeeId === employeeId && item.assignedEmployeeId !== employeeId,
-      ).length
-    : occurrences.filter(
-        (item) => item.completed && item.completedByEmployeeId !== item.assignedEmployeeId,
-      ).length;
-  const receivedHelp = employeeId
-    ? occurrences.filter(
-        (item) =>
-          item.assignedEmployeeId === employeeId &&
-          item.completed &&
-          item.completedByEmployeeId !== employeeId,
-      ).length
-    : coveredOthers;
-  return {
-    expected: assigned.length,
-    completed: completed.length,
-    percentage: percentage(completed.length, assigned.length),
-    performed,
-    coveredOthers,
-    receivedHelp,
-  };
-}
 
 export async function getPerformance(
   actor: TaskActor,
@@ -100,17 +81,18 @@ export async function getPerformance(
     if (!exists) throw new NotFoundError('Empleado no encontrado.');
   }
 
-  const [employees, plans, executions, specialExecutions, urgentPending] = await Promise.all([
+  const planOverlapsRange = {
+    validFrom: { lt: rangeEnd },
+    OR: [{ validTo: null }, { validTo: { gte: rangeStart } }],
+  };
+  const [employees, plans, executions, urgentPending] = await Promise.all([
     prisma.employee.findMany({
       where: {},
       select: employeeSelect,
       orderBy: { displayName: 'asc' },
     }),
     prisma.taskPlanningInterval.findMany({
-      where: {
-        validFrom: { lt: rangeEnd },
-        OR: [{ validTo: null }, { validTo: { gte: rangeStart } }],
-      },
+      where: planOverlapsRange,
       select: {
         id: true,
         taskId: true,
@@ -122,10 +104,24 @@ export async function getPerformance(
       },
       orderBy: { validFrom: 'asc' },
     }),
+    // Una sola sentencia: las ejecuciones vigentes de los períodos del rango
+    // y, para URGENT/ONE_TIME, la finalización vigente (a lo sumo una por
+    // tarea) de las tareas planificadas en el rango — hace falta aunque sea
+    // anterior al rango, para saber que ya no estaba pendiente.
     prisma.taskExecution.findMany({
       where: {
         revertedAt: null,
-        periodKey: { gte: formatLocalDate(from), lte: formatLocalDate(to) },
+        OR: [
+          { periodKey: { gte: formatLocalDate(from), lte: formatLocalDate(to) } },
+          {
+            periodKey: { in: [URGENT_PERIOD_KEY, ONE_TIME_PERIOD_KEY] },
+            task: {
+              planningIntervals: {
+                some: { ...planOverlapsRange, frequency: { in: ['URGENT', 'ONE_TIME'] } },
+              },
+            },
+          },
+        ],
       },
       select: {
         id: true,
@@ -135,14 +131,6 @@ export async function getPerformance(
         completedByEmployeeId: true,
         completedAt: true,
       },
-    }),
-    prisma.taskExecution.findMany({
-      where: {
-        revertedAt: null,
-        completedAt: { gte: rangeStart, lt: rangeEnd },
-        task: { frequency: { in: ['URGENT', 'ONE_TIME'] } },
-      },
-      select: { task: { select: { frequency: true } }, completedByEmployeeId: true },
     }),
     prisma.task.count({
       where: {
@@ -154,24 +142,31 @@ export async function getPerformance(
     }),
   ]);
 
-  const occurrences = buildRecurringOccurrences({
-    plans: plans.map((plan) => ({ ...plan, description: plan.task.description })),
-    executions: executions
-      .filter(
-        (
-          execution,
-        ): execution is typeof execution & {
-          completedAt: Date;
-          completedByEmployeeId: string;
-        } => execution.completedAt !== null && execution.completedByEmployeeId !== null,
-      )
-      .map((execution) => ({ ...execution })),
-    from,
-    to,
-    today,
-    now,
-    timeZone,
-  });
+  const planRows = plans.map((plan) => ({ ...plan, description: plan.task.description }));
+  const completedExecutions = executions.filter(
+    (
+      execution,
+    ): execution is typeof execution & { completedAt: Date; completedByEmployeeId: string } =>
+      execution.completedAt !== null && execution.completedByEmployeeId !== null,
+  );
+  const occurrences = [
+    ...buildRecurringOccurrences({
+      plans: planRows,
+      executions: completedExecutions,
+      from,
+      to,
+      today,
+      now,
+      timeZone,
+    }),
+    ...buildSingleOccurrences({
+      plans: planRows,
+      executions: completedExecutions,
+      rangeStart,
+      rangeEnd,
+      now,
+    }),
+  ];
   const visibleOccurrences = scopedEmployeeId
     ? occurrences.filter(
         (item) =>
@@ -179,17 +174,17 @@ export async function getPerformance(
           item.completedByEmployeeId === scopedEmployeeId,
       )
     : occurrences;
+  const completedInRange = (frequency: 'URGENT' | 'ONE_TIME') =>
+    visibleOccurrences.filter(
+      (item) =>
+        item.frequency === frequency &&
+        item.completedAt !== null &&
+        item.completedAt.getTime() >= rangeStart.getTime() &&
+        (!scopedEmployeeId || item.completedByEmployeeId === scopedEmployeeId),
+    ).length;
   const special = {
-    urgentCompleted: specialExecutions.filter(
-      (row) =>
-        row.task.frequency === 'URGENT' &&
-        (!scopedEmployeeId || row.completedByEmployeeId === scopedEmployeeId),
-    ).length,
-    oneTimeCompleted: specialExecutions.filter(
-      (row) =>
-        row.task.frequency === 'ONE_TIME' &&
-        (!scopedEmployeeId || row.completedByEmployeeId === scopedEmployeeId),
-    ).length,
+    urgentCompleted: completedInRange('URGENT'),
+    oneTimeCompleted: completedInRange('ONE_TIME'),
     urgentPending,
   };
 
@@ -198,20 +193,27 @@ export async function getPerformance(
     : employees;
   const employeeMetrics = visibleEmployees.map((employee) => ({
     employee,
-    ...metricsFor(visibleOccurrences, employee.id),
+    ...computeMetrics(visibleOccurrences, employee.id),
     dailyStreak: computeDailyStreak(visibleOccurrences, employee.id, today),
   }));
-  const team = metricsFor(visibleOccurrences);
-  const trend = Array.from(new Set(visibleOccurrences.map((item) => item.periodKey)))
+  const team = computeMetrics(visibleOccurrences);
+  // Tendencia por período recurrente (las únicas/urgentes no tienen período),
+  // con el mismo criterio personal que el porcentaje.
+  const recurringVisible = visibleOccurrences.filter(
+    (item) => item.periodKey !== URGENT_PERIOD_KEY && item.periodKey !== ONE_TIME_PERIOD_KEY,
+  );
+  const trend = Array.from(new Set(recurringVisible.map((item) => item.periodKey)))
     .sort()
     .map((periodKey) => {
-      const rows = visibleOccurrences.filter((item) => item.periodKey === periodKey);
-      const completed = rows.filter((item) => item.completed).length;
+      const rows = recurringVisible.filter((item) => item.periodKey === periodKey);
+      const completedPersonally = rows.filter(
+        (item) => occurrenceStatus(item) === 'personal',
+      ).length;
       return {
         periodKey,
-        expected: rows.length,
-        completed,
-        percentage: percentage(completed, rows.length),
+        assigned: rows.length,
+        completedPersonally,
+        percentage: percentage(completedPersonally, rows.length),
       };
     });
 
@@ -231,6 +233,7 @@ export async function getPerformance(
       requestedEmployeeId || actor.role === 'EMPLOYEE'
         ? visibleOccurrences.map((item) => ({
             ...item,
+            status: occurrenceStatus(item),
             assignedEmployee:
               actor.role === 'ADMIN' || item.assignedEmployeeId === scopedEmployeeId
                 ? (employees.find((employee) => employee.id === item.assignedEmployeeId) ?? null)

@@ -1,5 +1,6 @@
 import type { TaskFrequency } from '../../api/taskTypes';
 import type { BadgeTone } from '../../components/ui/Badge';
+import { formatDateTime } from '../../utils/dateFormat';
 
 /** Orden operativo del prototipo (mismo que el backend): urgente → única → diaria → semanal → mensual. */
 export const FREQUENCY_ORDER: readonly TaskFrequency[] = [
@@ -46,25 +47,13 @@ export const FREQUENCY_TONE: Record<TaskFrequency, BadgeTone> = {
 
 /**
  * Fecha y hora de una finalización para mostrar (nunca para decidir
- * períodos: eso es del backend). Usa la zona de negocio que devuelve la API.
+ * períodos: eso es del backend), en la zona de negocio que devuelve la API:
+ * "hoy, 14:35" o, si no es hoy, `dd/mm/aaaa HH:mm`.
  */
 export function formatCompletedAt(iso: string, timeZone: string, today: string): string {
-  const date = new Date(iso);
-  const dayKey = new Intl.DateTimeFormat('en-CA', { timeZone }).format(date);
-  const time = new Intl.DateTimeFormat('es-AR', {
-    timeZone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).format(date);
-  if (dayKey === today) return `hoy, ${time}`;
-  const day = new Intl.DateTimeFormat('es-AR', {
-    timeZone,
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-  }).format(date);
-  return `${day}, ${time}`;
+  const dayKey = new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date(iso));
+  const full = formatDateTime(iso, timeZone);
+  return dayKey === today ? `hoy, ${full.slice(11)}` : full;
 }
 
 /** `YYYY-MM-DD` → "lun 22 sep" (la fecha ya es local; se formatea en UTC para no desplazarla). */

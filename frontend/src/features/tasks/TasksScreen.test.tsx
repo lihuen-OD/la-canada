@@ -437,6 +437,11 @@ describe('TasksScreen — historial semanal', () => {
     expect(within(history).getAllByText('Diaria sintética desactivada').length).toBeGreaterThan(0);
     expect(within(history).getAllByText('Desactivada').length).toBeGreaterThan(0);
     expect(within(history).getByRole('status')).toHaveTextContent('3/7 hechas');
+    // Semanas anteriores en dd/mm/aaaa; ningún ISO visible en el historial.
+    expect(within(history).getAllByRole('option')[1]).toHaveTextContent(
+      /^Semana del \d{2}\/\d{2}\/\d{4}$/,
+    );
+    expect(history.textContent).not.toMatch(/\b\d{4}-\d{2}-\d{2}\b/);
     // La única completada no está en el listado operativo.
     expect(
       within(screen.getByRole('list', { name: 'Tareas del período' })).queryByText(
@@ -465,6 +470,60 @@ describe('TasksScreen — caché y revalidación (Etapa 5P)', () => {
 
     finish(listResponse([DAILY_A, WEEKLY_B]));
     expect(await screen.findByText(WEEKLY_B.description)).toBeInTheDocument();
+  });
+
+  it.each(['URGENT', 'ONE_TIME'] as const)(
+    'completar una %s también invalida Desempeño (entra al porcentaje personal)',
+    async (frequency) => {
+      const task = makeTask({ ...URGENT_A, frequency, periodKey: frequency });
+      api.completeTask.mockResolvedValue({ task });
+      api.fetchTasks.mockResolvedValue(listResponse([task]));
+      const { queryClient } = render(<TasksScreen />, { route: '/tasks' });
+      await screen.findByText(task.description);
+      const performanceKey = [
+        'session',
+        'u-a',
+        'performance',
+        'summary',
+        '2026-09-19',
+        '2026-09-25',
+      ];
+      queryClient.setQueryData(performanceKey, { team: {} });
+      await userEvent
+        .setup()
+        .click(screen.getByRole('button', { name: `Marcar como completada: ${task.description}` }));
+      await waitFor(() =>
+        expect(queryClient.getQueryState(performanceKey)?.isInvalidated).toBe(true),
+      );
+    },
+  );
+
+  it('revertir invalida Desempeño', async () => {
+    const execution = makeExecution();
+    const done = makeTask({ currentExecution: execution });
+    api.revertTaskCompletion.mockResolvedValue({ task: DAILY_A });
+    api.fetchTasks.mockResolvedValue(listResponse([done]));
+    const { queryClient } = render(<TasksScreen />, { route: '/tasks' });
+    await screen.findByText(done.description);
+    const performanceKey = [
+      'session',
+      'u-a',
+      'performance',
+      'employee',
+      'x',
+      '2026-09-19',
+      '2026-09-25',
+    ];
+    queryClient.setQueryData(performanceKey, { team: {} });
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole('button', { name: 'Deshacer finalización: Tarea sintética diaria' }),
+    );
+    const dialog = screen.getByRole('dialog', { name: 'Deshacer finalización' });
+    await user.click(within(dialog).getByRole('button', { name: 'Deshacer' }));
+    await waitFor(() =>
+      expect(queryClient.getQueryState(performanceKey)?.isInvalidated).toBe(true),
+    );
   });
 
   it('completar invalida solo Tareas y Desempeño — nunca Stock ni Usuarios', async () => {

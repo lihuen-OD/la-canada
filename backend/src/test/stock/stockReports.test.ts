@@ -6,6 +6,7 @@ import {
   STOCK_CSV_MAX_ROWS,
   STOCK_REPORT_RANKING_LIMIT,
   csvCell,
+  csvDate,
   exportStockReportCsv,
   getStockReportSummary,
   listStockReportMovements,
@@ -499,7 +500,7 @@ describe('exportStockReportCsv — paridad con exportarCSV() del prototipo', () 
     expect(lines[0]).toBe('"Fecha","Ítem","Cantidad","Unidad","Persona","Destino","Motivo"');
     expect(lines[1]).toBe(
       [
-        '2026-09-20',
+        '20/09/2026',
         'Producto sintético',
         '2.5',
         'kg',
@@ -512,7 +513,7 @@ describe('exportStockReportCsv — paridad con exportarCSV() del prototipo', () 
     );
     // Prefijos derivados del tipo, como los escribía el prototipo.
     expect(lines[2]).toBe(
-      ['2026-09-20', 'Producto sintético', '10', 'kg', '', '', '[Admin] [Ingreso] Compra']
+      ['20/09/2026', 'Producto sintético', '10', 'kg', '', '', '[Admin] [Ingreso] Compra']
         .map((value) => `"${value}"`)
         .join(','),
     );
@@ -521,6 +522,8 @@ describe('exportStockReportCsv — paridad con exportarCSV() del prototipo', () 
   });
 
   it('neutraliza fórmulas de planilla y rechaza exportaciones gigantes sin truncar', async () => {
+    expect(csvDate(new Date('2026-01-05T00:00:00.000Z'))).toBe('05/01/2026');
+    expect(csvDate(new Date('2028-02-29T00:00:00.000Z'))).toBe('29/02/2028');
     expect(csvCell('=HYPERLINK("x")')).toBe(`"'=HYPERLINK(""x"")"`);
     expect(csvCell('@SUM')).toBe(`"'@SUM"`);
     expect(csvCell('  =SUM(A1:A2)')).toBe(`"'  =SUM(A1:A2)"`);

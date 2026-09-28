@@ -51,11 +51,8 @@ export function birthdayNotice(days: number | null): string {
   return '';
 }
 
-/** "25/09/2026" — fecha de calendario pura, sin zona del navegador. */
-export function formatDate(date: string): string {
-  const [year, month, day] = date.split('-');
-  return `${day}/${month}/${year}`;
-}
+/** "25/09/2026" — la utilidad única de fechas de la app. */
+export { formatDate } from '../../utils/dateFormat';
 
 /** "12.5" → "12,5" (decimal del backend, sin pasar por float). */
 export function formatKg(kg: string): string {

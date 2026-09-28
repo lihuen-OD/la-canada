@@ -544,6 +544,15 @@ function csvMotivo(row: CsvRow): string {
 }
 
 /**
+ * Fecha para personas (`dd/mm/aaaa`). `effective_date` es `@db.Date`: se lee
+ * con sus componentes UTC, sin correrla por la zona del servidor.
+ */
+export function csvDate(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${pad(date.getUTCDate())}/${pad(date.getUTCMonth() + 1)}/${date.getUTCFullYear()}`;
+}
+
+/**
  * Celda CSV entre comillas con `"` duplicadas (igual que el prototipo). Mejora
  * de seguridad interna: una celda que empieza con `= + - @` o tab/CR se
  * antepone con `'` para que una planilla no la ejecute como fórmula.
@@ -588,7 +597,7 @@ export async function exportStockReportCsv(
     STOCK_CSV_COLUMNS.map(csvCell).join(','),
     ...rows.map((row) =>
       [
-        row.effectiveDate.toISOString().slice(0, 10),
+        csvDate(row.effectiveDate),
         row.itemName,
         decimalText(row.quantity),
         row.itemUnit,

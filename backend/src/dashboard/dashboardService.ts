@@ -2,8 +2,9 @@ import { config } from '../config';
 import { prisma } from '../lib/prisma';
 import { formatLocalDate, toLocalDate } from '../lib/businessTime';
 import { computeStockLevel } from '../stock/stockLevel';
-import { listTasks, listTaskEmployees, type TaskActor } from '../tasks/tasksService';
+import { listTasks, type TaskActor } from '../tasks/tasksService';
 import { listUpcomingEvents } from '../more/eventsService';
+import { defaultPerformanceRange, getPerformance } from '../performance/performanceService';
 
 const stockSelect = {
   id: true,
@@ -22,6 +23,36 @@ const newsSelect = {
 } as const;
 
 /**
+ * Desempeño de Inicio = EXACTAMENTE `getPerformance` (misma función, mismo
+ * actor, rango predeterminado de Tareas → Desempeño): no hay una segunda
+ * fórmula. ADMIN recibe a todo el equipo; EMPLOYEE solo sus propias cifras
+ * (el alcance lo impone `getPerformance`). Solo se exponen las métricas de
+ * cumplimiento personal y coberturas — ni detalle ni trabajo operativo.
+ */
+async function dashboardPerformance(actor: TaskActor, now: Date) {
+  if (actor.role === 'EMPLOYEE' && !actor.employeeId) return null;
+  const range = defaultPerformanceRange(now);
+  const result = await getPerformance(actor, range, undefined, now);
+  return {
+    scope: actor.role === 'ADMIN' ? ('team' as const) : ('self' as const),
+    range: { from: result.range.from, to: result.range.to, timeZone: result.range.timeZone },
+    employees: result.employees.map((row) => ({
+      employee: {
+        id: row.employee.id,
+        displayName: row.employee.displayName,
+        colorHex: row.employee.colorHex,
+      },
+      assigned: row.assigned,
+      completedPersonally: row.completedPersonally,
+      percentage: row.percentage,
+      pending: row.pending,
+      coverageReceived: row.coverageReceived,
+      coverageGiven: row.coverageGiven,
+    })),
+  };
+}
+
+/**
  * Inicio replica `rndInicio` del prototipo. Las ramas son independientes y se
  * resuelven en paralelo; la cantidad de sentencias es fija y no depende de
  * tarjetas, personas ni filas devueltas.
@@ -31,27 +62,25 @@ export async function getDashboard(actor: TaskActor, now = new Date()) {
   const todayText = formatLocalDate(today);
   const todayDb = new Date(Date.UTC(today.year, today.month - 1, today.day));
 
-  const [taskResult, employeeResult, stockRows, eggAggregate, events, newsRows] = await Promise.all(
-    [
-      listTasks(actor, { status: 'active' }, now),
-      listTaskEmployees(),
-      prisma.stockItem.findMany({
-        where: { active: true },
-        select: stockSelect,
-        orderBy: [{ area: 'asc' }, { name: 'asc' }],
-      }),
-      prisma.eggCollection.aggregate({
-        where: { collectionDate: todayDb, voidedAt: null },
-        _sum: { goodEggsCount: true },
-      }),
-      listUpcomingEvents(3, now),
-      prisma.newsReport.findMany({
-        select: newsSelect,
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: 3,
-      }),
-    ],
-  );
+  const [taskResult, performance, stockRows, eggAggregate, events, newsRows] = await Promise.all([
+    listTasks(actor, { status: 'active' }, now),
+    dashboardPerformance(actor, now),
+    prisma.stockItem.findMany({
+      where: { active: true },
+      select: stockSelect,
+      orderBy: [{ area: 'asc' }, { name: 'asc' }],
+    }),
+    prisma.eggCollection.aggregate({
+      where: { collectionDate: todayDb, voidedAt: null },
+      _sum: { goodEggsCount: true },
+    }),
+    listUpcomingEvents(3, now),
+    prisma.newsReport.findMany({
+      select: newsSelect,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 3,
+    }),
+  ]);
 
   const tasks = taskResult.tasks;
   const completedTasks = tasks.filter((task) => task.currentExecution !== null).length;
@@ -86,16 +115,7 @@ export async function getDashboard(actor: TaskActor, now = new Date()) {
       description: task.description,
       assignee: task.assignee,
     })),
-    teamProgress: employeeResult.employees.map((employee) => {
-      const assigned = tasks.filter((task) => task.assignee.id === employee.id);
-      const completed = assigned.filter((task) => task.currentExecution !== null).length;
-      return {
-        employee,
-        completed,
-        total: assigned.length,
-        percentage: assigned.length === 0 ? 0 : Math.round((completed / assigned.length) * 100),
-      };
-    }),
+    performance,
     stockAlerts,
     upcomingEvents: events,
     latestNews: newsRows.map((news) => ({

@@ -96,7 +96,7 @@ describe('GET /api/v1/dashboard contra demo', () => {
         'kpis',
         'latestNews',
         'stockAlerts',
-        'teamProgress',
+        'performance',
         'timeZone',
         'today',
         'upcomingEvents',
@@ -116,11 +116,11 @@ describe('GET /api/v1/dashboard contra demo', () => {
     counting = false;
     expect(response.status).toBe(200);
     // Prisma/adapter-pg emite una sentencia por nivel de relación y omite la
-    // relación cuando el padre viene vacío: auth 1 + tareas 3–5 + personas 1 +
-    // stock 1 + huevos 1 + eventos 1 + novedades 1–2 + cumpleaños 4–6 = 14–19
-    // (18 medidas en `demo`). El techo es fijo: nada depende de cuántas filas
-    // o tarjetas haya, así que no hay N+1.
-    expect(statements.length).toBeGreaterThanOrEqual(14);
-    expect(statements.length).toBeLessThanOrEqual(19);
+    // relación cuando el padre viene vacío: auth 1 + tareas 3–5 + stock 1 +
+    // huevos 1 + eventos 1 + novedades 1–2 + cumpleaños 4–6 + desempeño
+    // canónico 5 (personas, planificación + tarea, ejecuciones, urgentes) =
+    // 17–22. El techo es fijo: nada depende de cuántas filas haya (sin N+1).
+    expect(statements.length).toBeGreaterThanOrEqual(17);
+    expect(statements.length).toBeLessThanOrEqual(22);
   });
 });

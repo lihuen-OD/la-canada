@@ -107,13 +107,60 @@
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
 }
+.home-progress {
+  flex-wrap: wrap;
+}
 .home-progress__name {
-  width: 5.5rem;
-  overflow: hidden;
+  display: flex;
+  flex: 1 1 10rem;
+  flex-direction: column;
+  min-width: 0;
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+}
+.home-progress__name small {
+  font-weight: var(--font-weight-regular);
+}
+.home-progress .home-progress__bar {
+  flex: 1 1 100%;
+  order: 3;
+}
+/* Período del desempeño (el mismo rango predeterminado de Tareas → Desempeño). */
+.home-period {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+/* "Mi desempeño" (EMPLOYEE): cifra Fraunces y hechos en dos columnas. */
+.home-mine__score {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+}
+.home-mine__score strong {
+  font-family: var(--font-display);
+  font-size: var(--font-size-2xl);
+  color: var(--color-progress);
+}
+.home-mine__score span {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+.home-mine__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+}
+.home-mine__facts dt {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+.home-mine__facts dd {
+  margin: 0;
+  font-weight: var(--font-weight-bold);
 }
 .home-progress__bar,
 .home-stock__bar {
