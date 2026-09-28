@@ -492,3 +492,9 @@ Cambios de esta revisión:
 - Validación: unitarios (`familyService.test.ts`, `morePure.test.ts`, estático de la migración), integración `family.integration.test.ts` contra `demo` (fixtures `test-5f-<RUN>`, 0 residuos) y tests frontend de Mi perfil y Eventos.
 - **Ampliación — nombre visible editable**: ADMIN (`UserProfile.displayName`) y EMPLOYEE (`Employee.displayName`) desde Mi perfil; ADMIN sobre empleados desde Datos del equipo (`PATCH /employees/:id`). Validación única (2–100, letras Unicode, apóstrofe, guion, punto). Sin migración ni cambios de identidad técnica.
 - Nota de entorno: `demo` tiene además `20260928100000_garden_plan_versions`, aplicada desde el worktree paralelo `feat/garden-plan` y ausente en `main`. Es independiente (otras tablas) y su timestamp es anterior al de esta etapa.
+
+## Etapa 5U — Múltiples administradores 🟡 sin commit — pendiente de revisión
+
+- «＋ Nuevo administrador» en Usuarios; `POST /admin/users/admins` con alta atómica (User ADMIN activo + UserProfile + auditoría), username técnico aleatorio, PIN Argon2id e idempotencia sin PIN. Sin migraciones.
+- Gobierno: nunca desactivarse a sí mismo, nunca 0 ADMIN activos, carrera cruzada resuelta con bloqueo de filas (`adminLockout.ts`); renombrar a otro ADMIN desde Usuarios (`PATCH /admin/users/:id/display-name`).
+- Validación: unitarios (`adminAccounts.test.ts`, `adminLockout.test.ts`), integración `adminGovernance.integration.test.ts` y `adminCreation.integration.test.ts` contra `demo` (fixtures `test-5u-<RUN>`, 0 residuos, ADMIN real sin cambios) y tests frontend de Usuarios.

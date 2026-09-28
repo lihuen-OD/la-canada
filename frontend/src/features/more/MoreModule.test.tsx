@@ -844,7 +844,9 @@ describe('🪪 nombre visible del EMPLOYEE y del equipo (Etapa 5F)', () => {
       }),
     );
     const dialog = within(screen.getByRole('dialog'));
-    expect(dialog.getByText(/No cambia su usuario, su PIN ni su historial/)).toBeInTheDocument();
+    expect(
+      dialog.getByText(/No cambia su identidad de ingreso, su PIN ni su historial/),
+    ).toBeInTheDocument();
     const field = dialog.getByLabelText('Nombre visible');
     await user.clear(field);
     await user.type(field, 'X');

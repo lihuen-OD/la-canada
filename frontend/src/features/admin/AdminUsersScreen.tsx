@@ -1,16 +1,25 @@
 import { useCallback, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { activateUser, changeUserStatus, fetchAdminUsers, resetUserPin } from '../../api/adminApi';
+import {
+  activateUser,
+  changeUserDisplayName,
+  changeUserStatus,
+  fetchAdminUsers,
+  resetUserPin,
+} from '../../api/adminApi';
 import { queryKeys } from '../../api/queryKeys';
 import { useSessionScope } from '../../api/useSessionScope';
 import type { AdminUserListItem } from '../../api/adminTypes';
 import type { UserStatus } from '../../api/types';
 import { useAuth } from '../../auth/useAuth';
+import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
 import { CheckCircleIcon } from '../../components/ui/icons';
 import { AdminUserRow } from './AdminUserRow';
+import { CreateAdminDialog } from './CreateAdminDialog';
+import { EmployeeNameDialog } from '../more/EmployeeNameDialog';
 import { PinDialog } from './PinDialog';
 import { ConfirmDialog } from './ConfirmDialog';
 import {
@@ -24,6 +33,8 @@ type LoadState =
 
 type DialogState =
   | { type: 'none' }
+  | { type: 'createAdmin' }
+  | { type: 'name'; user: AdminUserListItem }
   | { type: 'activate'; user: AdminUserListItem }
   | { type: 'reset'; user: AdminUserListItem }
   | { type: 'status'; user: AdminUserListItem; nextStatus: UserStatus };
@@ -40,7 +51,7 @@ type DialogState =
  * al instante y cada mutación invalida solo este listado.
  */
 export function AdminUsersScreen() {
-  const { user: currentUser, logout } = useAuth();
+  const { user: currentUser, logout, applyDisplayName } = useAuth();
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const { userId, enabled } = useSessionScope();
@@ -87,22 +98,23 @@ export function AdminUsersScreen() {
   }
 
   const users = state.status === 'loaded' ? state.users : [];
-  const activeAdminIds = new Set(
-    users.filter((u) => u.role === 'ADMIN' && u.status === 'ACTIVE').map((u) => u.id),
-  );
-
-  function wouldSelfLockout(userId: string): boolean {
-    if (!currentUser || userId !== currentUser.id) return false;
-    const otherActiveAdmins = [...activeAdminIds].filter((id) => id !== userId);
-    return otherActiveAdmins.length === 0;
-  }
-
   return (
     <div className="admin-users">
       <PageHeader
         title="Usuarios"
         description="Activá cuentas, asigná el PIN de cada persona y gestioná su estado de acceso."
         refreshing={state.status === 'loaded' && usersQuery.isFetching}
+        actions={
+          <Button
+            size="sm"
+            onClick={() => {
+              setSuccessMessage(null);
+              setDialog({ type: 'createAdmin' });
+            }}
+          >
+            ＋ Nuevo administrador
+          </Button>
+        }
       />
 
       <div aria-live="polite" className="admin-users__feedback">
@@ -149,17 +161,57 @@ export function AdminUsersScreen() {
                   key={user.id}
                   user={user}
                   isSelf={currentUser?.id === user.id}
-                  wouldSelfLockout={wouldSelfLockout(user.id)}
                   onActivate={(target) => setDialog({ type: 'activate', user: target })}
                   onResetPin={(target) => setDialog({ type: 'reset', user: target })}
                   onChangeStatus={(target, nextStatus) =>
                     setDialog({ type: 'status', user: target, nextStatus })
                   }
+                  onEditName={(target) => {
+                    setSuccessMessage(null);
+                    setDialog({ type: 'name', user: target });
+                  }}
                 />
               ))}
             </ul>
           </div>
         </section>
+      ) : null}
+
+      {dialog.type === 'createAdmin' ? (
+        <CreateAdminDialog
+          onCancel={closeDialog}
+          onCreated={(created) => {
+            closeDialog();
+            setSuccessMessage(
+              `Administrador creado: ${created.displayName}. Ya puede ingresar con su PIN.`,
+            );
+            load();
+          }}
+        />
+      ) : null}
+
+      {dialog.type === 'name' ? (
+        <EmployeeNameDialog
+          employee={{
+            id: dialog.user.id,
+            displayName: dialog.user.personalProfile?.displayName ?? '',
+          }}
+          save={async (id, displayName) =>
+            (await changeUserDisplayName(id, displayName)).user.displayName
+          }
+          onClose={closeDialog}
+          onSaved={(displayName, changed) => {
+            closeDialog();
+            if (!changed) return;
+            if (currentUser?.id === dialog.user.id) applyDisplayName(displayName);
+            setSuccessMessage(`Nombre actualizado: ${displayName} ✓`);
+            load();
+            // Su nombre también titula su cumpleaños (Eventos, Inicio).
+            void queryClient.invalidateQueries({ queryKey: queryKeys.more.events(userId) });
+            void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard(userId) });
+          }}
+          onSessionExpired={() => void logout()}
+        />
       ) : null}
 
       {dialog.type === 'activate' ? (

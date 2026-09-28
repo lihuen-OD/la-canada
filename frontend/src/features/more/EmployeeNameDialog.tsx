@@ -10,6 +10,13 @@ import { errorMessageOf, isSessionExpired } from '../pets/petErrors';
 
 interface EmployeeNameDialogProps {
   employee: { id: string; displayName: string };
+  /**
+   * Cómo se guarda (por defecto, el `PATCH /employees/:id` de Datos del
+   * equipo). Etapa 5U: Usuarios lo reutiliza para una cuenta sin Employee
+   * (otro ADMIN), con `PATCH /admin/users/:id/display-name`. Devuelve el
+   * nombre guardado.
+   */
+  save?: (id: string, displayName: string) => Promise<string>;
   onClose: () => void;
   /** `changed`: el nombre realmente cambió (para invalidar lo que muestra nombres). */
   onSaved: (displayName: string, changed: boolean) => void;
@@ -22,8 +29,12 @@ interface EmployeeNameDialogProps {
  * (`PATCH /employees/:id`, solo `displayName`). No toca código, usuario, PIN,
  * sesiones, asignaciones ni historial.
  */
+const saveEmployeeName = async (id: string, displayName: string) =>
+  (await updateEmployee(id, { displayName })).employee.displayName;
+
 export function EmployeeNameDialog({
   employee,
+  save = saveEmployeeName,
   onClose,
   onSaved,
   onSessionExpired,
@@ -48,8 +59,7 @@ export function EmployeeNameDialog({
     void run(async () => {
       setError(null);
       try {
-        const saved = await updateEmployee(employee.id, { displayName });
-        onSaved(saved.employee.displayName, true);
+        onSaved(await save(employee.id, displayName), true);
       } catch (caught) {
         if (isSessionExpired(caught)) {
           onSessionExpired();
@@ -81,7 +91,7 @@ export function EmployeeNameDialog({
           />
         </div>
         <p className="dialog__description">
-          Se actualiza en toda la app. No cambia su usuario, su PIN ni su historial.
+          Se actualiza en toda la app. No cambia su identidad de ingreso, su PIN ni su historial.
         </p>
         <div aria-live="assertive" className="live-status live-status--start">
           {isSubmitting ? <span role="status">Guardando…</span> : null}

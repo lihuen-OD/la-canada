@@ -4,6 +4,8 @@ import type {
   AdminActionResult,
   AdminUsersListResponse,
   ChangeUserStatusRequest,
+  CreateAdminRequest,
+  CreatedAdminResponse,
   ResetPinRequest,
 } from './adminTypes';
 
@@ -20,6 +22,30 @@ export async function fetchAdminUsers(): Promise<AdminUsersListResponse> {
     method: 'GET',
     authenticated: true,
   });
+}
+
+/** Etapa 5U — "＋ Nuevo administrador". `Idempotency-Key` solo como header; el PIN, en el body. */
+export async function createAdminUser(
+  body: CreateAdminRequest,
+  idempotencyKey: string,
+): Promise<CreatedAdminResponse> {
+  return apiRequest<CreatedAdminResponse>('/admin/users/admins', {
+    method: 'POST',
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+    authenticated: true,
+  });
+}
+
+/** Etapa 5U — nombre visible de una cuenta sin Employee (otro ADMIN). */
+export async function changeUserDisplayName(
+  userId: string,
+  displayName: string,
+): Promise<{ user: { id: string; displayName: string } }> {
+  return apiRequest<{ user: { id: string; displayName: string } }>(
+    `/admin/users/${userId}/display-name`,
+    { method: 'PATCH', body: { displayName }, authenticated: true },
+  );
 }
 
 export async function activateUser(userId: string, pin: string): Promise<AdminActionResult> {

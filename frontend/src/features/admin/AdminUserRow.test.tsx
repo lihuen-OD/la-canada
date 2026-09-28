@@ -23,7 +23,7 @@ describe('AdminUserRow', () => {
   it('usuario PENDING_ACTIVATION muestra "Activar y asignar PIN", nunca "Cambiar PIN"', () => {
     render(
       <ul>
-        <AdminUserRow user={makeUser({})} isSelf={false} wouldSelfLockout={false} {...noop} />
+        <AdminUserRow user={makeUser({})} isSelf={false} {...noop} />
       </ul>,
     );
     expect(screen.getByRole('button', { name: /activar y asignar pin/i })).toBeInTheDocument();
@@ -36,7 +36,7 @@ describe('AdminUserRow', () => {
         <AdminUserRow
           user={makeUser({ status: 'ACTIVE' })}
           isSelf={false}
-          wouldSelfLockout={false}
+
           {...noop}
         />
       </ul>,
@@ -53,7 +53,7 @@ describe('AdminUserRow', () => {
         <AdminUserRow
           user={makeUser({ status: 'ACTIVE' })}
           isSelf={false}
-          wouldSelfLockout={false}
+
           {...noop}
         />
       </ul>,
@@ -67,7 +67,7 @@ describe('AdminUserRow', () => {
         <AdminUserRow
           user={makeUser({ status: 'SUSPENDED', role: 'ADMIN' })}
           isSelf={false}
-          wouldSelfLockout={false}
+
           {...noop}
         />
       </ul>,
@@ -83,7 +83,7 @@ describe('AdminUserRow', () => {
         <AdminUserRow
           user={makeUser({})}
           isSelf={false}
-          wouldSelfLockout={false}
+
           {...noop}
           onActivate={onActivate}
         />
@@ -100,7 +100,7 @@ describe('AdminUserRow', () => {
         <AdminUserRow
           user={makeUser({ status: 'ACTIVE' })}
           isSelf={false}
-          wouldSelfLockout={false}
+
           {...noop}
         />
       </ul>,
@@ -110,15 +110,10 @@ describe('AdminUserRow', () => {
     expect(screen.queryByRole('button', { name: 'Reactivar' })).not.toBeInTheDocument();
   });
 
-  it('nunca ofrece auto-bloqueo: deshabilita la transición que dejaría al sistema sin administradores', () => {
+  it('nunca ofrece desactivar la propia cuenta, aunque haya otros ADMIN activos (Etapa 5U)', () => {
     render(
       <ul>
-        <AdminUserRow
-          user={makeUser({ status: 'ACTIVE', role: 'ADMIN' })}
-          isSelf
-          wouldSelfLockout
-          {...noop}
-        />
+        <AdminUserRow user={makeUser({ status: 'ACTIVE', role: 'ADMIN' })} isSelf {...noop} />
       </ul>,
     );
     expect(screen.getByRole('button', { name: 'Suspender' })).toBeDisabled();
@@ -136,7 +131,7 @@ describe('AdminUserRow', () => {
         <AdminUserRow
           user={makeUser({ status })}
           isSelf={false}
-          wouldSelfLockout={false}
+
           {...noop}
         />
       </ul>,
@@ -144,20 +139,19 @@ describe('AdminUserRow', () => {
     expect(screen.getByText(label)).toBeInTheDocument();
   });
 
-  it('la cuenta propia se marca con texto, y el bloqueo por auto-lockout se explica al lado del botón', () => {
+  it('la cuenta propia se marca con texto, y el bloqueo se explica al lado del botón', () => {
     render(
       <ul>
         <AdminUserRow
           user={makeUser({ status: 'ACTIVE', role: 'ADMIN', employee: null, username: 'admin' })}
           isSelf
-          wouldSelfLockout
           {...noop}
         />
       </ul>,
     );
     expect(screen.getByText('Tu cuenta')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Suspender' })).toHaveAccessibleDescription(
-      'No podés dejar el sistema sin ningún administrador activo.',
+      'No podés desactivar tu propia cuenta.',
     );
   });
 });

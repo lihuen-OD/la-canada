@@ -32,6 +32,26 @@ export interface AdminUserListItem {
   employee: { id: string; displayName: string } | null;
   /** Etapa 5F — nombre visible del perfil personal (ADMIN sin Employee). */
   personalProfile?: { displayName: string | null } | null;
+  /** Etapa 5U — username generado por el sistema (`admin-…`): no se muestra. */
+  technicalUsername?: boolean;
+}
+
+/** Etapa 5U — alta de otro ADMIN. Nunca rol, ids, username ni estado: los decide el backend. */
+export interface CreateAdminRequest {
+  displayName: string;
+  /** Siempre string: `'0123'` conserva el cero inicial. */
+  pin: string;
+}
+
+/** Datos mínimos del ADMIN creado: nunca PIN, hash, username, intentos, bloqueo ni tokens. */
+export interface CreatedAdminResponse {
+  user: {
+    id: string;
+    role: 'ADMIN';
+    status: 'ACTIVE';
+    displayName: string;
+    createdAt: string;
+  };
 }
 
 export interface AdminUsersListResponse {

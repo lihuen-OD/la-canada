@@ -119,13 +119,41 @@ export class InvalidStatusTransitionError extends AppError {
 }
 
 /** Un ADMIN intentando suspenderse/desactivarse a sí mismo dejaría el sistema sin administración utilizable. */
-export class SelfLockoutError extends AppError {
+/**
+ * Etapa 5U — un ADMIN nunca se suspende ni se deshabilita a sí mismo (lo hace
+ * otro ADMIN). Reemplaza a la regla anterior, que solo lo impedía si era el
+ * único activo.
+ */
+export class SelfStatusChangeError extends AppError {
   constructor() {
-    super(
-      'No podés suspender ni desactivar tu propia cuenta si sos el único administrador activo.',
-      409,
-      { code: 'AUTH_SELF_LOCKOUT' },
-    );
+    super('No podés desactivar tu propia cuenta.', 409, { code: 'AUTH_SELF_STATUS_CHANGE' });
+  }
+}
+
+/** Etapa 5U — suspender/deshabilitar a este ADMIN dejaría al sistema sin ninguno activo. */
+export class LastActiveAdminError extends AppError {
+  constructor() {
+    super('No podés desactivar al último administrador activo.', 409, {
+      code: 'ADMIN_LAST_ACTIVE',
+    });
+  }
+}
+
+/** Etapa 5U — el nombre de una persona con ficha de equipo se corrige en Datos del equipo (`Employee`). */
+export class DisplayNameUsesEmployeeError extends AppError {
+  constructor() {
+    super('El nombre de esta persona se corrige desde Configuración → Datos del equipo.', 409, {
+      code: 'DISPLAY_NAME_USES_EMPLOYEE',
+    });
+  }
+}
+
+/** Etapa 5U — el actor dejó de ser un ADMIN activo mientras su pedido esperaba (carrera). */
+export class ActorNoLongerActiveError extends AppError {
+  constructor() {
+    super('Tu cuenta ya no está activa. Volvé a ingresar.', 409, {
+      code: 'ADMIN_ACTOR_INACTIVE',
+    });
   }
 }
 

@@ -265,31 +265,17 @@ describe('adminUsersController — flujo real contra demo', () => {
     await expect(changeStatus(req, res)).rejects.toThrow();
   });
 
-  it('changeStatus: un admin no puede auto-suspenderse si es el único ADMIN activo', async () => {
-    // Nos aseguramos de que el único ADMIN activo real relevante para este chequeo sea el actor de prueba:
-    // el propio actor intenta auto-suspenderse. Si existen otros ADMIN activos reales del seed, la protección
-    // de auto-lockout no se dispara (comportamiento correcto) — igualmente confirmamos que la llamada no
-    // deja al actor de prueba en un estado inconsistente cuando sí se dispara.
-    const otherActiveAdmins = await prisma.user.count({
-      where: { role: 'ADMIN', status: 'ACTIVE', id: { not: actorUserId } },
-    });
-
-    const { res } = fakeRes();
-    const req = fakeReq({
-      actingAsUserId: actorUserId,
-      targetId: actorUserId,
-      body: { status: 'SUSPENDED' },
-    });
-
-    if (otherActiveAdmins === 0) {
-      await expect(changeStatus(req, res)).rejects.toThrow();
-      const actor = await prisma.user.findUniqueOrThrow({ where: { id: actorUserId } });
-      expect(actor.status).toBe('ACTIVE');
-    } else {
-      await changeStatus(req, res);
-      // Revertimos para no dejar al actor de prueba suspendido antes de la limpieza final.
-      await prisma.user.update({ where: { id: actorUserId }, data: { status: 'ACTIVE' } });
+  it('changeStatus: un admin nunca se auto-suspende ni se auto-deshabilita (Etapa 5U), haya o no otros ADMIN activos', async () => {
+    for (const status of ['SUSPENDED', 'DEACTIVATED']) {
+      const { res } = fakeRes();
+      const req = fakeReq({ actingAsUserId: actorUserId, targetId: actorUserId, body: { status } });
+      await expect(changeStatus(req, res)).rejects.toMatchObject({
+        statusCode: 409,
+        code: 'AUTH_SELF_STATUS_CHANGE',
+      });
     }
+    const actor = await prisma.user.findUniqueOrThrow({ where: { id: actorUserId } });
+    expect(actor.status).toBe('ACTIVE');
   });
 
   it('listUsers: filtra por status sin exponer pinHash', async () => {

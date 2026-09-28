@@ -850,3 +850,22 @@ Módulo **nuevo** (el prototipo no lo tenía): `backend/src/more/gardenService.t
 El mismo defecto y la misma solución están en `PhotoUploadDialog` (subir foto, Más): antes el object URL venía de un `useMemo` revocado por el cleanup, de modo que **nadie había visto nunca la foto que subía** (en Chrome: `naturalWidth = 0`, 884×18 de ícono roto y el alt) y "Guardar" solo miraba el tipo y el tamaño del archivo, no la preview. Ahora es el mismo ciclo (URL creada en el efecto, revocación de la URL propia de cada setup, eventos de un `src` viejo descartados, `onLoad` habilita "Guardar" y `onError` avisa "No pudimos generar la vista previa. Volvé a seleccionar la foto.") con `PhotoUploadDialog.test.tsx` como guarda de regresión. La regla general: **un archivo no se envía hasta que la persona lo vio**, en los dos diálogos de subida.
 
 **Presupuesto medido** (build de producción, mismo pipeline antes/después): bundle inicial JS 523,2 → 524,1 KB (gzip 149,1 → 149,2), es decir **+0,9 KBraw / +0,1 KB gzip** repartidos entre `index` y el chunk compartido; diferido nuevo `GardenScreen` **8,0 KB (gzip 3,1)**; CSS 85,8 → 87,9 KB (gzip 13,1 → 13,3). Sin dependencias nuevas y sin cambios en `docs/UI_CONTEXT.md` (misma paleta, tipografías, cards, chips y modales de Más).
+
+## 31. Múltiples administradores (Etapa 5U)
+
+`POST /api/v1/admin/users/admins` (solo ADMIN, `requireAuth` + `requireRole('ADMIN')`). Body `.strict()` `{ displayName, pin }`: el rol, el estado, el username, el `pinHash` y cualquier id los decide el backend (un campo de más → 400 «La solicitud incluye datos que no se pueden modificar.»). `auth/adminAccounts.ts`:
+- **Username técnico** `admin-<16 hex>` (64 bits de `crypto.randomBytes`): no derivado del nombre, único por el índice de `users.username`, reintento con otro valor ante `P2002` (hasta 3), inmutable y nunca devuelto ni usado como credencial.
+- **Hash Argon2id** calculado antes de abrir la transacción.
+- **Transacción única**: `User` (`ADMIN`, `ACTIVE`, intentos en 0, sin bloqueo) + `UserProfile.displayName` + `AuditLog` `admin.user.created` (rol, estado y nombre; nunca PIN, hash ni username).
+- **Respuesta** `201 { user: { id, role, status, displayName, createdAt } }`.
+- **`Idempotency-Key` opcional**: la huella excluye el PIN (un SHA-256 de 4 dígitos es reversible) y la respuesta guardada no lo contiene.
+
+**Gobierno de varios ADMIN** (`auth/adminLockout.ts`): en `PATCH /admin/users/:id/status`, si el objetivo es un ADMIN activo y la transición le corta el acceso, dentro de la misma transacción:
+1. rechaza a uno mismo (`AUTH_SELF_STATUS_CHANGE`);
+2. bloquea con `SELECT id FROM users WHERE role='ADMIN' AND status='ACTIVE' ORDER BY id FOR UPDATE` (orden fijo, sin deadlocks);
+3. exige que el actor siga en ese conjunto después de esperar el bloqueo (`ADMIN_ACTOR_INACTIVE`, el perdedor de la carrera);
+4. exige que quede otro activo (`ADMIN_LAST_ACTIVE`, defensa en profundidad).
+
+La carrera real se verificó contra `demo`: 5 de 5 rondas `200/409`. `PATCH /admin/users/:id/display-name` (`.strict()` `{ displayName }`) corrige el nombre de una cuenta sin Employee en `UserProfile` (una con Employee → 409 `DISPLAY_NAME_USES_EMPLOYEE`); valida el id como UUID.
+
+`GET /admin/users` agrega `technicalUsername` para que la UI no muestre `@admin-…`. Frontend: `CreateAdminDialog` (mismas garantías que `PinDialog`), acción en el encabezado de Usuarios; al crear se invalida solo `['session', userId, 'admin', 'users']`. Sin migración ni dependencias nuevas.

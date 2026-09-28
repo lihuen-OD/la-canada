@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { personDisplayNameSchema } from '../lib/personName';
 import { PIN_PATTERN } from './pin';
 
 const PIN_MESSAGE = 'El PIN debe tener exactamente 4 dígitos (0-9).';
@@ -28,6 +29,24 @@ export const activateBodySchema = z.object({
 export const resetPinBodySchema = z.object({
   pin: pinSchema,
 });
+
+/**
+ * Etapa 5U — alta de un ADMIN adicional. `.strict()`: el rol, el estado, el
+ * username técnico, el `pinHash` y cualquier id los decide el backend; si el
+ * cliente los manda, se rechaza. El PIN, igual que en el resto: string, sin
+ * transformar (`'0123'` llega intacto).
+ */
+export const createAdminBodySchema = z
+  .object({
+    displayName: personDisplayNameSchema,
+    pin: z.string({ message: PIN_MESSAGE }).regex(PIN_PATTERN, PIN_MESSAGE),
+  })
+  .strict();
+
+/** Etapa 5U — un ADMIN corrige el nombre visible de otra cuenta sin Employee (p. ej. otro ADMIN). */
+export const userDisplayNameBodySchema = z
+  .object({ displayName: personDisplayNameSchema })
+  .strict();
 
 export const statusChangeBodySchema = z.object({
   status: z.enum(['PENDING_ACTIVATION', 'ACTIVE', 'SUSPENDED', 'DEACTIVATED']),

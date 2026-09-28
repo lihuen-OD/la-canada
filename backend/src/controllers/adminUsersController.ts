@@ -2,8 +2,12 @@ import type { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { recordAuditLog } from '../auth/auditLog';
 import { hashPin, validatePinPolicy } from '../auth/pin';
+import { TECHNICAL_USERNAME_PATTERN, createAdminAccount } from '../auth/adminAccounts';
+import { assertAdminCanBeDeactivated } from '../auth/adminLockout';
 import {
   activateBodySchema,
+  createAdminBodySchema,
+  userDisplayNameBodySchema,
   listUsersQuerySchema,
   resetPinBodySchema,
   statusChangeBodySchema,
@@ -11,15 +15,17 @@ import {
 import { isAllowedStatusTransition, statusChangeRevokesSessions } from '../auth/userStatus';
 import {
   AuthenticationRequiredError,
+  DisplayNameUsesEmployeeError,
   InvalidStatusTransitionError,
   NotFoundError,
-  SelfLockoutError,
   ValidationError,
 } from '../errors/AppError';
 
 function requestMeta(req: Request): { ipAddress: string | null; userAgent: string | null } {
   return { ipAddress: req.ip ?? null, userAgent: req.header('user-agent') ?? null };
 }
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function requireTargetId(req: Request): string {
   const id = req.params.id;
@@ -60,7 +66,85 @@ export async function listUsers(req: Request, res: Response): Promise<void> {
   ]);
 
   res.set('Cache-Control', 'no-store');
-  res.status(200).json({ users, pagination: { page, pageSize, total } });
+  res.status(200).json({
+    // Etapa 5U: `technicalUsername` = generado por el sistema (`admin-…`): la UI no lo muestra.
+    users: users.map((user) => ({
+      ...user,
+      technicalUsername: TECHNICAL_USERNAME_PATTERN.test(user.username),
+    })),
+    pagination: { page, pageSize, total },
+  });
+}
+
+/**
+ * `PATCH /admin/users/:id/display-name` (solo ADMIN, Etapa 5U): corrige el
+ * nombre visible de una cuenta SIN Employee (otro ADMIN) en `UserProfile`. No
+ * toca `username`, rol, estado, PIN ni sesiones. Una persona con ficha de
+ * equipo se corrige en Datos del equipo (`Employee.displayName`): una sola vía
+ * por nombre. Auditado con el nombre anterior y el nuevo.
+ */
+export async function changeDisplayName(req: Request, res: Response): Promise<void> {
+  if (!req.auth) throw new AuthenticationRequiredError();
+  const targetId = requireTargetId(req);
+  if (!UUID_PATTERN.test(targetId)) throw new ValidationError('El identificador no es válido.');
+  const parsed = userDisplayNameBodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new ValidationError(parsed.error.issues[0]?.message ?? 'Nombre inválido.');
+  }
+  const { displayName } = parsed.data;
+  const actorUserId = req.auth.userId;
+  const result = await prisma.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({
+      where: { id: targetId },
+      select: { id: true, employeeId: true, personalProfile: { select: { displayName: true } } },
+    });
+    if (!user) throw new NotFoundError('Usuario no encontrado.');
+    if (user.employeeId) throw new DisplayNameUsesEmployeeError();
+    const previous = user.personalProfile?.displayName ?? null;
+    if (previous !== displayName) {
+      await tx.userProfile.upsert({
+        where: { userId: targetId },
+        create: { userId: targetId, displayName },
+        update: { displayName },
+      });
+      await recordAuditLog(tx, {
+        actorUserId,
+        action: 'admin.user.display_name_updated',
+        entityType: 'User',
+        entityId: targetId,
+        previousState: { displayName: previous },
+        newState: { displayName },
+        ...requestMeta(req),
+      });
+    }
+    return { user: { id: targetId, displayName } };
+  });
+  res.set('Cache-Control', 'no-store');
+  res.status(200).json(result);
+}
+
+/**
+ * `POST /admin/users/admins` (solo ADMIN, Etapa 5U): crea otro administrador
+ * ya ACTIVO con su PIN y su nombre visible, sin Employee. `201` con datos
+ * mínimos: nunca el PIN, el hash, el username técnico, intentos, bloqueo ni
+ * tokens. Acepta `Idempotency-Key` (doble envío = una sola cuenta).
+ */
+export async function createAdmin(req: Request, res: Response): Promise<void> {
+  if (!req.auth) throw new AuthenticationRequiredError();
+  const parsed = createAdminBodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new ValidationError(
+      parsed.error.issues[0]?.message ?? 'Datos del administrador inválidos.',
+    );
+  }
+  const result = await createAdminAccount(
+    req.auth.userId,
+    parsed.data,
+    requestMeta(req),
+    req.header('idempotency-key') ?? undefined,
+  );
+  res.set('Cache-Control', 'no-store');
+  res.status(result.kind === 'replay' ? result.status : 201).json(result.body);
 }
 
 /** El PIN inicial lo asigna el administrador al activar — nunca lo elige ni lo ve el propio usuario en este paso. */
@@ -195,15 +279,16 @@ export async function changeStatus(req: Request, res: Response): Promise<void> {
       );
     }
 
-    const isSelf = actorUserId === targetId;
-    const wouldLockOut = isSelf && user.role === 'ADMIN' && statusChangeRevokesSessions(nextStatus);
-    if (wouldLockOut) {
-      const otherActiveAdmins = await tx.user.count({
-        where: { role: 'ADMIN', status: 'ACTIVE', id: { not: targetId } },
-      });
-      if (otherActiveAdmins === 0) {
-        throw new SelfLockoutError();
-      }
+    // Etapa 5U: nunca a uno mismo, nunca el último ADMIN activo, y a prueba
+    // de dos ADMIN desactivándose en simultáneo (bloqueo de filas, ver
+    // `auth/adminLockout.ts`). El actor de este endpoint siempre es un ADMIN
+    // activo, así que "a uno mismo" también entra por esta condición.
+    if (
+      user.role === 'ADMIN' &&
+      user.status === 'ACTIVE' &&
+      statusChangeRevokesSessions(nextStatus)
+    ) {
+      await assertAdminCanBeDeactivated(tx, actorUserId, targetId);
     }
 
     await tx.user.update({ where: { id: targetId }, data: { status: nextStatus } });

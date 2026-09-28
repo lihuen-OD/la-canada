@@ -18,11 +18,11 @@ import {
 interface AdminUserRowProps {
   user: AdminUserListItem;
   isSelf: boolean;
-  /** Verdadero cuando esta acción de cambio de estado dejaría al sistema sin ningún ADMIN activo — el backend también lo rechaza, esto solo evita ofrecerlo. */
-  wouldSelfLockout: boolean;
   onActivate: (user: AdminUserListItem) => void;
   onResetPin: (user: AdminUserListItem) => void;
   onChangeStatus: (user: AdminUserListItem, nextStatus: UserStatus) => void;
+  /** Etapa 5U — corregir el nombre visible de una cuenta sin Employee (otro ADMIN). */
+  onEditName?: (user: AdminUserListItem) => void;
 }
 
 /** Tono de cada estado — siempre acompañado de su etiqueta en español. */
@@ -41,15 +41,16 @@ const TRANSITION_VARIANT: Record<UserStatus, ButtonVariant> = {
   DEACTIVATED: 'danger',
 };
 
-const SELF_LOCKOUT_MESSAGE = 'No podés dejar el sistema sin ningún administrador activo.';
+/** Etapa 5U: un ADMIN nunca se suspende ni se deshabilita a sí mismo (el backend responde 409). */
+const SELF_LOCKOUT_MESSAGE = 'No podés desactivar tu propia cuenta.';
 
 export function AdminUserRow({
   user,
   isSelf,
-  wouldSelfLockout,
   onActivate,
   onResetPin,
   onChangeStatus,
+  onEditName,
 }: AdminUserRowProps) {
   const lockoutHintId = useId();
   // Etapa 5F: nombre visible (Employee o perfil personal); el username solo si no hay ninguno (vista administrativa).
@@ -58,8 +59,7 @@ export function AdminUserRow({
   const transitions = getAllowedStatusTransitions(user.status);
   const isAdminAccount = user.role === 'ADMIN' && !user.employee;
 
-  const isLockedOut = (nextStatus: UserStatus) =>
-    isSelf && user.role === 'ADMIN' && statusChangeRevokesSessions(nextStatus) && wouldSelfLockout;
+  const isLockedOut = (nextStatus: UserStatus) => isSelf && statusChangeRevokesSessions(nextStatus);
   const showLockoutHint = transitions.some(isLockedOut);
 
   return (
@@ -72,7 +72,8 @@ export function AdminUserRow({
             <span>{displayName}</span>
             {isSelf ? <Badge tone="neutral">Tu cuenta</Badge> : null}
           </p>
-          <p className="admin-user__username">@{user.username}</p>
+          {/* Etapa 5U: un username técnico generado (`admin-…`) no se muestra. */}
+          {user.technicalUsername ? null : <p className="admin-user__username">@{user.username}</p>}
           {isAdminAccount ? <p className="admin-user__hint">Sin persona vinculada</p> : null}
         </div>
       </div>
@@ -85,6 +86,16 @@ export function AdminUserRow({
       </div>
 
       <div className="admin-user__actions">
+        {onEditName && !user.employee ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label={`Editar nombre de ${displayName}`}
+            onClick={() => onEditName(user)}
+          >
+            <span aria-hidden="true">✏️</span>
+          </Button>
+        ) : null}
         {user.status === 'PENDING_ACTIVATION' ? (
           <Button size="sm" icon={<KeyIcon size="sm" />} onClick={() => onActivate(user)}>
             Activar y asignar PIN
