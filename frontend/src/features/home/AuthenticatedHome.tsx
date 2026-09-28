@@ -1,85 +1,309 @@
+import { useCallback, useEffect, type ReactNode } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { getDashboard } from '../../api/dashboardApi';
+import type { DashboardResponse } from '../../api/dashboardTypes';
+import { ApiError } from '../../api/httpClient';
+import { STALE_TIME } from '../../api/queryClient';
+import { queryKeys } from '../../api/queryKeys';
+import { useSessionScope } from '../../api/useSessionScope';
 import { useAuth } from '../../auth/useAuth';
-import { getRoleLabel, getUserDisplayName } from '../../auth/userDisplay';
 import { Avatar } from '../../components/ui/Avatar';
-import { Badge } from '../../components/ui/Badge';
-import { buttonClassName } from '../../components/ui/buttonStyles';
 import { Card } from '../../components/ui/Card';
 import { PageHeader } from '../../components/ui/PageHeader';
-import { CheckCircleIcon, UsersIcon } from '../../components/ui/icons';
-import { APP_ROUTES } from '../../routes/navigation';
-import { LogoutButton } from '../auth/LogoutButton';
+import { ErrorState } from '../../components/ui/StateMessage';
 
-/**
- * PANTALLA TEMPORAL — se reemplaza por el módulo Inicio real (KPI, tareas,
- * stock, eventos, novedades con datos reales) en una etapa posterior del
- * plan de migración (docs/MIGRATION_PLAN.md). Hasta entonces no muestra
- * métricas, tareas ni stock (ni reales ni de relleno): solo confirma la
- * sesión, ofrece el acceso administrativo a quien corresponde y el cierre
- * de sesión.
- */
+const EVENT_ICON: Record<string, string> = {
+  VISIT: '👥',
+  BIRTHDAY: '🎂',
+  MAINTENANCE: '🔧',
+  OTHER: '📌',
+};
+const areaLabel = (area: 'HOUSE' | 'GARDEN') => (area === 'HOUSE' ? 'Casa' : 'Jardín');
+const stockLabel = (level: 'low' | 'critical') => (level === 'critical' ? 'Crítico' : 'Bajo');
+const stockPercent = (current: string, minimum: string) => {
+  const min = Number(minimum);
+  return min <= 0 ? 100 : Math.min(100, Math.round((Number(current) / (min * 2)) * 100));
+};
+
+function newsAge(value: string): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 1000));
+  if (seconds < 60) return 'hace un momento';
+  if (seconds < 3600) return `hace ${Math.floor(seconds / 60)} min`;
+  if (seconds < 86400) return `hace ${Math.floor(seconds / 3600)} h`;
+  return `hace ${Math.floor(seconds / 86400)} días`;
+}
+
+/** Inicio real: réplica de `rndInicio` del prototipo, alimentada por un único DTO agregado. */
 export function AuthenticatedHome() {
-  const { user } = useAuth();
+  const { logout } = useAuth();
+  const { userId, enabled } = useSessionScope();
+  const query = useQuery({
+    queryKey: queryKeys.dashboard(userId),
+    queryFn: getDashboard,
+    enabled,
+    staleTime: STALE_TIME.operational,
+  });
+  const expired = query.error instanceof ApiError && query.error.status === 401;
+  const endExpiredSession = useCallback(() => void logout(), [logout]);
+  useEffect(() => {
+    if (expired) endExpiredSession();
+  }, [expired, endExpiredSession]);
 
-  if (!user) {
-    return null;
+  if (!query.data) {
+    if (query.isError) {
+      return (
+        <ErrorState
+          title="No pudimos cargar Inicio"
+          description="Revisá tu conexión e intentá nuevamente."
+          onRetry={() => void query.refetch()}
+        />
+      );
+    }
+    return <DashboardSkeleton />;
   }
+  return <DashboardContent data={query.data} refreshing={query.isFetching} />;
+}
 
-  const displayName = getUserDisplayName(user);
-  const roleLabel = getRoleLabel(user.role);
-  const isAdmin = user.role === 'ADMIN';
-
+function DashboardContent({ data, refreshing }: { data: DashboardResponse; refreshing: boolean }) {
+  const { kpis } = data;
   return (
     <div className="home">
-      <PageHeader
-        title={
-          <>
-            Hola, <span className="home__name">{displayName}</span>
-          </>
-        }
-        description="Te damos la bienvenida a La Cañada."
-      />
-
-      <div className="home__grid">
-        <Card title="Tu sesión">
-          <div className="session-summary">
-            <Avatar
-              name={displayName}
-              colorHex={user.employee?.colorHex}
-              size="lg"
-              variant={isAdmin && !user.employee ? 'admin' : 'person'}
-            />
-            <div className="session-summary__text">
-              <span className="session-summary__name">{displayName}</span>
-              {/* Sin persona vinculada, el nombre visible ya es "Administrador". */}
-              {user.employee ? (
-                <Badge tone={isAdmin ? 'earth' : 'neutral'}>{roleLabel}</Badge>
-              ) : null}
-            </div>
-          </div>
-          <p className="session-summary__status" role="status">
-            <CheckCircleIcon />
-            Sesión iniciada
-          </p>
-          <div className="home__card-actions">
-            <LogoutButton />
-          </div>
-        </Card>
-
-        {isAdmin ? (
-          <Card title="Administración">
-            <p className="home__card-text">
-              Activá cuentas, asigná el PIN de cada persona y gestioná su estado de acceso.
-            </p>
-            <div className="home__card-actions">
-              <Link to={APP_ROUTES.adminUsers.path} className={buttonClassName()}>
-                <UsersIcon />
-                Administrar usuarios
-              </Link>
-            </div>
-          </Card>
-        ) : null}
+      <PageHeader title="Buenos días 👋" refreshing={refreshing} />
+      <nav className="home-kpis" aria-label="Indicadores de Inicio">
+        <KpiLink
+          to="/tasks"
+          tone="positive"
+          value={`${kpis.tasksCompleted}/${kpis.tasksTotal}`}
+          label="Tareas completadas"
+        />
+        <KpiLink
+          to="/tasks"
+          tone={kpis.urgentPending ? 'danger' : 'positive'}
+          value={kpis.urgentPending}
+          label="Urgentes pendientes"
+        />
+        <KpiLink
+          to="/stock/purchases"
+          tone={kpis.stockAlerts ? 'warning' : 'positive'}
+          value={kpis.stockAlerts}
+          label="Alertas de stock"
+        />
+        <KpiLink to="/chicken-coop" tone="info" value={kpis.goodEggsToday} label="🥚 Huevos hoy" />
+      </nav>
+      <div className="home-dashboard">
+        <div className="home-dashboard__column">
+          <DashboardCard title="🚨 Urgentes" to="/tasks" linkLabel="Ver tareas">
+            {data.urgentTasks.length ? (
+              <ul className="home-list">
+                {data.urgentTasks.map((task) => (
+                  <li className="home-task" key={task.id}>
+                    <Avatar
+                      name={task.assignee.displayName}
+                      colorHex={task.assignee.colorHex}
+                      size="sm"
+                    />
+                    <span>
+                      <strong>{task.description}</strong>
+                      <small>{task.assignee.displayName}</small>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <EmptyText>Sin urgentes 🎉</EmptyText>
+            )}
+          </DashboardCard>
+          <DashboardCard
+            title="👥 Avance del equipo"
+            to="/tasks/performance"
+            linkLabel="Ver desempeño"
+          >
+            {data.teamProgress.length ? (
+              <ul className="home-list">
+                {data.teamProgress.map((progress) => (
+                  <li className="home-progress" key={progress.employee.id}>
+                    <Avatar
+                      name={progress.employee.displayName}
+                      colorHex={progress.employee.colorHex}
+                      size="sm"
+                    />
+                    <span className="home-progress__name">{progress.employee.displayName}</span>
+                    <span className="home-progress__bar" aria-hidden="true">
+                      <span style={{ width: `${progress.percentage}%` }} />
+                    </span>
+                    <strong>{progress.percentage}%</strong>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <EmptyText>Sin personas activas</EmptyText>
+            )}
+          </DashboardCard>
+        </div>
+        <div className="home-dashboard__column">
+          <DashboardCard title="⚠️ Stock bajo" to="/stock/purchases" linkLabel="Ver stock">
+            {data.stockAlerts.length ? (
+              <ul className="home-list">
+                {data.stockAlerts.map((item) => (
+                  <li className="home-stock" key={item.id}>
+                    <span className="home-stock__body">
+                      <strong>
+                        {item.name} <small>({areaLabel(item.area)})</small>
+                      </strong>
+                      <span className="home-stock__row">
+                        <span className="home-stock__bar" aria-hidden="true">
+                          <span
+                            className={`is-${item.stockLevel}`}
+                            style={{
+                              width: `${stockPercent(item.currentQuantity, item.minimumQuantity)}%`,
+                            }}
+                          />
+                        </span>
+                        <small>
+                          {item.currentQuantity}/{item.minimumQuantity} {item.unit}
+                        </small>
+                      </span>
+                    </span>
+                    <span className={`home-stock__badge is-${item.stockLevel}`}>
+                      {stockLabel(item.stockLevel)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <EmptyText>Todo el stock en orden ✅</EmptyText>
+            )}
+          </DashboardCard>
+          <DashboardCard title="📅 Próximos eventos" to="/more/events" linkLabel="Ver todos">
+            {data.upcomingEvents.length ? (
+              <ul className="home-list">
+                {data.upcomingEvents.map((event) => {
+                  const date = new Date(`${event.date}T00:00:00.000Z`);
+                  const day = date.getUTCDate();
+                  const when =
+                    event.daysUntil === 0
+                      ? 'Hoy'
+                      : event.daysUntil === 1
+                        ? 'Mañana'
+                        : `En ${event.daysUntil} días`;
+                  const monthLabel = new Intl.DateTimeFormat('es-AR', {
+                    month: 'short',
+                    timeZone: 'UTC',
+                  })
+                    .format(date)
+                    .replace('.', '');
+                  return (
+                    <li className="home-event" key={event.id}>
+                      <time dateTime={event.date}>
+                        <strong>{day}</strong>
+                        <small>{monthLabel}</small>
+                      </time>
+                      <span>
+                        <strong>
+                          {EVENT_ICON[event.type]} {event.title}
+                        </strong>
+                        <small>{when}</small>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <EmptyText>Sin eventos próximos</EmptyText>
+            )}
+          </DashboardCard>
+          <DashboardCard title="📝 Últimas novedades" to="/more/news" linkLabel="Ver novedades">
+            {data.latestNews.length ? (
+              <ul className="home-list">
+                {data.latestNews.map((news) => (
+                  <li className="home-news" key={news.id}>
+                    <span className="home-news__header">
+                      <Avatar
+                        name={news.employee.displayName}
+                        colorHex={news.employee.colorHex}
+                        size="sm"
+                      />
+                      <strong>{news.employee.displayName}</strong>
+                      <small>{newsAge(news.createdAt)}</small>
+                    </span>
+                    <p>{news.text}</p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <EmptyText>Sin novedades</EmptyText>
+            )}
+          </DashboardCard>
+        </div>
       </div>
+    </div>
+  );
+}
+
+function KpiLink({
+  to,
+  tone,
+  value,
+  label,
+}: {
+  to: string;
+  tone: string;
+  value: string | number;
+  label: string;
+}) {
+  return (
+    <Link to={to} className={`home-kpi home-kpi--${tone}`}>
+      <strong>{value}</strong>
+      <span>{label}</span>
+    </Link>
+  );
+}
+function DashboardCard({
+  title,
+  to,
+  linkLabel,
+  children,
+}: {
+  title: string;
+  to: string;
+  linkLabel: string;
+  children: ReactNode;
+}) {
+  return (
+    <Card
+      title={title}
+      actions={
+        <Link className="home-card-link" to={to}>
+          {linkLabel}
+        </Link>
+      }
+    >
+      {children}
+    </Card>
+  );
+}
+function EmptyText({ children }: { children: ReactNode }) {
+  return <p className="home-empty">{children}</p>;
+}
+function DashboardSkeleton() {
+  return (
+    <div className="home" aria-label="Cargando Inicio" role="status">
+      <div className="home-skeleton home-skeleton--title" />
+      <div className="home-kpis">
+        {Array.from({ length: 4 }, (_, index) => (
+          <div className="home-kpi home-skeleton" key={index} />
+        ))}
+      </div>
+      <div className="home-dashboard">
+        {Array.from({ length: 2 }, (_, index) => (
+          <div className="home-dashboard__column" key={index}>
+            <div className="card home-skeleton home-skeleton--card" />
+            <div className="card home-skeleton home-skeleton--card" />
+          </div>
+        ))}
+      </div>
+      <span className="sr-only">Cargando Inicio…</span>
     </div>
   );
 }

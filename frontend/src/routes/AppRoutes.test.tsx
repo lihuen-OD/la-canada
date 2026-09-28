@@ -10,15 +10,18 @@ const {
   fetchAdminUsersMock,
   fetchStockItemsMock,
   fetchStockCategoriesMock,
+  getDashboardMock,
 } = vi.hoisted(() => ({
   useAuthMock: vi.fn(),
   fetchLoginOptionsMock: vi.fn(),
   fetchAdminUsersMock: vi.fn(),
   fetchStockItemsMock: vi.fn(),
   fetchStockCategoriesMock: vi.fn(),
+  getDashboardMock: vi.fn(),
 }));
 vi.mock('../auth/useAuth', () => ({ useAuth: useAuthMock }));
 vi.mock('../api/authApi', () => ({ fetchLoginOptions: fetchLoginOptionsMock }));
+vi.mock('../api/dashboardApi', () => ({ getDashboard: getDashboardMock }));
 vi.mock('../api/adminApi', () => ({
   fetchAdminUsers: fetchAdminUsersMock,
   activateUser: vi.fn(),
@@ -75,6 +78,23 @@ describe('AppRoutes (con app shell real)', () => {
     });
     fetchStockCategoriesMock.mockReset();
     fetchStockCategoriesMock.mockResolvedValue({ categories: [] });
+    getDashboardMock.mockResolvedValue({
+      generatedAt: '2026-09-25T12:00:00.000Z',
+      today: '2026-09-25',
+      timeZone: 'America/Argentina/Cordoba',
+      kpis: {
+        tasksCompleted: 0,
+        tasksTotal: 0,
+        urgentPending: 0,
+        stockAlerts: 0,
+        goodEggsToday: 0,
+      },
+      urgentTasks: [],
+      teamProgress: [],
+      stockAlerts: [],
+      upcomingEvents: [],
+      latestNews: [],
+    });
   });
 
   it('restaurando sesión: pantalla estable con estado anunciado, nunca el login ni el shell', () => {
@@ -104,13 +124,13 @@ describe('AppRoutes (con app shell real)', () => {
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
   });
 
-  it('autenticado: el Inicio se muestra dentro del app shell', () => {
+  it('autenticado: el Inicio se muestra dentro del app shell', async () => {
     renderAt('/', 'authenticated', 'EMPLOYEE');
 
     expect(screen.getByRole('navigation', { name: /navegación principal/i })).toBeInTheDocument();
-    expect(within(screen.getByRole('main')).getByRole('heading', { level: 1 })).toHaveTextContent(
-      /hola/i,
-    );
+    expect(
+      await within(screen.getByRole('main')).findByRole('heading', { level: 1 }),
+    ).toHaveTextContent(/buenos días/i);
   });
 
   it('/stock (autenticado): la pantalla real de Stock se muestra dentro del shell', async () => {
@@ -138,7 +158,7 @@ describe('AppRoutes (con app shell real)', () => {
 
     const user = userEvent.setup();
     await user.click(within(main).getByRole('link', { name: /volver al inicio/i }));
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/hola/i);
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent(/buenos días/i);
   });
 
   it('ADMIN en /admin/users: pantalla real de usuarios dentro del shell', () => {

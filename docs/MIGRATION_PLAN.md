@@ -444,3 +444,10 @@ Cambios de esta revisión:
 - [x] Escaneo de secretos, URLs de Neon/Supabase, PIN/`1234`, storage, `dangerouslySetInnerHTML`, SQL crudo, UUIDs hardcodeados, datos mock en runtime y errores de Prisma expuestos — sin hallazgos nuevos.
 - [x] Revisión visual automatizada (Chrome headless, respuestas sintéticas interceptadas, sin escritura en la base) de `/tasks` y sus diálogos en 360/390/768/1366/1920 px: sin scroll horizontal de página, sin objetivos táctiles < 44px.
 - [ ] Revisión visual humana y commit (`feat: implement task management module`) a cargo del usuario.
+## Etapa 5I — Inicio/Dashboard real ✅ aprobada visualmente — commit `feat: implement operational dashboard`
+
+- Paridad de `rndInicio`: saludo, cuatro KPI y cinco tarjetas en el orden y con los emojis originales.
+- Endpoint agregado autenticado `GET /api/v1/dashboard`, DTO explícito, fechas en `BUSINESS_TIME_ZONE`, seis ramas en paralelo y un techo fijo de 14–19 sentencias SQL (18 en `demo`; detalle por bloque en `docs/ARCHITECTURE.md` §27), sin migración.
+- Una request frontend, caché en memoria por usuario durante 30 s, revalidación sin borrar contenido y navegación SPA.
+- Clima, Mascotas y accesos rápidos no se agregan porque no existían en Inicio; por ello Open-Meteo no participa de la carga.
+- Aprobada visualmente por el usuario; sin deploy, seed, migraciones ni cambios sobre `production`.

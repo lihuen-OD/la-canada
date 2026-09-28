@@ -57,6 +57,24 @@ function body(path: string): unknown {
   if (path.startsWith('/auth/refresh')) return { accessToken: 'token-sintetico', expiresIn: 900 };
   if (path.startsWith('/auth/me')) return { user: ADMIN };
   if (path.startsWith('/auth/login-options')) return { options: [] };
+  if (path.startsWith('/dashboard'))
+    return {
+      generatedAt: '2026-09-25T12:00:00.000Z',
+      today: '2026-09-25',
+      timeZone: 'America/Argentina/Cordoba',
+      kpis: {
+        tasksCompleted: 0,
+        tasksTotal: 0,
+        urgentPending: 0,
+        stockAlerts: 0,
+        goodEggsToday: 0,
+      },
+      urgentTasks: [],
+      teamProgress: [],
+      stockAlerts: [],
+      upcomingEvents: [],
+      latestNews: [],
+    };
   if (path.startsWith('/tasks/employees')) return { employees: [PERSON_A, PERSON_B] };
   if (path.startsWith('/tasks/history')) return emptyHistory();
   if (path.startsWith('/tasks')) return listResponse([makeTask()]);
@@ -131,7 +149,7 @@ const tasksNav = () => screen.getByRole('navigation', { name: 'Secciones de Tare
 
 async function bootToHome() {
   render(<App />);
-  await screen.findByRole('heading', { level: 1, name: /Hola/ });
+  await screen.findByRole('heading', { level: 1, name: /Buenos días/ });
 }
 
 describe('navegación SPA — la sesión se restaura una sola vez por documento', () => {
@@ -202,13 +220,13 @@ describe('navegación SPA — la sesión se restaura una sola vez por documento'
     await user.click(within(mainNav()).getByRole('link', { name: 'Tareas' }));
     await screen.findByRole('list', { name: 'Tareas del período' });
     await user.click(within(mainNav()).getByRole('link', { name: 'Inicio' }));
-    await screen.findByRole('heading', { level: 1, name: /Hola/ });
+    await screen.findByRole('heading', { level: 1, name: /Buenos días/ });
     const before = calls.length;
 
     act(() => window.history.back());
     await screen.findByRole('list', { name: 'Tareas del período' });
     act(() => window.history.forward());
-    await screen.findByRole('heading', { level: 1, name: /Hola/ });
+    await screen.findByRole('heading', { level: 1, name: /Buenos días/ });
 
     expect(calls.length).toBe(before);
     expect(count('/auth/refresh')).toBe(1);

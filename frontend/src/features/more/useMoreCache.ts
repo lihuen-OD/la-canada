@@ -20,11 +20,21 @@ export function useMoreCache() {
 
   return {
     afterNewsChange: useCallback(
-      () => invalidate(queryKeys.more.news(userId), queryKeys.more.summary(userId)),
+      () =>
+        invalidate(
+          queryKeys.more.news(userId),
+          queryKeys.more.summary(userId),
+          queryKeys.dashboard(userId),
+        ),
       [invalidate, userId],
     ),
     afterEventChange: useCallback(
-      () => invalidate(queryKeys.more.events(userId), queryKeys.more.summary(userId)),
+      () =>
+        invalidate(
+          queryKeys.more.events(userId),
+          queryKeys.more.summary(userId),
+          queryKeys.dashboard(userId),
+        ),
       [invalidate, userId],
     ),
     afterPhotoChange: useCallback(
@@ -41,6 +51,7 @@ export function useMoreCache() {
           queryKeys.admin.users(userId),
           queryKeys.more.events(userId),
           queryKeys.more.summary(userId),
+          queryKeys.dashboard(userId),
         ),
       [invalidate, userId],
     ),
@@ -57,6 +68,7 @@ export function useMoreCache() {
           queryKeys.more.team(userId),
           queryKeys.more.events(userId),
           queryKeys.more.summary(userId),
+          queryKeys.dashboard(userId),
         ),
       [invalidate, userId],
     ),

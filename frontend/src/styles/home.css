@@ -1,57 +1,255 @@
-/* Inicio autenticado TEMPORAL (features/home/AuthenticatedHome.tsx) — se
-   reemplaza por el módulo Inicio real en una etapa posterior. */
-
-.home__grid {
+.home {
+  min-width: 0;
+}
+.home-kpis {
   display: grid;
-  gap: var(--space-4);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
 }
-
-.home__name {
-  color: var(--color-action);
+.home-kpi {
+  min-height: 82px;
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-card);
+  color: var(--color-text);
+  text-decoration: none;
+  box-shadow: var(--shadow-card);
+  transition: transform var(--duration-fast) var(--ease-standard);
 }
-
-.session-summary {
-  display: flex;
-  align-items: center;
+.home-kpi:hover {
+  transform: translateY(-1px);
+}
+.home-kpi strong {
+  display: block;
+  font-family: var(--font-display);
+  font-size: var(--font-size-xl);
+  line-height: var(--line-height-tight);
+}
+.home-kpi span {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+}
+.home-kpi--positive {
+  background: var(--color-positive-bg);
+  color: var(--color-positive);
+}
+.home-kpi--warning {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+.home-kpi--danger {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+.home-kpi--info {
+  background: var(--color-info-bg);
+  color: var(--color-info);
+}
+.home-dashboard,
+.home-dashboard__column {
+  display: grid;
   gap: var(--space-3);
   min-width: 0;
 }
-
-.session-summary__text {
+.home-dashboard__column {
+  align-content: start;
+}
+.home-card-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-target);
+  padding: 0 var(--space-2);
+  color: var(--color-action);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  text-decoration: none;
+}
+.home-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.home-list > li {
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+.home-list > li:last-child {
+  border-bottom: 0;
+}
+.home-task,
+.home-progress,
+.home-stock,
+.home-event {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3) 0;
+}
+.home-task > span,
+.home-event > span {
+  display: grid;
+  min-width: 0;
+}
+.home-task strong,
+.home-event strong,
+.home-stock strong {
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+.home-task small,
+.home-event small,
+.home-stock small,
+.home-news small {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+.home-progress__name {
+  width: 5.5rem;
+  overflow: hidden;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-progress__bar,
+.home-stock__bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-muted);
+}
+.home-progress__bar {
+  flex: 1;
+  min-width: 40px;
+}
+.home-progress__bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-positive);
+}
+.home-progress > strong {
+  min-width: 2.5rem;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  text-align: right;
+}
+.home-stock__body {
+  display: grid;
+  flex: 1;
   gap: var(--space-1);
   min-width: 0;
 }
-
-.session-summary__name {
-  font-weight: var(--font-weight-semibold);
-  overflow-wrap: anywhere;
-}
-
-.session-summary__status {
-  display: inline-flex;
+.home-stock__row {
+  display: flex;
   align-items: center;
   gap: var(--space-2);
-  margin-top: var(--space-4);
+}
+.home-stock__bar {
+  flex: 1;
+}
+.home-stock__bar > span {
+  display: block;
+  height: 100%;
+}
+.home-stock__bar .is-low {
+  background: var(--color-warning-accent);
+}
+.home-stock__bar .is-critical {
+  background: var(--color-danger);
+}
+.home-stock__badge {
+  flex: 0 0 auto;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+}
+.home-stock__badge.is-low {
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+.home-stock__badge.is-critical {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+.home-event time {
+  display: grid;
+  flex: 0 0 42px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-control);
+  background: var(--color-positive-bg);
   color: var(--color-positive);
-  font-weight: var(--font-weight-semibold);
+  text-align: center;
 }
-
-.home__card-actions {
+.home-event time strong {
+  font-family: var(--font-display);
+  font-size: var(--font-size-md);
+}
+.home-event time small {
+  text-transform: uppercase;
+}
+.home-news {
+  padding: var(--space-3) 0;
+}
+.home-news__header {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  margin-top: var(--space-4);
+  align-items: center;
+  gap: var(--space-2);
 }
-
-.home__card-text {
+.home-news__header strong {
+  font-size: var(--font-size-sm);
+}
+.home-news__header small {
+  margin-left: auto;
+}
+.home-news p {
+  margin-top: var(--space-2);
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.home-empty {
+  padding: var(--space-4) 0;
   color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  text-align: center;
 }
-
+.home-skeleton {
+  overflow: hidden;
+  background: var(--color-surface-muted);
+  animation: home-pulse 1.4s ease-in-out infinite;
+}
+.home-skeleton--title {
+  width: 12rem;
+  height: 2rem;
+  margin-bottom: var(--space-5);
+  border-radius: var(--radius-control);
+}
+.home-skeleton--card {
+  min-height: 180px;
+}
+@keyframes home-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-skeleton {
+    animation: none;
+  }
+}
+@media (min-width: 600px) {
+  .home-kpis {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
 @media (min-width: 900px) {
-  .home__grid {
+  .home-dashboard {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: start;
   }

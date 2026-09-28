@@ -1,129 +1,144 @@
-import { MemoryRouter } from 'react-router-dom';
-import { render, screen } from '../../test/render';
+import { StrictMode } from 'react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import type { DashboardResponse } from '../../api/dashboardTypes';
+import { createTestQueryClient, render, screen, waitFor } from '../../test/render';
 
-const { useAuthMock } = vi.hoisted(() => ({ useAuthMock: vi.fn() }));
-vi.mock('../../auth/useAuth', () => ({ useAuth: useAuthMock }));
+const mocks = vi.hoisted(() => ({ getDashboard: vi.fn(), logout: vi.fn() }));
+vi.mock('../../api/dashboardApi', () => ({ getDashboard: mocks.getDashboard }));
+vi.mock('../../auth/useAuth', () => ({
+  useAuth: () => ({
+    user: { id: 'user-1', role: 'EMPLOYEE', employee: { id: 'employee-1' } },
+    logout: mocks.logout,
+  }),
+}));
 
 import { AuthenticatedHome } from './AuthenticatedHome';
 
-function renderHome() {
-  return render(
+const dashboard: DashboardResponse = {
+  generatedAt: '2026-09-25T12:00:00.000Z',
+  today: '2026-09-25',
+  timeZone: 'America/Argentina/Cordoba',
+  kpis: { tasksCompleted: 3, tasksTotal: 5, urgentPending: 1, stockAlerts: 1, goodEggsToday: 7 },
+  urgentTasks: [
+    {
+      id: 't1',
+      description: 'Revisar bomba',
+      assignee: { id: 'e1', displayName: 'Coke', colorHex: '#4a7c59' },
+    },
+  ],
+  teamProgress: [
+    {
+      employee: { id: 'e1', displayName: 'Coke', colorHex: '#4a7c59' },
+      completed: 3,
+      total: 5,
+      percentage: 60,
+    },
+  ],
+  stockAlerts: [
+    {
+      id: 's1',
+      name: 'Alimento',
+      area: 'GARDEN',
+      unit: 'kg',
+      minimumQuantity: '10',
+      currentQuantity: '4',
+      stockLevel: 'low',
+    },
+  ],
+  upcomingEvents: [
+    {
+      kind: 'event',
+      id: 'ev1',
+      title: 'Visita técnica',
+      date: '2026-09-26',
+      type: 'VISIT',
+      note: null,
+      daysUntil: 1,
+    },
+  ],
+  latestNews: [
+    {
+      id: 'n1',
+      text: 'Portón revisado',
+      createdAt: new Date().toISOString(),
+      employee: { id: 'e1', displayName: 'Coke', colorHex: '#4a7c59' },
+    },
+  ],
+};
+
+function renderHome(queryClient = createTestQueryClient(), strict = false) {
+  const content = (
     <MemoryRouter>
-      <AuthenticatedHome />
-    </MemoryRouter>,
+      <Routes>
+        <Route path="/" element={<AuthenticatedHome />} />
+        <Route path="/tasks" element={<p>Tareas destino</p>} />
+      </Routes>
+    </MemoryRouter>
   );
+  return render(strict ? <StrictMode>{content}</StrictMode> : content, { queryClient });
 }
 
-describe('AuthenticatedHome', () => {
-  it('muestra el nombre real del empleado y su rol', () => {
-    const logout = vi.fn();
-    useAuthMock.mockReturnValue({
-      user: {
-        id: 'user-1',
-        role: 'EMPLOYEE',
-        status: 'ACTIVE',
-        employee: { id: 'e1', displayName: 'Coke', colorHex: '#4a7c59' },
-      },
-      logout,
-    });
-
+describe('Dashboard de Inicio', () => {
+  it('renderiza los bloques y KPIs originales con datos reales del DTO', async () => {
+    mocks.getDashboard.mockResolvedValueOnce(dashboard);
     renderHome();
-
-    expect(screen.getByRole('heading', { level: 1, name: 'Hola, Coke' })).toBeInTheDocument();
-    // Rol traducido, como texto (no solo un color).
-    expect(screen.getByText('Equipo')).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent('Sesión iniciada');
-  });
-
-  it('un ADMIN sin Employee vinculado se muestra con la etiqueta genérica, nunca con el username', () => {
-    useAuthMock.mockReturnValue({
-      user: { id: 'admin-1', role: 'ADMIN', status: 'ACTIVE', employee: null },
-      logout: vi.fn(),
-    });
-
-    const { container } = renderHome();
-
     expect(
-      screen.getByRole('heading', { level: 1, name: 'Hola, Administrador' }),
+      await screen.findByRole('heading', { level: 1, name: 'Buenos días 👋' }),
     ).toBeInTheDocument();
-    expect(container.textContent).not.toMatch(/@|username/i);
+    expect(screen.getByText('3/5')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '🚨 Urgentes' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '👥 Avance del equipo' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '⚠️ Stock bajo' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '📅 Próximos eventos' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '📝 Últimas novedades' })).toBeInTheDocument();
+    expect(screen.queryByText(/clima|mascotas/i)).not.toBeInTheDocument();
   });
 
-  it('el botón "Cerrar sesión" llama a logout', async () => {
-    const logout = vi.fn();
-    useAuthMock.mockReturnValue({
-      user: { id: 'user-1', role: 'EMPLOYEE', status: 'ACTIVE', employee: null },
-      logout,
+  it('muestra los estados vacíos reales', async () => {
+    mocks.getDashboard.mockResolvedValueOnce({
+      ...dashboard,
+      urgentTasks: [],
+      teamProgress: [],
+      stockAlerts: [],
+      upcomingEvents: [],
+      latestNews: [],
     });
-
     renderHome();
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /cerrar sesión/i }));
-
-    expect(logout).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('Sin urgentes 🎉')).toBeInTheDocument();
+    expect(screen.getByText('Todo el stock en orden ✅')).toBeInTheDocument();
+    expect(screen.getByText('Sin eventos próximos')).toBeInTheDocument();
+    expect(screen.getByText('Sin novedades')).toBeInTheDocument();
   });
 
-  it('no muestra ningún dato de negocio (tareas, stock, métricas) — es un punto de entrada temporal', () => {
-    useAuthMock.mockReturnValue({
-      user: { id: 'user-1', role: 'EMPLOYEE', status: 'ACTIVE', employee: null },
-      logout: vi.fn(),
-    });
-
-    const { container } = renderHome();
-    const content = container.textContent ?? '';
-    expect(content).not.toMatch(/tarea|stock|gallina|mascota|evento|novedad|clima|foto/i);
-    // Sin KPI ni cifras de ningún tipo: ningún número se renderiza en la pantalla temporal.
-    expect(content).not.toMatch(/\d/);
-  });
-
-  it('no renderiza <main> propio: vive dentro del app shell, que ya lo provee', () => {
-    useAuthMock.mockReturnValue({
-      user: { id: 'user-1', role: 'EMPLOYEE', status: 'ACTIVE', employee: null },
-      logout: vi.fn(),
-    });
-
+  it('navega con Link, sin recargar el documento', async () => {
+    mocks.getDashboard.mockResolvedValueOnce(dashboard);
     renderHome();
-    expect(screen.queryByRole('main')).not.toBeInTheDocument();
+    await screen.findByText('Revisar bomba');
+    await userEvent.setup().click(screen.getByRole('link', { name: /ver tareas/i }));
+    expect(screen.getByText('Tareas destino')).toBeInTheDocument();
   });
 
-  it('"Cerrar sesión" no permite un segundo envío mientras el primero sigue en curso', async () => {
-    const logout = vi.fn().mockReturnValue(new Promise(() => {}));
-    useAuthMock.mockReturnValue({
-      user: { id: 'user-1', role: 'EMPLOYEE', status: 'ACTIVE', employee: null },
-      logout,
-    });
-
-    renderHome();
-    const user = userEvent.setup();
-    const button = screen.getByRole('button', { name: /cerrar sesión/i });
-    await user.click(button);
-    await user.click(button);
-
-    expect(logout).toHaveBeenCalledTimes(1);
-    expect(button).toBeDisabled();
+  it('StrictMode deduplica la carga y una revisita fresca hace cero requests', async () => {
+    mocks.getDashboard.mockResolvedValue(dashboard);
+    const queryClient = createTestQueryClient();
+    const first = renderHome(queryClient, true);
+    await screen.findByText('Revisar bomba');
+    expect(mocks.getDashboard).toHaveBeenCalledTimes(1);
+    first.unmount();
+    renderHome(queryClient, true);
+    await screen.findByText('Revisar bomba');
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(1));
   });
 
-  it('un ADMIN ve el enlace de administración de usuarios', () => {
-    useAuthMock.mockReturnValue({
-      user: { id: 'admin-1', role: 'ADMIN', status: 'ACTIVE', employee: null },
-      logout: vi.fn(),
-    });
-
-    renderHome();
-
-    expect(screen.getByRole('link', { name: /administrar usuarios/i })).toBeInTheDocument();
-  });
-
-  it('un EMPLOYEE nunca ve el enlace de administración de usuarios', () => {
-    useAuthMock.mockReturnValue({
-      user: { id: 'user-1', role: 'EMPLOYEE', status: 'ACTIVE', employee: null },
-      logout: vi.fn(),
-    });
-
-    renderHome();
-
-    expect(screen.queryByRole('link', { name: /administrar usuarios/i })).not.toBeInTheDocument();
+  it('conserva el contenido mientras revalida', async () => {
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(['session', 'user-1', 'dashboard'], dashboard);
+    await queryClient.invalidateQueries({ queryKey: ['session', 'user-1', 'dashboard'] });
+    mocks.getDashboard.mockReturnValueOnce(new Promise(() => {}));
+    renderHome(queryClient);
+    expect(screen.getByText('Revisar bomba')).toBeInTheDocument();
+    expect(screen.getByText('Actualizando…')).toBeInTheDocument();
   });
 });

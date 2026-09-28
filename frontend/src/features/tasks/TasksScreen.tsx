@@ -146,6 +146,7 @@ export function TasksScreen() {
   const refresh = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(userId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.performance.all(userId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard(userId) });
   }, [queryClient, userId]);
 
   const closeDialog = useCallback(() => setDialog({ type: 'none' }), []);

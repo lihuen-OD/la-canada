@@ -6,6 +6,7 @@ import { tasksRouter } from './tasksRoutes';
 import { performanceRouter } from './performanceRoutes';
 import { stockRouter } from './stockRoutes';
 import { chickenCoopRouter } from './chickenCoopRoutes';
+import { dashboardRouter } from './dashboardRoutes';
 import { petsRouter } from './petsRoutes';
 import {
   employeesRouter,
@@ -25,6 +26,7 @@ apiV1Router.use('/tasks', tasksRouter);
 apiV1Router.use('/performance', performanceRouter);
 apiV1Router.use('/stock', stockRouter);
 apiV1Router.use('/chicken-coop', chickenCoopRouter);
+apiV1Router.use('/dashboard', dashboardRouter);
 apiV1Router.use('/pets', petsRouter);
 // ☰ Más (Etapa 5X): Novedades, Eventos, Clima, Fotos, Configuración y Mi perfil.
 apiV1Router.use('/more', moreRouter);

@@ -14,5 +14,6 @@ export function useChickenCoopCache() {
   const { userId } = useSessionScope();
   return useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.chickenCoop.all(userId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard(userId) });
   }, [queryClient, userId]);
 }

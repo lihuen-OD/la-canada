@@ -194,6 +194,28 @@ export async function listEvents(
   };
 }
 
+/** Solo los próximos eventos/cumpleaños para Inicio; evita cargar y contar pasados. */
+export async function listUpcomingEvents(limit: number, now = new Date()) {
+  const today = businessToday(now);
+  const todayText = formatLocalDate(today);
+  const todayDb = toDbDate(today);
+  const [upcoming, birthdayInputs] = await Promise.all([
+    prisma.event.findMany({
+      where: { deletedAt: null, date: { gte: todayDb } },
+      select: eventSelect,
+      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+      take: Math.max(limit, 1),
+    }),
+    loadBirthdayInputs(),
+  ]);
+  return [
+    ...upcoming.map((row) => serializeEvent(row, todayText)),
+    ...birthdayItems(birthdayInputs, today),
+  ]
+    .sort((a, b) => a.daysUntil - b.daysUntil || a.title.localeCompare(b.title, 'es'))
+    .slice(0, limit);
+}
+
 /** Próximos eventos (desde hoy) + cumpleaños vigentes — la tarjeta de Más. Solo conteos. */
 export async function countUpcomingEvents(now = new Date()) {
   const todayDb = toDbDate(businessToday(now));

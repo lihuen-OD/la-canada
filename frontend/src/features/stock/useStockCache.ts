@@ -29,6 +29,7 @@ export function useStockCache() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.stock.itemsAll(userId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.stock.movements(userId, itemId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.stock.reportsAll(userId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard(userId) });
     },
     [queryClient, userId],
   );
@@ -37,6 +38,7 @@ export function useStockCache() {
   const afterItemChange = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.stock.itemsAll(userId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.stock.itemAll(userId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard(userId) });
   }, [queryClient, userId]);
 
   /** Categorías: su catálogo y los productos (que embeben el nombre de la categoría). */

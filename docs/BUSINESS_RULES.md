@@ -280,3 +280,8 @@ Repetido aquí por completitud del pedido original — el detalle completo y el 
 - **Destinos de consumo**: catálogo editable por admin, tipo `vehiculo` o `sector`; eliminar un destino ofrece elegir entre inactivar (conserva historial) o borrar en forma definitiva (con doble confirmación, línea 3198-3223).
 - **Exportación CSV** de consumos filtrados por rango de fechas (`exportarCSV`, línea 3402) — columnas: Fecha, Ítem, Cantidad, Unidad, Persona, Destino, Motivo.
 - **Sesión**: `sessionStorage` recuerda rol + persona entre recargas de la misma pestaña/sesión de navegador, pero se pierde al cerrar el navegador (no es "recordarme" persistente entre dispositivos ni entre reinicios del navegador). `logout()` la limpia explícitamente.
+## Inicio/Dashboard (Etapa 5I)
+
+- Replica `rndInicio`: tareas completadas del período vigente sobre tareas operativas; urgentes activas sin ejecución vigente; productos activos críticos/bajos; suma de huevos buenos no anulados del día; avance por persona activa; tres próximos eventos/cumpleaños; tres novedades más recientes.
+- Usa `BUSINESS_TIME_ZONE` para “hoy”. El backend es la autoridad y ambos roles reciben únicamente este DTO operativo; Desempeño conserva por separado su excepción ADMIN/todos y EMPLOYEE/propio.
+- No contiene Clima, Mascotas ni accesos rápidos: esas pantallas existen en sus módulos, pero no eran widgets del Inicio original.
