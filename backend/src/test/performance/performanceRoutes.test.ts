@@ -10,7 +10,7 @@ describe('/api/v1/performance — autenticación', () => {
     const response = await request(createApp()).get(path);
     expect(response.status).toBe(401);
     expect(response.body).toEqual({
-      error: { message: 'Autenticación requerida.', code: 'AUTH_REQUIRED' },
+      error: { message: 'Tu sesión venció. Volvé a ingresar.', code: 'AUTH_REQUIRED' },
     });
   });
 });

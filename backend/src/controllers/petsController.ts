@@ -14,6 +14,7 @@ import {
   listPetTypesQuerySchema,
   listPetsQuerySchema,
   petIdParamSchema,
+  petStatusBodySchema,
   petTypeStatusBodySchema,
   updatePetBodySchema,
 } from '../pets/petSchemas';
@@ -21,7 +22,10 @@ import {
   createPet,
   createPetRecord,
   createPetType,
-  deactivatePetType,
+  deletePet,
+  deletePetType,
+  setPetActive,
+  setPetTypeActive,
   getPet,
   listPetRecords,
   listPetTypes,
@@ -90,8 +94,19 @@ export async function postPetType(req: Request, res: Response): Promise<void> {
 export async function patchPetTypeStatus(req: Request, res: Response): Promise<void> {
   const actor = await actorFrom(req);
   const typeId = idFrom(req.params.id, 'tipo');
-  parseOrThrow(petTypeStatusBodySchema, req.body, 'Solo se admite { "active": false }.');
-  send(res, 200, await deactivatePetType(actor, typeId, requestMeta(req)));
+  const { active } = parseOrThrow(
+    petTypeStatusBodySchema,
+    req.body,
+    'El body debe incluir active.',
+  );
+  send(res, 200, await setPetTypeActive(actor, typeId, active, requestMeta(req)));
+}
+
+/** `DELETE /pets/types/:id` — solo un tipo agregado que ninguna mascota usa. */
+export async function deletePetTypeHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  await deletePetType(actor, idFrom(req.params.id, 'tipo'), requestMeta(req));
+  res.set('Cache-Control', 'no-store').status(204).end();
 }
 
 // ── Mascotas ──
@@ -121,6 +136,20 @@ export async function patchPet(req: Request, res: Response): Promise<void> {
   const petId = idFrom(req.params.id, 'mascota');
   const input = parseOrThrow(updatePetBodySchema, req.body, 'Datos de mascota inválidos.');
   send(res, 200, await updatePet(actor, petId, input, requestMeta(req)));
+}
+
+export async function patchPetStatus(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const petId = idFrom(req.params.id, 'mascota');
+  const { active } = parseOrThrow(petStatusBodySchema, req.body, 'El body debe incluir active.');
+  send(res, 200, await setPetActive(actor, petId, active, requestMeta(req)));
+}
+
+/** `DELETE /pets/:id` — solo una mascota sin historia clínica ni fotos. */
+export async function deletePetHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  await deletePet(actor, idFrom(req.params.id, 'mascota'), requestMeta(req));
+  res.set('Cache-Control', 'no-store').status(204).end();
 }
 
 // ── Registros clínicos ──

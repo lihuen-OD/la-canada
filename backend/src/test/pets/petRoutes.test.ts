@@ -37,15 +37,19 @@ describe('/api/v1/pets — autenticación', () => {
 
 describe('router de mascotas — superficie', () => {
   const source = readFileSync(resolve(__dirname, '../../routes/petsRoutes.ts'), 'utf-8');
-  it('todo detrás de requireAuth, sin DELETE ni PUT', () => {
+  it('todo detrás de requireAuth; sin PUT; DELETE solo para mascota y tipo sin historia', () => {
     expect(source).toMatch(/petsRouter\.use\(requireAuth\)/);
-    expect(source).not.toMatch(/\.(delete|put)\(/);
+    expect(source).not.toMatch(/\.put\(/);
+    const deletes = [...source.matchAll(/petsRouter\.delete\('([^']*)'/g)].map((m) => m[1]);
+    expect(deletes.sort()).toEqual(['/:id', '/types/:id']);
+    // Los registros clínicos se anulan: nunca DELETE sobre records.
+    expect(source).not.toMatch(/delete\([^\n]*records/);
   });
   it('las mutaciones JSON exigen Content-Type; la foto usa su parser binario acotado', () => {
     const mutations = [...source.matchAll(/petsRouter\.(post|patch)\(([^)]*)\)/g)].map(
       (m) => m[2] ?? '',
     );
-    expect(mutations).toHaveLength(8);
+    expect(mutations).toHaveLength(9);
     for (const args of mutations) {
       expect(args).toMatch(
         args.includes("'/:id/photo',") ? /parsePetPhotoBody/ : /requireJsonContentType/,

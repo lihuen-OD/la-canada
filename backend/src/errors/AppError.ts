@@ -21,14 +21,14 @@ export class AppError extends Error {
 }
 
 export class NotFoundError extends AppError {
-  constructor(message = 'Recurso no encontrado') {
+  constructor(message = 'No encontramos lo que buscás.') {
     super(message, 404);
   }
 }
 
 export class CorsOriginError extends AppError {
   constructor() {
-    super('Origen no permitido por CORS.', 403, { code: 'CORS_ORIGIN_DENIED' });
+    super('No se puede acceder desde este sitio.', 403, { code: 'CORS_ORIGIN_DENIED' });
   }
 }
 
@@ -47,21 +47,21 @@ export class InvalidCredentialsError extends AppError {
 /** Access token ausente, con formato inválido, firma inválida, o issuer/audience incorrectos. */
 export class InvalidAccessTokenError extends AppError {
   constructor() {
-    super('Token de acceso inválido.', 401, { code: 'AUTH_TOKEN_INVALID' });
+    super('Tu sesión venció. Volvé a ingresar.', 401, { code: 'AUTH_TOKEN_INVALID' });
   }
 }
 
 /** Distinto del anterior a propósito: el frontend puede reaccionar a "expiró" (intentar /refresh) distinto de "inválido". No revela nada sobre la cuenta, solo sobre el token. */
 export class ExpiredAccessTokenError extends AppError {
   constructor() {
-    super('Token de acceso vencido.', 401, { code: 'AUTH_TOKEN_EXPIRED' });
+    super('Tu sesión venció. Volvé a ingresar.', 401, { code: 'AUTH_TOKEN_EXPIRED' });
   }
 }
 
 /** Sesión inexistente, revocada o vencida — nunca se distingue cuál al cliente (mismo tratamiento que credenciales inválidas: no dar pistas). */
 export class InvalidSessionError extends AppError {
   constructor() {
-    super('Sesión inválida o expirada.', 401, { code: 'AUTH_SESSION_INVALID' });
+    super('Tu sesión venció. Volvé a ingresar.', 401, { code: 'AUTH_SESSION_INVALID' });
   }
 }
 
@@ -80,12 +80,12 @@ export class SessionRefreshUnavailableError extends AppError {
 
 export class AuthenticationRequiredError extends AppError {
   constructor() {
-    super('Autenticación requerida.', 401, { code: 'AUTH_REQUIRED' });
+    super('Tu sesión venció. Volvé a ingresar.', 401, { code: 'AUTH_REQUIRED' });
   }
 }
 
 export class ForbiddenError extends AppError {
-  constructor(message = 'No tenés permisos para esta acción.') {
+  constructor(message = 'No tenés permiso para realizar esta acción.') {
     super(message, 403, { code: 'AUTH_FORBIDDEN' });
   }
 }
@@ -93,13 +93,15 @@ export class ForbiddenError extends AppError {
 /** CSRF: el header Origin de un request de auth que cambia estado no coincide con FRONTEND_URL (o falta). */
 export class OriginValidationError extends AppError {
   constructor() {
-    super('Origen no válido.', 403, { code: 'AUTH_ORIGIN_INVALID' });
+    super('No se puede acceder desde este sitio.', 403, { code: 'AUTH_ORIGIN_INVALID' });
   }
 }
 
 export class UnsupportedContentTypeError extends AppError {
   constructor() {
-    super('Content-Type debe ser application/json.', 415, { code: 'UNSUPPORTED_CONTENT_TYPE' });
+    super('Los datos enviados no tienen un formato válido. Revisalos e intentá nuevamente.', 415, {
+      code: 'UNSUPPORTED_CONTENT_TYPE',
+    });
   }
 }
 
@@ -273,20 +275,22 @@ export class StockDestinationDuplicateError extends AppError {
 /** El header `Idempotency-Key` no cumple `^[A-Za-z0-9_-]{8,64}$`. */
 export class IdempotencyKeyInvalidError extends AppError {
   constructor() {
-    super(
-      'Idempotency-Key inválido: se admiten de 8 a 64 caracteres (letras, números, "-" o "_").',
-      400,
-      { code: 'IDEMPOTENCY_KEY_INVALID' },
-    );
+    super('No pudimos identificar la operación. Actualizá la pantalla e intentá nuevamente.', 400, {
+      code: 'IDEMPOTENCY_KEY_INVALID',
+    });
   }
 }
 
 /** Misma (actor, endpoint, clave) ya completada con un cuerpo de request distinto. */
 export class IdempotencyKeyConflictError extends AppError {
   constructor() {
-    super('La clave Idempotency-Key ya fue usada con un cuerpo distinto.', 409, {
-      code: 'IDEMPOTENCY_KEY_CONFLICT',
-    });
+    super(
+      'Esta operación ya se registró con otros datos. Actualizá la pantalla para ver el estado actual.',
+      409,
+      {
+        code: 'IDEMPOTENCY_KEY_CONFLICT',
+      },
+    );
   }
 }
 
@@ -300,7 +304,7 @@ export class IdempotencyKeyConflictError extends AppError {
 export class IdempotencyRecordPendingError extends AppError {
   constructor() {
     super(
-      'La operación anterior con esta clave todavía se está completando. Volvé a intentar.',
+      'La operación anterior todavía se está completando. Esperá un momento e intentá nuevamente.',
       409,
       { code: 'IDEMPOTENCY_RECORD_PENDING' },
     );
@@ -393,7 +397,9 @@ export class PetTypeDuplicateError extends AppError {
 /** Los 9 tipos precargados no se eliminan (el prototipo tampoco lo permitía). */
 export class PetTypeBuiltinError extends AppError {
   constructor() {
-    super('Los tipos precargados no se pueden eliminar.', 409, { code: 'PET_TYPE_BUILTIN' });
+    super('Este tipo forma parte de la configuración inicial y no se puede eliminar.', 409, {
+      code: 'PET_TYPE_BUILTIN',
+    });
   }
 }
 
@@ -491,6 +497,91 @@ export class WeatherUnavailableError extends AppError {
   constructor() {
     super('No se pudo cargar el clima. Verificá tu conexión.', 502, {
       code: 'WEATHER_UNAVAILABLE',
+    });
+  }
+}
+
+// ── Eliminación definitiva (solo registros sin historia) ───────────────────
+// Cada entidad tiene su propio código `*_IN_USE`: el cliente puede ofrecer
+// "Desactivar" sin parsear el mensaje humano.
+
+export class TaskInUseError extends AppError {
+  constructor() {
+    super(
+      'No se puede eliminar esta tarea porque tiene actividad registrada. Podés desactivarla para conservar su historial.',
+      409,
+      { code: 'TASK_IN_USE' },
+    );
+  }
+}
+
+export class TaskNotFoundError extends AppError {
+  constructor() {
+    super('Tarea no encontrada.', 404, { code: 'TASK_NOT_FOUND' });
+  }
+}
+
+/** Mismo código que la desactivación con productos activos: el motivo es el mismo (tiene productos). */
+export class StockCategoryHasItemsError extends AppError {
+  constructor() {
+    super(
+      'No se puede eliminar esta categoría porque tiene productos asociados. Primero reasigná los productos o desactivá la categoría.',
+      409,
+      { code: 'STOCK_CATEGORY_IN_USE' },
+    );
+  }
+}
+
+export class StockItemInUseError extends AppError {
+  constructor() {
+    super(
+      'No se puede eliminar este producto porque tiene movimientos de stock. Podés desactivarlo para conservar el historial.',
+      409,
+      { code: 'STOCK_ITEM_IN_USE' },
+    );
+  }
+}
+
+export class StockDestinationInUseError extends AppError {
+  constructor() {
+    super(
+      'No se puede eliminar este destino porque fue utilizado en movimientos de stock. Podés desactivarlo.',
+      409,
+      { code: 'STOCK_DESTINATION_IN_USE' },
+    );
+  }
+}
+
+export class PetTypeMissingError extends AppError {
+  constructor() {
+    super('El tipo de mascota no existe.', 404, { code: 'PET_TYPE_NOT_FOUND' });
+  }
+}
+
+export class PetTypeInUseError extends AppError {
+  constructor() {
+    super(
+      'No se puede eliminar este tipo porque está asociado a una o más mascotas. Podés desactivarlo.',
+      409,
+      { code: 'PET_TYPE_IN_USE' },
+    );
+  }
+}
+
+export class AnimalInUseError extends AppError {
+  constructor() {
+    super(
+      'No se puede eliminar esta mascota porque tiene registros o fotos. Podés desactivarla para conservar su historia.',
+      409,
+      { code: 'ANIMAL_IN_USE' },
+    );
+  }
+}
+
+export class PetInactiveError extends AppError {
+  constructor() {
+    super('La mascota está inactiva. Reactivala para registrar datos nuevos.', 409, {
+      code: 'PET_INACTIVE',
     });
   }
 }

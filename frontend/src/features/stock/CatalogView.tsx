@@ -13,6 +13,9 @@ import {
   updateStockCategory,
   updateStockDestination,
   updateStockItem,
+  deleteStockCategory,
+  deleteStockDestination,
+  deleteStockItem,
 } from '../../api/stockApi';
 import { useSessionScope } from '../../api/useSessionScope';
 import type {
@@ -28,6 +31,7 @@ import type {
   UpdateStockItemRequest,
 } from '../../api/stockTypes';
 import { Badge } from '../../components/ui/Badge';
+import { DeleteConfirmDialog } from '../admin/DeleteConfirmDialog';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
@@ -49,7 +53,10 @@ type CatalogDialogState =
   | { type: 'destination-form'; destination?: StockDestination }
   | { type: 'category-toggle'; category: StockCategory }
   | { type: 'item-toggle'; item: StockItem }
-  | { type: 'destination-toggle'; destination: StockDestination };
+  | { type: 'destination-toggle'; destination: StockDestination }
+  | { type: 'category-delete'; category: StockCategory }
+  | { type: 'item-delete'; item: StockItem }
+  | { type: 'destination-delete'; destination: StockDestination };
 
 const PAGE_SIZE = 50;
 const CATALOG_ITEM_FILTERS = { status: 'all' as const };
@@ -186,6 +193,14 @@ export function CatalogView() {
                       {category.active ? 'Desactivar' : 'Reactivar'}
                       <span className="visually-hidden">: {category.name}</span>
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={() => setDialog({ type: 'category-delete', category })}
+                    >
+                      Eliminar
+                      <span className="visually-hidden">: {category.name}</span>
+                    </Button>
                   </div>
                 </li>
               ))}
@@ -253,6 +268,14 @@ export function CatalogView() {
                         onClick={() => setDialog({ type: 'item-toggle', item })}
                       >
                         {item.active ? 'Desactivar' : 'Reactivar'}
+                        <span className="visually-hidden">: {item.name}</span>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => setDialog({ type: 'item-delete', item })}
+                      >
+                        Eliminar
                         <span className="visually-hidden">: {item.name}</span>
                       </Button>
                     </div>
@@ -345,6 +368,14 @@ export function CatalogView() {
                       {destination.active ? 'Desactivar' : 'Reactivar'}
                       <span className="visually-hidden">: {destination.name}</span>
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={() => setDialog({ type: 'destination-delete', destination })}
+                    >
+                      Eliminar
+                      <span className="visually-hidden">: {destination.name}</span>
+                    </Button>
                   </div>
                 </li>
               ))}
@@ -408,6 +439,45 @@ export function CatalogView() {
               dialog.destination ? 'Destino renombrado.' : 'Destino creado.',
               cache.afterDestinationChange,
             );
+          }}
+        />
+      ) : null}
+
+      {dialog.type === 'category-delete' ? (
+        <DeleteConfirmDialog
+          entityLabel="la categoría"
+          name={dialog.category.name}
+          keepWhen="tiene productos (activos o inactivos)"
+          onCancel={closeDialog}
+          onConfirm={async () => {
+            await sessionAware(() => deleteStockCategory(dialog.category.id));
+            done('Categoría eliminada.', cache.afterCategoryChange);
+          }}
+        />
+      ) : null}
+
+      {dialog.type === 'item-delete' ? (
+        <DeleteConfirmDialog
+          entityLabel="el producto"
+          name={dialog.item.name}
+          keepWhen="tuvo algún movimiento (incluido el saldo inicial) o tiene saldo"
+          onCancel={closeDialog}
+          onConfirm={async () => {
+            await sessionAware(() => deleteStockItem(dialog.item.id));
+            done('Producto eliminado.', cache.afterItemChange);
+          }}
+        />
+      ) : null}
+
+      {dialog.type === 'destination-delete' ? (
+        <DeleteConfirmDialog
+          entityLabel="el destino"
+          name={dialog.destination.name}
+          keepWhen="ya se usó en algún consumo"
+          onCancel={closeDialog}
+          onConfirm={async () => {
+            await sessionAware(() => deleteStockDestination(dialog.destination.id));
+            done('Destino eliminado.', cache.afterDestinationChange);
           }}
         />
       ) : null}

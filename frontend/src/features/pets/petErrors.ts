@@ -1,6 +1,8 @@
 import { ApiError } from '../../api/httpClient';
 
-export const NETWORK_ERROR_MESSAGE = 'No se pudo conectar. Intentá de nuevo.';
+import { NETWORK_ERROR_MESSAGE } from '../../api/errorMessages';
+
+export { NETWORK_ERROR_MESSAGE };
 
 const MESSAGES: Readonly<Record<string, string>> = {
   IDEMPOTENCY_KEY_CONFLICT:

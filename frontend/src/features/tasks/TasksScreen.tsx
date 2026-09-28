@@ -3,6 +3,7 @@ import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-quer
 import {
   completeTask,
   createTask,
+  deleteTask,
   fetchTaskEmployees,
   fetchTaskHistory,
   fetchTasks,
@@ -30,6 +31,7 @@ import { PageHeader } from '../../components/ui/PageHeader';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
 import { AlertIcon, CheckCircleIcon } from '../../components/ui/icons';
 import { ConfirmDialog } from '../admin/ConfirmDialog';
+import { DeleteConfirmDialog } from '../admin/DeleteConfirmDialog';
 import { CompleteTaskDialog } from './CompleteTaskDialog';
 import { errorMessageOf, isSessionExpired } from './dialogErrors';
 import { RevertTaskDialog } from './RevertTaskDialog';
@@ -54,7 +56,8 @@ type DialogState =
   | { type: 'edit'; task: TaskItemData }
   | { type: 'complete'; task: TaskItemData }
   | { type: 'revert'; taskId: string; description: string; execution: TaskExecution }
-  | { type: 'toggle'; task: TaskItemData };
+  | { type: 'toggle'; task: TaskItemData }
+  | { type: 'delete'; task: TaskItemData };
 
 type Notice = { tone: 'positive' | 'danger'; text: string } | null;
 
@@ -388,6 +391,7 @@ export function TasksScreen() {
             await updateTask(taskId, body).catch(rethrowForDialog);
             afterSuccess('Tarea actualizada.');
           }}
+          onDelete={(target) => setDialog({ type: 'delete', task: target })}
         />
       ) : null}
 
@@ -414,6 +418,19 @@ export function TasksScreen() {
               rethrowForDialog,
             );
             afterSuccess(`«${dialog.description}» volvió a quedar pendiente.`);
+          }}
+        />
+      ) : null}
+
+      {dialog.type === 'delete' ? (
+        <DeleteConfirmDialog
+          entityLabel="la tarea"
+          name={dialog.task.description}
+          keepWhen="alguna vez se completó (aunque luego se haya deshecho)"
+          onCancel={closeDialog}
+          onConfirm={async () => {
+            await deleteTask(dialog.task.id).catch(rethrowForDialog);
+            afterSuccess('Tarea eliminada.');
           }}
         />
       ) : null}

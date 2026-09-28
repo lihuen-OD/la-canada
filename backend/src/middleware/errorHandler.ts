@@ -27,6 +27,9 @@ function isBodyParserSyntaxError(err: unknown): err is SyntaxError & { status: n
   );
 }
 
+/** Mensaje público de todo error no controlado: nunca detalles de Prisma, Postgres ni SQL. */
+export const UNEXPECTED_ERROR_MESSAGE = 'Ocurrió un error inesperado. Intentá nuevamente.';
+
 export function errorHandler(
   err: unknown,
   _req: Request,
@@ -34,13 +37,18 @@ export function errorHandler(
   _next: NextFunction,
 ): void {
   if (isBodyParserSyntaxError(err)) {
-    res.status(400).json({ error: { message: 'JSON inválido en el body.', code: 'INVALID_JSON' } });
+    res.status(400).json({
+      error: {
+        message: 'Los datos enviados no tienen un formato válido. Revisalos e intentá nuevamente.',
+        code: 'INVALID_JSON',
+      },
+    });
     return;
   }
 
   const isAppError = err instanceof AppError;
   const statusCode = isAppError ? err.statusCode : 500;
-  const message = isAppError ? err.message : 'Error interno del servidor';
+  const message = isAppError ? err.message : UNEXPECTED_ERROR_MESSAGE;
   const isOperational = isAppError && err.isOperational;
 
   const body: ApiErrorBody = { error: { message } };

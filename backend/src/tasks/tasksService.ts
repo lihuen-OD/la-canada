@@ -22,8 +22,11 @@ import {
   TaskAlreadyCompletedError,
   TaskExecutionNotActiveError,
   TaskInactiveError,
+  TaskInUseError,
+  TaskNotFoundError,
   ValidationError,
 } from '../errors/AppError';
+import { runEntityDeletion } from '../lib/deletion';
 
 /**
  * Reglas del módulo Tareas (Etapa 4A) — ver docs/BUSINESS_RULES.md §2-§5 y
@@ -433,6 +436,44 @@ export async function setTaskActive(
     });
   });
   return { task: await loadSerializedTask(taskId, actor, now) };
+}
+
+/**
+ * Eliminación definitiva (ADMIN): solo para una tarea creada por error y
+ * nunca usada. Cualquier ejecución (incluida una revertida) o archivo es
+ * historia → `409 TASK_IN_USE` ("Desactivala"). Sus intervalos de
+ * planificación son técnicos y se borran explícitamente en la misma
+ * transacción; nada se borra en cascada. La auditoría (con snapshot) se
+ * escribe antes del borrado y se revierte con él si algo falla. Dos DELETE
+ * simultáneos: el segundo ve 0 filas → 404; una dependencia agregada en
+ * paralelo rompe la clave foránea → 409.
+ */
+export async function deleteTask(actor: TaskActor, taskId: string, meta: RequestMeta) {
+  requireAdmin(actor);
+  await runEntityDeletion(
+    async (tx) => {
+      const task = await tx.task.findUnique({
+        where: { id: taskId },
+        select: { description: true, employeeId: true, frequency: true, active: true },
+      });
+      if (!task) throw new TaskNotFoundError();
+      const executions = await tx.taskExecution.count({ where: { taskId } });
+      const files = await tx.fileAsset.count({ where: { taskId } });
+      if (executions > 0 || files > 0) throw new TaskInUseError();
+      await recordAuditLog(tx, {
+        actorUserId: actor.userId,
+        action: 'task.deleted',
+        entityType: 'Task',
+        entityId: taskId,
+        previousState: { ...task },
+        ...meta,
+      });
+      await tx.taskPlanningInterval.deleteMany({ where: { taskId } });
+      const { count } = await tx.task.deleteMany({ where: { id: taskId } });
+      if (count === 0) throw new TaskNotFoundError();
+    },
+    () => new TaskInUseError(),
+  );
 }
 
 // ── Operación ─────────────────────────────────────────────────────────────

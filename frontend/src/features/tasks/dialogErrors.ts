@@ -1,6 +1,8 @@
 import { ApiError } from '../../api/httpClient';
 
-export const NETWORK_ERROR_MESSAGE = 'No se pudo conectar. Intentá de nuevo.';
+import { NETWORK_ERROR_MESSAGE } from '../../api/errorMessages';
+
+export { NETWORK_ERROR_MESSAGE };
 
 /** Mensaje humano del backend (`ApiError.message`) o de conectividad — nunca JSON crudo ni errores internos. */
 export function errorMessageOf(error: unknown): string {

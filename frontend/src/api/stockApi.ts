@@ -193,3 +193,23 @@ export async function fetchStockReportCsv(filters: StockReportFilters): Promise<
     responseType: 'text',
   });
 }
+
+// ── Eliminación definitiva (ADMIN, solo sin historia; 409 `*_IN_USE` si la hay) ──
+
+export async function deleteStockCategory(categoryId: string): Promise<void> {
+  return apiRequest<void>(`/stock/categories/${categoryId}`, {
+    method: 'DELETE',
+    authenticated: true,
+  });
+}
+
+export async function deleteStockItem(itemId: string): Promise<void> {
+  return apiRequest<void>(`/stock/items/${itemId}`, { method: 'DELETE', authenticated: true });
+}
+
+export async function deleteStockDestination(destinationId: string): Promise<void> {
+  return apiRequest<void>(`/stock/destinations/${destinationId}`, {
+    method: 'DELETE',
+    authenticated: true,
+  });
+}

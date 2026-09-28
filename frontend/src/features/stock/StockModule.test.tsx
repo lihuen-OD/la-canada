@@ -36,6 +36,9 @@ const api = vi.hoisted(() => ({
   updateStockItem: vi.fn(),
   updateStockDestination: vi.fn(),
   setStockItemActive: vi.fn(),
+  deleteStockCategory: vi.fn(),
+  deleteStockItem: vi.fn(),
+  deleteStockDestination: vi.fn(),
 }));
 const { useAuthMock, logoutMock, fetchTaskEmployeesMock } = vi.hoisted(() => ({
   useAuthMock: vi.fn(),
@@ -1122,16 +1125,61 @@ describe('Stock — destinos en el Catálogo (ADMIN)', () => {
     });
   });
 
-  it('lista activos e inactivos con su tipo y sin botón de borrar', async () => {
+  it('lista activos e inactivos con su tipo; Eliminar es un botón propio, distinto de Desactivar', async () => {
     renderStock('/stock/catalog');
     const list = await screen.findByRole('list', { name: 'Destinos de consumo' });
     expect(within(list).getByText(DESTINATION.name)).toBeInTheDocument();
     expect(within(list).getByText('Vehículo')).toBeInTheDocument();
     expect(within(list).getByText('Sector')).toBeInTheDocument();
     expect(within(list).getByText('Inactivo')).toBeInTheDocument();
-    expect(
-      within(list).queryByRole('button', { name: /borrar|eliminar/i }),
-    ).not.toBeInTheDocument();
+    const remove = within(list).getByRole('button', { name: `Eliminar: ${DESTINATION.name}` });
+    expect(remove).toHaveClass('button--danger');
+    expect(within(list).getByRole('button', { name: `Desactivar: ${DESTINATION.name}` })).not.toBe(
+      remove,
+    );
+  });
+
+  it('eliminar destino usado: 409 STOCK_DESTINATION_IN_USE visible; doble clic = 1 request; sin optimismo', async () => {
+    const user = userEvent.setup();
+    let reject: (error: unknown) => void = () => undefined;
+    api.deleteStockDestination.mockImplementation(
+      () => new Promise((_resolve, fail) => (reject = fail)),
+    );
+    renderStock('/stock/catalog');
+    const list = await screen.findByRole('list', { name: 'Destinos de consumo' });
+    await user.click(within(list).getByRole('button', { name: `Eliminar: ${DESTINATION.name}` }));
+    const dialog = await screen.findByRole('dialog', { name: `Eliminar «${DESTINATION.name}»` });
+    expect(dialog).toHaveTextContent('No se puede deshacer');
+    await user.dblClick(within(dialog).getByRole('button', { name: 'Eliminar definitivamente' }));
+    expect(api.deleteStockDestination).toHaveBeenCalledTimes(1);
+    // Sin actualización optimista: el destino sigue en la lista mientras se espera al backend.
+    expect(within(list).getByText(DESTINATION.name)).toBeInTheDocument();
+    reject(
+      new ApiError(
+        409,
+        'El destino ya se usó en movimientos y no se puede eliminar. Desactivalo para dejar de ofrecerlo.',
+        'STOCK_DESTINATION_IN_USE',
+      ),
+    );
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Desactivalo');
+    expect(api.updateStockDestination).not.toHaveBeenCalled();
+  });
+
+  it('eliminar producto sin historia: cierra el diálogo, avisa e invalida solo Stock', async () => {
+    const user = userEvent.setup();
+    api.deleteStockItem.mockResolvedValue(undefined);
+    const { queryClient } = renderStock('/stock/catalog');
+    const tasksKey = ['session', 'u-a', 'tasks', 'list', 'active'];
+    queryClient.setQueryData(tasksKey, { tasks: [] });
+    const products = await screen.findByRole('list', { name: 'Productos de stock' });
+    await user.click(within(products).getByRole('button', { name: `Eliminar: ${OK_ITEM.name}` }));
+    const dialog = await screen.findByRole('dialog', { name: `Eliminar «${OK_ITEM.name}»` });
+    await user.click(within(dialog).getByRole('button', { name: 'Eliminar definitivamente' }));
+    await waitFor(() => expect(api.deleteStockItem).toHaveBeenCalledWith(OK_ITEM.id));
+    expect(await screen.findByText('Producto eliminado.')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(queryClient.getQueryState(tasksKey)?.isInvalidated).toBe(false);
+    await waitFor(() => expect(api.fetchStockItems.mock.calls.length).toBeGreaterThan(1));
   });
 
   it('crear destino con tipo; el duplicado muestra un mensaje claro', async () => {

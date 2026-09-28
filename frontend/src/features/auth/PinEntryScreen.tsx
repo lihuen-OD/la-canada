@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useAuth } from '../../auth/useAuth';
 import { ApiError } from '../../api/httpClient';
+import {
+  NETWORK_ERROR_MESSAGE,
+  RATE_LIMITED_MESSAGE,
+  UNEXPECTED_ERROR_MESSAGE,
+} from '../../api/errorMessages';
 import type { LoginOption } from '../../api/types';
 import { Avatar } from '../../components/ui/Avatar';
 import { Button } from '../../components/ui/Button';
@@ -10,7 +15,18 @@ import { PinPad } from './PinPad';
 
 const PIN_LENGTH = 4;
 const GENERIC_ERROR_MESSAGE = 'Identidad o PIN incorrectos.';
-const NETWORK_ERROR_MESSAGE = 'No se pudo conectar. Intentá de nuevo.';
+
+/**
+ * Identidad/PIN incorrectos, cuenta bloqueada o inactiva: el mismo mensaje
+ * genérico (sin enumerar usuarios). El límite de intentos (429) y un servicio
+ * caído (5xx) NO son "PIN incorrecto": se dice lo que realmente pasó.
+ */
+function loginErrorMessage(error: unknown): string {
+  if (!(error instanceof ApiError)) return NETWORK_ERROR_MESSAGE;
+  if (error.status === 429) return RATE_LIMITED_MESSAGE;
+  if (error.status >= 500) return UNEXPECTED_ERROR_MESSAGE;
+  return GENERIC_ERROR_MESSAGE;
+}
 
 interface PinEntryScreenProps {
   option: LoginOption;
@@ -62,9 +78,7 @@ export function PinEntryScreen({ option, onBack }: PinEntryScreenProps) {
         })
         .catch((error: unknown) => {
           clearPin();
-          setErrorMessage(
-            error instanceof ApiError ? GENERIC_ERROR_MESSAGE : NETWORK_ERROR_MESSAGE,
-          );
+          setErrorMessage(loginErrorMessage(error));
         })
         .finally(() => {
           submittingRef.current = false;

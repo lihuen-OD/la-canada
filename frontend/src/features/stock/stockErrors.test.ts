@@ -15,7 +15,6 @@ describe('errores humanos de Stock', () => {
   });
 
   it.each([
-    ['STOCK_CATEGORY_IN_USE', 'La categoría tiene productos activos y no se puede desactivar.'],
     ['STOCK_ITEM_NOT_FOUND', 'El producto ya no existe.'],
     ['STOCK_CATEGORY_NOT_FOUND', 'La categoría ya no existe.'],
     ['STOCK_DESTINATION_NOT_FOUND', 'El destino ya no existe.'],
@@ -26,6 +25,12 @@ describe('errores humanos de Stock', () => {
     expect(
       errorMessageOf(new ApiError(code.endsWith('NOT_FOUND') ? 404 : 409, 'interno', code)),
     ).toBe(expected);
+  });
+
+  it('STOCK_CATEGORY_IN_USE usa el mensaje del backend (desactivar y eliminar explican causas distintas)', () => {
+    const message =
+      'No se puede eliminar esta categoría porque tiene productos asociados. Primero reasigná los productos o desactivá la categoría.';
+    expect(errorMessageOf(new ApiError(409, message, 'STOCK_CATEGORY_IN_USE'))).toBe(message);
   });
 
   it('conserva validaciones humanas del backend y oculta errores de red crudos', () => {

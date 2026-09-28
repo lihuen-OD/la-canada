@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { ApiError } from '../../api/httpClient';
 import { IdempotencyIntent, intentFingerprint } from '../../api/idempotency';
@@ -10,6 +10,8 @@ import {
   fetchPetRecords,
   fetchPetTypes,
   voidPetRecord,
+  deletePet,
+  setPetActive,
 } from '../../api/petsApi';
 import type {
   CreatePetRecordRequest,
@@ -28,7 +30,9 @@ import { Chip } from '../../components/ui/Chip';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
 import { AlertIcon, ArrowLeftIcon, CheckCircleIcon } from '../../components/ui/icons';
+import { Badge } from '../../components/ui/Badge';
 import { ConfirmDialog } from '../admin/ConfirmDialog';
+import { DeleteConfirmDialog } from '../admin/DeleteConfirmDialog';
 import { useSubmitGuard } from '../tasks/useSubmitGuard';
 import { PetFormDialog } from './PetFormDialog';
 import { PetPhoto } from './PetPhoto';
@@ -58,6 +62,9 @@ export function PetDetailScreen() {
   const isAdmin = user?.role === 'ADMIN';
   const { userId, enabled } = useSessionScope();
   const [editing, setEditing] = useState(false);
+  const [adminDialog, setAdminDialog] = useState<'none' | 'status' | 'delete'>('none');
+  const navigate = useNavigate();
+  const { afterPetChange, afterPetDeleted } = usePetsCache();
   const handleSessionExpired = useCallback(() => {
     void logout();
   }, [logout]);
@@ -116,7 +123,10 @@ export function PetDetailScreen() {
       <Card className="pet-profile">
         <PetPhoto pet={pet} size="lg" />
         <div className="pet-profile__text">
-          <p className="pet-profile__name">{pet.name}</p>
+          <p className="pet-profile__name">
+            {pet.name}
+            {!pet.active ? <Badge tone="neutral">Inactiva</Badge> : null}
+          </p>
           <p className="pet-profile__info">{petSummary(pet, false)}</p>
           {age ? (
             <p className="pet-profile__age">
@@ -137,9 +147,78 @@ export function PetDetailScreen() {
         ) : null}
       </Card>
 
+      {isAdmin ? (
+        <div className="pet-admin-actions" role="group" aria-label={`Acciones sobre ${pet.name}`}>
+          <Button variant="secondary" size="sm" onClick={() => setAdminDialog('status')}>
+            {pet.active ? 'Desactivar' : 'Reactivar'}
+          </Button>
+          <Button variant="danger" size="sm" onClick={() => setAdminDialog('delete')}>
+            Eliminar
+          </Button>
+        </div>
+      ) : null}
+
       <PetKpis detail={detail} />
-      <RecordForm petId={pet.id} today={detail.today} onSessionExpired={handleSessionExpired} />
+      {pet.active ? (
+        <RecordForm petId={pet.id} today={detail.today} onSessionExpired={handleSessionExpired} />
+      ) : (
+        <p className="notice notice--warning" role="status">
+          Mascota inactiva: su historia se conserva, pero no admite registros nuevos
+          {isAdmin ? '. Reactivala para volver a registrar datos.' : '.'}
+        </p>
+      )}
       <RecordHistory petId={pet.id} isAdmin={isAdmin} onSessionExpired={handleSessionExpired} />
+
+      {adminDialog === 'status' ? (
+        <ConfirmDialog
+          title={pet.active ? `Desactivar «${pet.name}»` : `Reactivar «${pet.name}»`}
+          description={
+            pet.active
+              ? 'Para una mascota que murió, se entregó o ya no está. Deja de aparecer en el listado y no admite registros nuevos. No se borra nada: su historia clínica y sus fotos se conservan y podés reactivarla.'
+              : 'La mascota vuelve al listado y admite registros nuevos.'
+          }
+          confirmLabel={pet.active ? 'Desactivar' : 'Reactivar'}
+          tone={pet.active ? 'danger' : 'default'}
+          onCancel={() => setAdminDialog('none')}
+          onConfirm={async () => {
+            try {
+              await setPetActive(pet.id, !pet.active);
+            } catch (caught) {
+              if (isSessionExpired(caught)) {
+                setAdminDialog('none');
+                handleSessionExpired();
+                return;
+              }
+              throw humanError(caught);
+            }
+            setAdminDialog('none');
+            afterPetChange(pet.id);
+          }}
+        />
+      ) : null}
+
+      {adminDialog === 'delete' ? (
+        <DeleteConfirmDialog
+          entityLabel="la mascota"
+          name={pet.name}
+          keepWhen="ya tiene registros clínicos o fotos"
+          onCancel={() => setAdminDialog('none')}
+          onConfirm={async () => {
+            try {
+              await deletePet(pet.id);
+            } catch (caught) {
+              if (isSessionExpired(caught)) {
+                setAdminDialog('none');
+                handleSessionExpired();
+                return;
+              }
+              throw humanError(caught);
+            }
+            afterPetDeleted(pet.id);
+            void navigate('/pets', { replace: true });
+          }}
+        />
+      ) : null}
 
       {editing && typesQuery.data ? (
         <PetFormDialog

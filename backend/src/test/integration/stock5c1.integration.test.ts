@@ -572,7 +572,7 @@ describe('Idempotency-Key — rollback real en Postgres', () => {
         // Error no operacional inyectado → 500 genérico (fuera de production el
         // errorHandler adjunta `stack`, comportamiento preexistente de desarrollo).
         expect(failed.status).toBe(500);
-        expect(failed.body.error.message).toBe('Error interno del servidor');
+        expect(failed.body.error.message).toBe('Ocurrió un error inesperado. Intentá nuevamente.');
       } finally {
         resetFaults();
       }

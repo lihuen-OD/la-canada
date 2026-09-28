@@ -226,7 +226,7 @@ beforeEach(() => {
 });
 
 const AUTH_REQUIRED = {
-  error: { message: 'Autenticación requerida.', code: 'AUTH_REQUIRED' },
+  error: { message: 'Tu sesión venció. Volvé a ingresar.', code: 'AUTH_REQUIRED' },
 };
 const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
 

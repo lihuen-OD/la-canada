@@ -76,7 +76,9 @@ describe('ficha y tipos', () => {
     expect(ok(createPetTypeBodySchema, { name: 'Ternero', icon: '🦖' })).toBe(false);
   });
   it('listado paginado (máx. 50)', () => {
-    expect(listPetsQuerySchema.parse({})).toEqual({ page: 1, pageSize: 24 });
+    expect(listPetsQuerySchema.parse({})).toEqual({ status: 'active', page: 1, pageSize: 24 });
+    expect(ok(listPetsQuerySchema, { status: 'inactive' })).toBe(true);
+    expect(ok(listPetsQuerySchema, { status: 'deleted' })).toBe(false);
     expect(ok(listPetsQuerySchema, { pageSize: '51' })).toBe(false);
   });
 });

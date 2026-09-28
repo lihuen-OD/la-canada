@@ -21,6 +21,8 @@ export async function fetchPetTypes(
 
 export async function fetchPets(params: {
   typeId?: string;
+  /** `inactive`/`all`: solo ADMIN (el backend responde 403 al resto). */
+  status?: 'active' | 'inactive' | 'all';
   page: number;
   pageSize: number;
 }): Promise<PetsListResponse> {
@@ -29,6 +31,7 @@ export async function fetchPets(params: {
     pageSize: String(params.pageSize),
   });
   if (params.typeId) search.set('typeId', params.typeId);
+  if (params.status && params.status !== 'active') search.set('status', params.status);
   return apiRequest<PetsListResponse>(`/pets?${search.toString()}`, { authenticated: true });
 }
 
@@ -123,10 +126,30 @@ export async function createPetType(body: {
   });
 }
 
-export async function deactivatePetType(typeId: string): Promise<unknown> {
+/** Desactivar o reactivar un tipo agregado (los precargados no cambian). */
+export async function setPetTypeActive(typeId: string, active: boolean): Promise<unknown> {
   return apiRequest<unknown>(`/pets/types/${typeId}/status`, {
     method: 'PATCH',
-    body: { active: false },
+    body: { active },
     authenticated: true,
   });
+}
+
+/** Eliminar un tipo agregado que ninguna mascota usa (409 `PET_TYPE_IN_USE` si no). */
+export async function deletePetType(typeId: string): Promise<void> {
+  return apiRequest<void>(`/pets/types/${typeId}`, { method: 'DELETE', authenticated: true });
+}
+
+/** Desactivar (murió, se entregó, ya no está) o reactivar una mascota. */
+export async function setPetActive(petId: string, active: boolean): Promise<PetDetailResponse> {
+  return apiRequest<PetDetailResponse>(`/pets/${petId}/status`, {
+    method: 'PATCH',
+    body: { active },
+    authenticated: true,
+  });
+}
+
+/** Eliminar una mascota creada por error (409 `ANIMAL_IN_USE` si tiene historia). */
+export async function deletePet(petId: string): Promise<void> {
+  return apiRequest<void>(`/pets/${petId}`, { method: 'DELETE', authenticated: true });
 }

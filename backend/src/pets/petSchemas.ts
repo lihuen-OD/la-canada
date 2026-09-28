@@ -75,11 +75,17 @@ export const createPetTypeBodySchema = z
   })
   .strict();
 
-export const petTypeStatusBodySchema = z.object({ active: z.literal(false) }).strict();
+/** Solo tipos agregados: desactivar (`false`) o reactivar (`true`). */
+export const petTypeStatusBodySchema = z.object({ active: z.boolean() }).strict();
+
+/** Mascota: desactivar (murió, se entregó, ya no está) o reactivar. */
+export const petStatusBodySchema = z.object({ active: z.boolean() }).strict();
 
 export const listPetsQuerySchema = z
   .object({
     typeId: uuidSchema.optional(),
+    /** `inactive`/`all` solo ADMIN (el servicio lo impone). */
+    status: z.enum(['active', 'inactive', 'all']).default('active'),
     page: pageSchema,
     pageSize: pageSizeSchema(50, 24),
   })

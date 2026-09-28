@@ -234,3 +234,7 @@ Endpoints autenticados y rango Zod de hasta 90 días. El backend fuerza sesión 
 - **Personas**: la baja de una persona revoca sus sesiones y la saca del selector de ingreso; el login la rechaza con el error genérico de siempre. `/auth/me` y el login no exponen el estado interno del empleado.
 - **Clima**: el navegador no llama a servicios externos; el backend consulta Open-Meteo con timeout, valida la respuesta con Zod y nunca propaga errores del proveedor.
 - Idempotencia (`Idempotency-Key`) en el alta de novedades, hijos y fotos. Sin storage del navegador ni datos mock en runtime. `production` no se tocó.
+
+## Actualización — Eliminación definitiva (Etapa 5E)
+
+Solo ADMIN (verificado en el backend, nunca solo en la UI); nada con historia se borra físicamente; auditoría con snapshot antes del borrado, sin PIN, hashes, tokens ni binarios; los errores de Postgres/Prisma nunca se exponen: la FK solo se traduce dentro de la eliminación (`*_IN_USE`) y cualquier otro error no controlado responde «Ocurrió un error inesperado. Intentá nuevamente.». Todo mensaje público está en español (códigos estables en inglés); Zod usa un mapa de mensajes en español para los casos sin mensaje propio; el rate limit responde `429 RATE_LIMITED` y el login lo muestra como tal, sin confundirlo con «Identidad o PIN incorrectos.».

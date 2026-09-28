@@ -195,17 +195,23 @@ export async function addMyChild(
 export async function removeMyChild(actor: TaskActor, childId: string, meta: RequestMeta) {
   const employeeId = requireEmployee(actor);
   await prisma.$transaction(async (tx) => {
-    const { count } = await tx.employeeChild.deleteMany({ where: { id: childId, employeeId } });
-    if (count === 0) throw new ChildNotFoundError();
+    // Snapshot mínimo antes de borrar: de quién era y el nombre (sin fecha de nacimiento).
+    const child = await tx.employeeChild.findFirst({
+      where: { id: childId, employeeId },
+      select: { name: true },
+    });
+    if (!child) throw new ChildNotFoundError();
     await recordAuditLog(tx, {
       actorUserId: actor.userId,
       action: 'profile.child_removed',
       entityType: 'EmployeeChild',
       entityId: childId,
-      previousState: { employeeId },
+      previousState: { employeeId, name: child.name },
       ipAddress: meta.ipAddress,
       userAgent: meta.userAgent,
     });
+    const { count } = await tx.employeeChild.deleteMany({ where: { id: childId, employeeId } });
+    if (count === 0) throw new ChildNotFoundError();
   });
   return { child: { id: childId, removed: true } };
 }

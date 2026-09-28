@@ -36,6 +36,8 @@ interface TaskFormDialogProps {
   onCancel: () => void;
   onCreate: (body: CreateTaskRequest) => Promise<void>;
   onUpdate: (taskId: string, body: UpdateTaskRequest) => Promise<void>;
+  /** Solo en edición (ADMIN): abre la confirmación de eliminación definitiva. */
+  onDelete?: (task: TaskItem) => void;
 }
 
 export function TaskFormDialog({
@@ -44,6 +46,7 @@ export function TaskFormDialog({
   onCancel,
   onCreate,
   onUpdate,
+  onDelete,
 }: TaskFormDialogProps) {
   const titleId = useId();
   const [description, setDescription] = useState(task?.description ?? '');
@@ -185,6 +188,23 @@ export function TaskFormDialog({
             {isEdit ? 'Guardar cambios' : 'Crear tarea'}
           </Button>
         </div>
+
+        {task && onDelete ? (
+          <div className="danger-zone">
+            <p className="danger-zone__text">
+              ¿Se creó por error? Eliminarla es definitivo y solo es posible si nunca se completó.
+              Si ya tiene historial, desactivala desde el listado.
+            </p>
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={isSubmitting}
+              onClick={() => onDelete(task)}
+            >
+              Eliminar tarea
+            </Button>
+          </div>
+        ) : null}
       </form>
     </Modal>
   );

@@ -1,4 +1,5 @@
 import type { ApiErrorBody } from './types';
+import { fallbackMessageForStatus } from './errorMessages';
 import { getAccessToken } from '../auth/accessTokenStore';
 import { requestRefresh } from '../auth/refreshCoordinator';
 
@@ -26,9 +27,14 @@ export class ApiError extends Error {
 async function parseErrorBody(response: Response): Promise<ApiError> {
   try {
     const body = (await response.json()) as ApiErrorBody;
-    return new ApiError(response.status, body.error.message, body.error.code);
+    const message =
+      typeof body?.error?.message === 'string' && body.error.message.trim()
+        ? body.error.message
+        : fallbackMessageForStatus(response.status);
+    return new ApiError(response.status, message, body?.error?.code);
   } catch {
-    return new ApiError(response.status, `Error ${response.status} al llamar a la API.`, undefined);
+    // Respuesta no JSON (proxy, caída del servicio): texto humano por código, nunca el crudo.
+    return new ApiError(response.status, fallbackMessageForStatus(response.status), undefined);
   }
 }
 

@@ -108,7 +108,45 @@ describe('PinEntryScreen', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).not.toMatch(/incorrect/i);
-    expect(alert).toHaveTextContent(/no se pudo conectar/i);
+    expect(alert).toHaveTextContent(
+      'No pudimos conectar con el servidor. Revisá tu conexión e intentá nuevamente.',
+    );
+  });
+
+  it('429: explica que hay que esperar, nunca «PIN incorrecto», y conserva la protección', async () => {
+    loginMock.mockRejectedValue(
+      new ApiError(
+        429,
+        'Realizaste demasiados intentos. Esperá unos minutos antes de volver a intentar.',
+        'RATE_LIMITED',
+      ),
+    );
+    render(<PinEntryScreen option={OPTION} onBack={vi.fn()} />);
+    await userEvent.setup().keyboard('0000');
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(
+      'Realizaste demasiados intentos. Esperá unos minutos antes de volver a intentar.',
+    );
+    expect(alert.textContent).not.toMatch(/incorrect/i);
+  });
+
+  it('credenciales, bloqueo o cuenta inactiva: el mismo mensaje genérico (sin enumerar); 5xx es inesperado', async () => {
+    for (const [status, code] of [
+      [401, 'AUTH_INVALID_CREDENTIALS'],
+      [403, 'AUTH_ACCOUNT_LOCKED'],
+    ] as const) {
+      loginMock.mockRejectedValueOnce(new ApiError(status, 'detalle que no se muestra', code));
+      const view = render(<PinEntryScreen option={OPTION} onBack={vi.fn()} />);
+      await userEvent.setup().keyboard('0000');
+      expect(await screen.findByRole('alert')).toHaveTextContent('Identidad o PIN incorrectos.');
+      view.unmount();
+    }
+    loginMock.mockRejectedValueOnce(new ApiError(500, 'x', undefined));
+    render(<PinEntryScreen option={OPTION} onBack={vi.fn()} />);
+    await userEvent.setup().keyboard('0000');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Ocurrió un error inesperado. Intentá nuevamente.',
+    );
   });
 
   it('previene doble envío: dos intentos casi simultáneos de completar el PIN solo llaman a login una vez', async () => {

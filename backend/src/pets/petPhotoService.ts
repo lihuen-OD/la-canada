@@ -5,6 +5,7 @@ import {
   ForbiddenError,
   ObjectStorageNotConfiguredError,
   ObjectStorageUnavailableError,
+  PetInactiveError,
   PetNotFoundError,
   PetPhotoInvalidError,
   PetPhotoNotFoundError,
@@ -157,8 +158,9 @@ export async function uploadPetPhoto(
   const declared = input.declaredType?.split(';')[0]?.trim().toLowerCase();
   if (!mime || declared !== mime) throw new PetPhotoInvalidError();
 
-  const pet = await prisma.animal.findUnique({ where: { id: petId }, select: { id: true } });
+  const pet = await prisma.animal.findUnique({ where: { id: petId }, select: { active: true } });
   if (!pet) throw new PetNotFoundError();
+  if (!pet.active) throw new PetInactiveError();
 
   const objectKey = `animals/${petId.toLowerCase()}/${randomUUID()}.${EXTENSION[mime]}`;
   const file = await prisma.fileAsset.create({

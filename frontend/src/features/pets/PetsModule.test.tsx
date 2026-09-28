@@ -28,7 +28,10 @@ const api = vi.hoisted(() => ({
   uploadPetPhoto: vi.fn(),
   removePetPhoto: vi.fn(),
   createPetType: vi.fn(),
-  deactivatePetType: vi.fn(),
+  setPetTypeActive: vi.fn(),
+  deletePetType: vi.fn(),
+  setPetActive: vi.fn(),
+  deletePet: vi.fn(),
 }));
 const { useAuthMock, logoutMock } = vi.hoisted(() => ({
   useAuthMock: vi.fn(),
@@ -97,7 +100,12 @@ describe('🐾 Mascotas — listado', () => {
     expect(card).toHaveTextContent('🐕 Perro · Raza sintética · 2 años');
     expect(card).toHaveTextContent('⚖️ 12,5 kg');
     expect(card).toHaveTextContent('🎂 Cumple en 15 días');
-    expect(api.fetchPets).toHaveBeenCalledWith({ typeId: undefined, page: 1, pageSize: 24 });
+    expect(api.fetchPets).toHaveBeenCalledWith({
+      typeId: undefined,
+      status: 'active',
+      page: 1,
+      pageSize: 24,
+    });
   });
 
   it('EMPLOYEE no ve "+ Tipo" ni "+ Mascota"; filtrar por tipo pide ese listado', async () => {
@@ -110,6 +118,7 @@ describe('🐾 Mascotas — listado', () => {
     await waitFor(() =>
       expect(api.fetchPets).toHaveBeenLastCalledWith({
         typeId: TYPE_DOG.id,
+        status: 'active',
         page: 1,
         pageSize: 24,
       }),
@@ -147,11 +156,11 @@ describe('🐾 Mascotas — listado', () => {
     expect(await screen.findByRole('heading', { level: 1, name: PET.name })).toBeInTheDocument();
   });
 
-  it('ADMIN: "Gestionar tipos" — sin "×" en precargados, símbolo sugiere nombre, baja con confirmación', async () => {
+  it('ADMIN: "Gestionar tipos" — precargados sin acciones, símbolo sugiere nombre, Desactivar ≠ Eliminar', async () => {
     const user = userEvent.setup();
     asAdmin();
     api.createPetType.mockResolvedValue({ type: { ...TYPE_CUSTOM, name: 'Ternero' } });
-    api.deactivatePetType.mockResolvedValue({});
+    api.setPetTypeActive.mockResolvedValue({});
     renderPets();
     await user.click(await screen.findByRole('button', { name: '+ Tipo' }));
     const dialog = await screen.findByRole('dialog');
@@ -165,15 +174,119 @@ describe('🐾 Mascotas — listado', () => {
       expect(api.createPetType).toHaveBeenCalledWith({ name: 'Ternero', icon: '🐂' }),
     );
 
+    expect(
+      within(dialog).queryByRole('button', { name: 'Desactivar el tipo Perro' }),
+    ).not.toBeInTheDocument();
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Desactivar el tipo Tipo sintético' }),
+    );
+    const confirm = await screen.findByRole('dialog', {
+      name: 'Desactivar el tipo «Tipo sintético»',
+    });
+    expect(confirm).toHaveTextContent('Las mascotas de este tipo no se borran');
+    await user.click(within(confirm).getByRole('button', { name: 'Desactivar' }));
+    await waitFor(() => expect(api.setPetTypeActive).toHaveBeenCalledWith(TYPE_CUSTOM.id, false));
+    expect(api.deletePetType).not.toHaveBeenCalled();
+  });
+
+  it('ADMIN: eliminar un tipo agregado — confirmación irreversible, 409 PET_TYPE_IN_USE visible, doble clic = 1 request', async () => {
+    const user = userEvent.setup();
+    asAdmin();
+    let reject: (error: unknown) => void = () => undefined;
+    api.deletePetType.mockImplementation(() => new Promise((_resolve, fail) => (reject = fail)));
+    renderPets();
+    await user.click(await screen.findByRole('button', { name: '+ Tipo' }));
+    const dialog = await screen.findByRole('dialog');
     await user.click(
       within(dialog).getByRole('button', { name: 'Eliminar el tipo Tipo sintético' }),
     );
-    const confirm = await screen.findByRole('dialog', {
-      name: /¿Eliminar el tipo "Tipo sintético"\?/,
-    });
-    expect(confirm).toHaveTextContent('Las mascotas de este tipo no se borran.');
-    await user.click(within(confirm).getByRole('button', { name: 'Eliminar' }));
-    await waitFor(() => expect(api.deactivatePetType).toHaveBeenCalledWith(TYPE_CUSTOM.id));
+    const confirm = await screen.findByRole('dialog', { name: 'Eliminar «Tipo sintético»' });
+    expect(confirm).toHaveTextContent('No se puede deshacer');
+    expect(confirm).toHaveTextContent('«Desactivar»');
+    const button = within(confirm).getByRole('button', { name: 'Eliminar definitivamente' });
+    await user.dblClick(button);
+    expect(api.deletePetType).toHaveBeenCalledTimes(1);
+    reject(
+      new ApiError(
+        409,
+        'Hay mascotas de este tipo y no se puede eliminar. Desactivalo para no ofrecerlo en mascotas nuevas.',
+        'PET_TYPE_IN_USE',
+      ),
+    );
+    expect(await within(confirm).findByRole('alert')).toHaveTextContent(/Desactivalo/);
+    expect(api.setPetTypeActive).not.toHaveBeenCalled();
+  });
+
+  it('ADMIN filtra por estado (Activas / Inactivas / Todas); EMPLOYEE no ve el filtro', async () => {
+    const user = userEvent.setup();
+    asAdmin();
+    renderPets();
+    const group = await screen.findByRole('group', { name: 'Filtrar por estado' });
+    await user.click(within(group).getByRole('button', { name: 'Inactivas' }));
+    await waitFor(() =>
+      expect(api.fetchPets).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: 'inactive', page: 1 }),
+      ),
+    );
+  });
+});
+
+describe('🐾 Mascotas — ficha: desactivar y eliminar (ADMIN)', () => {
+  it('EMPLOYEE no ve Desactivar ni Eliminar', async () => {
+    renderPets(`/pets/${PET.id}`);
+    await screen.findByRole('heading', { level: 1, name: PET.name });
+    expect(screen.queryByRole('group', { name: /Acciones sobre/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Eliminar' })).not.toBeInTheDocument();
+  });
+
+  it('Desactivar pide confirmación (conserva historia) y usa el endpoint de estado, nunca DELETE', async () => {
+    const user = userEvent.setup();
+    asAdmin();
+    api.setPetActive.mockResolvedValue(detailResponse(makePet({ active: false })));
+    renderPets(`/pets/${PET.id}`);
+    const actions = await screen.findByRole('group', { name: `Acciones sobre ${PET.name}` });
+    await user.click(within(actions).getByRole('button', { name: 'Desactivar' }));
+    const confirm = await screen.findByRole('dialog', { name: `Desactivar «${PET.name}»` });
+    expect(confirm).toHaveTextContent('No se borra nada');
+    await user.click(within(confirm).getByRole('button', { name: 'Desactivar' }));
+    await waitFor(() => expect(api.setPetActive).toHaveBeenCalledWith(PET.id, false));
+    expect(api.deletePet).not.toHaveBeenCalled();
+    await waitFor(() => expect(api.fetchPet).toHaveBeenCalledTimes(2));
+  });
+
+  it('una mascota inactiva muestra «Inactiva», ofrece Reactivar y no admite registros nuevos', async () => {
+    asAdmin();
+    api.fetchPet.mockResolvedValue(detailResponse(makePet({ active: false })));
+    renderPets(`/pets/${PET.id}`);
+    const actions = await screen.findByRole('group', { name: `Acciones sobre ${PET.name}` });
+    expect(within(actions).getByRole('button', { name: 'Reactivar' })).toBeInTheDocument();
+    expect(screen.getByText('Inactiva')).toBeInTheDocument();
+    expect(screen.queryByRole('form', { name: 'Nuevo registro' })).not.toBeInTheDocument();
+    expect(screen.getByText(/no admite registros nuevos/)).toBeInTheDocument();
+  });
+
+  it('Eliminar: 409 ANIMAL_IN_USE se muestra y no navega; sin historia, 204 → vuelve al listado', async () => {
+    const user = userEvent.setup();
+    asAdmin();
+    api.deletePet.mockRejectedValueOnce(
+      new ApiError(
+        409,
+        'La mascota ya tiene historia clínica o fotos y no se puede eliminar. Desactivala para conservar su historia.',
+        'ANIMAL_IN_USE',
+      ),
+    );
+    renderPets(`/pets/${PET.id}`);
+    const actions = await screen.findByRole('group', { name: `Acciones sobre ${PET.name}` });
+    await user.click(within(actions).getByRole('button', { name: 'Eliminar' }));
+    const confirm = await screen.findByRole('dialog', { name: `Eliminar «${PET.name}»` });
+    await user.click(within(confirm).getByRole('button', { name: 'Eliminar definitivamente' }));
+    expect(await within(confirm).findByRole('alert')).toHaveTextContent('Desactivala');
+    expect(screen.getByRole('heading', { level: 1, name: PET.name })).toBeInTheDocument();
+
+    api.deletePet.mockResolvedValueOnce(undefined);
+    await user.click(within(confirm).getByRole('button', { name: 'Eliminar definitivamente' }));
+    expect(await screen.findByRole('heading', { level: 1, name: /Mascotas/ })).toBeInTheDocument();
+    expect(api.deletePet).toHaveBeenCalledTimes(2);
   });
 });
 

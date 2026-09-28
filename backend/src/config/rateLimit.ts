@@ -29,7 +29,13 @@ export function createApiRateLimiter(): RequestHandler {
     legacyHeaders: false,
     // Las imágenes tienen su propio cupo: una grilla de fotos no agota el de la API.
     skip: isImageRead,
-    message: { error: { message: 'Demasiadas solicitudes. Intentá de nuevo más tarde.' } },
+    message: {
+      error: {
+        message:
+          'Realizaste demasiadas solicitudes. Esperá unos minutos antes de volver a intentar.',
+        code: 'RATE_LIMITED',
+      },
+    },
   });
 }
 
@@ -47,7 +53,13 @@ export function createImageRateLimiter(): RequestHandler {
     standardHeaders: true,
     legacyHeaders: false,
     skip: (req) => !isImageRead(req),
-    message: { error: { message: 'Demasiadas solicitudes. Intentá de nuevo más tarde.' } },
+    message: {
+      error: {
+        message:
+          'Realizaste demasiadas solicitudes. Esperá unos minutos antes de volver a intentar.',
+        code: 'RATE_LIMITED',
+      },
+    },
   });
 }
 
@@ -69,6 +81,11 @@ export function createAuthRateLimiter(): RequestHandler {
     limit: AUTH_MAX_REQUESTS,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: { message: 'Demasiados intentos. Intentá de nuevo más tarde.' } },
+    message: {
+      error: {
+        message: 'Realizaste demasiados intentos. Esperá unos minutos antes de volver a intentar.',
+        code: 'RATE_LIMITED',
+      },
+    },
   });
 }

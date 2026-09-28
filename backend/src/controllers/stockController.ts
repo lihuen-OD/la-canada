@@ -23,6 +23,9 @@ import {
   createStockDestination,
   createStockItem,
   createStockMovement,
+  deleteStockCategory,
+  deleteStockDestination,
+  deleteStockItem,
   getStockItem as getStockItemDetail,
   listStockCategories,
   listStockDestinations,
@@ -243,4 +246,28 @@ export async function getStockReportCsvHandler(req: Request, res: Response): Pro
     `attachment; filename="consumos_lacanada.csv"; filename*=UTF-8''${encodeURIComponent(filename)}`,
   );
   res.status(200).send(content);
+}
+
+// ── Eliminación definitiva (204; 409 *_IN_USE si tiene historia) ──────────
+
+function noContent(res: Response): void {
+  res.set('Cache-Control', 'no-store').status(204).end();
+}
+
+export async function deleteStockCategoryHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  await deleteStockCategory(actor, stockIdFrom(req), requestMeta(req));
+  noContent(res);
+}
+
+export async function deleteStockItemHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  await deleteStockItem(actor, stockIdFrom(req), requestMeta(req));
+  noContent(res);
+}
+
+export async function deleteStockDestinationHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  await deleteStockDestination(actor, stockIdFrom(req), requestMeta(req));
+  noContent(res);
 }

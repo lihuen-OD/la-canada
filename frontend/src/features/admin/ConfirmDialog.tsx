@@ -4,8 +4,7 @@ import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { AlertIcon } from '../../components/ui/icons';
 import { ApiError } from '../../api/httpClient';
-
-const NETWORK_ERROR_MESSAGE = 'No se pudo conectar. Intentá de nuevo.';
+import { NETWORK_ERROR_MESSAGE } from '../../api/errorMessages';
 
 export interface ConfirmDialogProps {
   title: string;

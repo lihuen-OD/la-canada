@@ -1,11 +1,12 @@
 import { ApiError } from '../../api/httpClient';
 
-export const NETWORK_ERROR_MESSAGE = 'No se pudo conectar. Intentá de nuevo.';
+import { NETWORK_ERROR_MESSAGE } from '../../api/errorMessages';
+
+export { NETWORK_ERROR_MESSAGE };
 
 const STOCK_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   STOCK_INSUFFICIENT_QUANTITY: 'La reducción supera el stock disponible.',
   STOCK_BALANCE_LIMIT: 'El incremento superaría el saldo máximo permitido.',
-  STOCK_CATEGORY_IN_USE: 'La categoría tiene productos activos y no se puede desactivar.',
   STOCK_ITEM_NOT_FOUND: 'El producto ya no existe.',
   STOCK_CATEGORY_NOT_FOUND: 'La categoría ya no existe.',
   STOCK_DESTINATION_NOT_FOUND: 'El destino ya no existe.',

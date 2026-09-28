@@ -31,7 +31,7 @@ const db = vi.hoisted(() => {
     },
     idempotencyRecord: { findUnique: fn(), create: fn(), update: fn() },
     employeeProfile: { findUnique: fn(), upsert: fn() },
-    employeeChild: { findMany: fn(), create: fn(), deleteMany: fn() },
+    employeeChild: { findMany: fn(), findFirst: fn(), create: fn(), deleteMany: fn() },
     propertyLocation: { findUnique: fn() },
     auditLog: { create: fn() },
     $transaction: fn(),
@@ -413,10 +413,26 @@ describe('👤 Mi perfil — siempre la persona de la sesión', () => {
   });
 
   it('un hijo solo se elimina del propio perfil', async () => {
-    db.employeeChild.deleteMany.mockResolvedValue({ count: 0 });
+    db.employeeChild.findFirst.mockResolvedValue(null);
     await expect(removeMyChild(EMPLOYEE, ID, META)).rejects.toMatchObject({
       code: 'CHILD_NOT_FOUND',
     });
+    expect(db.employeeChild.findFirst.mock.calls[0]?.[0]).toMatchObject({
+      where: { id: ID, employeeId: 'emp-1' },
+    });
+    expect(db.employeeChild.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('eliminar un hijo propio audita un snapshot mínimo (nombre, sin fecha) antes de borrar', async () => {
+    db.employeeChild.findFirst.mockResolvedValue({ name: 'Hijo sintético' });
+    db.employeeChild.deleteMany.mockResolvedValue({ count: 1 });
+    await removeMyChild(EMPLOYEE, ID, META);
+    const audit = db.auditLog.create.mock.calls.at(-1)?.[0].data;
+    expect(audit).toMatchObject({
+      action: 'profile.child_removed',
+      previousState: { employeeId: 'emp-1', name: 'Hijo sintético' },
+    });
+    expect(JSON.stringify(audit.previousState)).not.toMatch(/birth/i);
     expect(db.employeeChild.deleteMany.mock.calls[0]?.[0]).toEqual({
       where: { id: ID, employeeId: 'emp-1' },
     });

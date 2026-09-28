@@ -467,3 +467,9 @@ Cambios de esta revisión:
 - Validación: tests del calculador y del servicio, integración dirigida `performance.integration.test.ts` contra `demo` (fixtures `test-perf-<RUN>`, 0 residuos), tests frontend de Desempeño e invalidación tras completar URGENT/ONE_TIME o revertir.
 - **Inicio = Desempeño** y **fechas `dd/mm/aaaa`**: el Dashboard reutiliza `getPerformance` (sin fórmula propia; test de consistencia con los cinco tipos y la integración contra `demo`); utilidad única de fechas en el frontend, CSV de Stock en `dd/mm/aaaa`.
 - **5D.2 (sin commit)**: se retira la racha end-to-end (solo cálculo en memoria: no cambia ninguna sentencia SQL; resumen 5, detalle 6); etiquetas «Sin completar», «Le cubrieron», «Cubrió a otros»; rangos públicos 7/14/30 (90 rechazado por el backend); Inicio sigue en 7 días.
+
+## Etapa 5E — Política de eliminación, desactivación y anulación 🟡 sin commit — pendiente de revisión
+
+- Eliminación definitiva (ADMIN, solo sin historia) para tareas, categorías, productos y destinos de stock, tipos de mascota agregados y mascotas; desactivación/reactivación de mascotas (nueva) y reactivación de tipos agregados. Sin migraciones.
+- Validación: tests unitarios (política común por entidad, estado de mascotas, FK en el `errorHandler`), integración `deletion.integration.test.ts` contra `demo` (fixtures `test-del-<RUN>`, 0 residuos: FK real de `adapter-pg`, DELETE concurrentes 204/404, revertidas/`OPENING_BALANCE`/anulados cuentan como historia), tests frontend y revisión visual en 5 anchos, ADMIN y EMPLOYEE.
+- **Cierre 5E**: P2003 acotado a `runEntityDeletion` (sin mapeo global); catálogo de mensajes públicos en español (eliminación, sesión, permisos, rate limit `RATE_LIMITED`, red, inesperado, Zod), 404 de rutas sin exponer la URL, login distingue 429 y 5xx del PIN incorrecto.

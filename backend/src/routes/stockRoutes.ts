@@ -14,6 +14,9 @@ import {
   patchStockDestination,
   patchStockItem,
   patchStockItemStatus,
+  deleteStockCategoryHandler,
+  deleteStockDestinationHandler,
+  deleteStockItemHandler,
   postStockCategory,
   postStockDestination,
   postStockItem,
@@ -44,9 +47,12 @@ stockRouter.get('/items/:id', getStockItem);
 stockRouter.get('/items/:id/movements', getStockItemMovements);
 stockRouter.post('/categories', requireJsonContentType, postStockCategory);
 stockRouter.patch('/categories/:id', requireJsonContentType, patchStockCategory);
+stockRouter.delete('/categories/:id', deleteStockCategoryHandler);
 stockRouter.post('/destinations', requireJsonContentType, postStockDestination);
 stockRouter.patch('/destinations/:id', requireJsonContentType, patchStockDestination);
+stockRouter.delete('/destinations/:id', deleteStockDestinationHandler);
 stockRouter.post('/items', requireJsonContentType, postStockItem);
 stockRouter.patch('/items/:id', requireJsonContentType, patchStockItem);
 stockRouter.patch('/items/:id/status', requireJsonContentType, patchStockItemStatus);
+stockRouter.delete('/items/:id', deleteStockItemHandler);
 stockRouter.post('/items/:id/movements', requireJsonContentType, postStockMovement);

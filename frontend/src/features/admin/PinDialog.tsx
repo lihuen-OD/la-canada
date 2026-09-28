@@ -4,9 +4,9 @@ import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { AlertIcon } from '../../components/ui/icons';
 import { ApiError } from '../../api/httpClient';
+import { NETWORK_ERROR_MESSAGE } from '../../api/errorMessages';
 
 const PIN_PATTERN = /^\d{4}$/;
-const NETWORK_ERROR_MESSAGE = 'No se pudo conectar. Intentá de nuevo.';
 
 export interface PinDialogProps {
   /** `activate`: usuario PENDING_ACTIVATION, primer PIN. `reset`: usuario ACTIVE, cambio de PIN. */

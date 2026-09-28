@@ -11,6 +11,10 @@ import { apiV1Router } from './routes';
 import { getRoot } from './controllers/rootController';
 import { notFoundHandler } from './middleware/notFoundHandler';
 import { errorHandler } from './middleware/errorHandler';
+import { configureSpanishValidation } from './lib/zodSpanish';
+
+// Mensajes de validación por defecto en español (antes que cualquier `parse`).
+configureSpanishValidation();
 
 /**
  * Crea la app Express sin ponerla a escuchar en ningún puerto — así los

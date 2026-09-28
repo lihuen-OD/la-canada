@@ -20,6 +20,7 @@ const api = vi.hoisted(() => ({
   setTaskActive: vi.fn(),
   completeTask: vi.fn(),
   revertTaskCompletion: vi.fn(),
+  deleteTask: vi.fn(),
 }));
 const { useAuthMock, logoutMock } = vi.hoisted(() => ({
   useAuthMock: vi.fn(),
@@ -560,5 +561,68 @@ describe('TasksScreen — caché y revalidación (Etapa 5P)', () => {
     // Sincrónico: datos al instante desde la caché, sin loader.
     expect(screen.getByText(DAILY_A.description)).toBeInTheDocument();
     expect(api.fetchTasks).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('TasksScreen — eliminar (ADMIN, solo sin historia)', () => {
+  async function openDelete() {
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Editar: Tarea sintética diaria' }));
+    const form = await screen.findByRole('dialog', { name: 'Editar tarea' });
+    // Eliminar vive separado de Guardar y de Desactivar (que sigue en la fila).
+    await user.click(within(form).getByRole('button', { name: 'Eliminar tarea' }));
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Eliminar «Tarea sintética diaria»',
+    });
+    return { user, dialog };
+  }
+
+  it('EMPLOYEE no tiene cómo eliminar', async () => {
+    await renderLoaded();
+    expect(screen.queryByRole('button', { name: /eliminar/i })).not.toBeInTheDocument();
+  });
+
+  it('confirmación irreversible → DELETE, aviso e invalidación de Tareas, Desempeño e Inicio (no Stock)', async () => {
+    asAdmin();
+    api.deleteTask.mockResolvedValue(undefined);
+    api.fetchTasks.mockResolvedValue(listResponse([DAILY_A]));
+    const { queryClient } = render(<TasksScreen />, { route: '/tasks' });
+    await screen.findByText(DAILY_A.description);
+    const keys = {
+      performance: ['session', 'u-admin', 'performance', 'summary', 'a', 'b'],
+      dashboard: ['session', 'u-admin', 'dashboard'],
+      stock: ['session', 'u-admin', 'stock', 'categories', 'all'],
+    };
+    for (const key of Object.values(keys)) queryClient.setQueryData(key, {});
+    const { user, dialog } = await openDelete();
+    expect(dialog).toHaveTextContent('No se puede deshacer');
+    await user.click(within(dialog).getByRole('button', { name: 'Eliminar definitivamente' }));
+    await waitFor(() => expect(api.deleteTask).toHaveBeenCalledWith(DAILY_A.id));
+    expect(await screen.findByText('Tarea eliminada.')).toBeInTheDocument();
+    expect(queryClient.getQueryState(keys.performance)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(keys.dashboard)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(keys.stock)?.isInvalidated).toBe(false);
+    expect(api.setTaskActive).not.toHaveBeenCalled();
+  });
+
+  it('con historial: 409 TASK_IN_USE muestra «Desactivala» y no cierra; doble clic = 1 request', async () => {
+    asAdmin();
+    let reject: (error: unknown) => void = () => undefined;
+    api.deleteTask.mockImplementation(() => new Promise((_ok, fail) => (reject = fail)));
+    await renderLoaded([DAILY_A]);
+    const { user, dialog } = await openDelete();
+    await user.dblClick(within(dialog).getByRole('button', { name: 'Eliminar definitivamente' }));
+    expect(api.deleteTask).toHaveBeenCalledTimes(1);
+    reject(
+      new ApiError(
+        409,
+        'La tarea ya tiene historial (finalizaciones o fotos) y no se puede eliminar. Desactivala para conservar el historial.',
+        'TASK_IN_USE',
+      ),
+    );
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'Desactivala para conservar el historial',
+    );
+    expect(screen.getByRole('dialog', { name: 'Eliminar «Tarea sintética diaria»' })).toBe(dialog);
   });
 });

@@ -34,7 +34,7 @@ describe('/api/v1/stock — autenticación', () => {
           : await request(app).patch(path).send({});
     expect(response.status).toBe(401);
     expect(response.body).toEqual({
-      error: { message: 'Autenticación requerida.', code: 'AUTH_REQUIRED' },
+      error: { message: 'Tu sesión venció. Volvé a ingresar.', code: 'AUTH_REQUIRED' },
     });
   });
 });
@@ -42,8 +42,8 @@ describe('/api/v1/stock — autenticación', () => {
 describe('/api/v1/stock — historial inmutable', () => {
   it('no declara PUT, PATCH ni DELETE para movimientos', () => {
     const source = readFileSync(resolve(__dirname, '../../routes/stockRoutes.ts'), 'utf8');
-    expect(source).not.toMatch(/stockRouter\.(?:put|delete)\(/);
-    expect(source).not.toMatch(/stockRouter\.patch\([^\n]*movements/);
+    expect(source).not.toMatch(/stockRouter\.put\(/);
+    expect(source).not.toMatch(/stockRouter\.(?:patch|delete)\([^\n]*movements/);
   });
 });
 
@@ -55,8 +55,9 @@ describe('/api/v1/stock/destinations — alta y edición sin borrado físico', (
     expect(source).toMatch(/stockRouter\.patch\('\/destinations\/:id'/);
   });
 
-  it('no declara DELETE para destinos (la baja es inactivación)', () => {
-    expect(source).not.toMatch(/stockRouter\.delete\(/);
+  it('DELETE solo para categoría, producto y destino sin historia; nunca movimientos', () => {
+    const deletes = [...source.matchAll(/stockRouter\.delete\('([^']*)'/g)].map((m) => m[1]);
+    expect(deletes.sort()).toEqual(['/categories/:id', '/destinations/:id', '/items/:id']);
     expect(source).not.toMatch(/stockRouter\.patch\([^\n]*movements/);
   });
 });

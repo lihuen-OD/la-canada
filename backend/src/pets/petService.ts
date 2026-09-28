@@ -7,9 +7,13 @@ import {
   ForbiddenError,
   PetMedicalRecordAlreadyVoidedError,
   PetMedicalRecordNotFoundError,
+  AnimalInUseError,
+  PetInactiveError,
   PetNotFoundError,
   PetTypeBuiltinError,
   PetTypeDuplicateError,
+  PetTypeInUseError,
+  PetTypeMissingError,
   PetTypeNotFoundError,
   ValidationError,
 } from '../errors/AppError';
@@ -22,6 +26,7 @@ import {
 } from '../lib/businessTime';
 import { canonicalRequestHash, executeIdempotent } from '../lib/idempotency';
 import { getObjectStorage } from '../lib/objectStorage';
+import { runEntityDeletion } from '../lib/deletion';
 import { prisma } from '../lib/prisma';
 import { resolveActor, type RequestMeta, type TaskActor } from '../tasks/tasksService';
 import {
@@ -256,34 +261,70 @@ export async function createPetType(actor: PetActor, input: CreatePetTypeInput, 
 }
 
 /**
- * "×" de un tipo (ADMIN): baja lógica. "Las mascotas de este tipo no se
- * borran" (prototipo): conservan su tipo; solo deja de ofrecerse para
- * mascotas nuevas. Los 9 precargados no se pueden dar de baja.
+ * Desactivar / reactivar un tipo agregado (ADMIN). "Las mascotas de este
+ * tipo no se borran" (prototipo): conservan su tipo; inactivo solo deja de
+ * ofrecerse para mascotas nuevas. Los 9 precargados no cambian de estado.
  */
-export async function deactivatePetType(actor: PetActor, typeId: string, meta: RequestMeta) {
-  requireAdmin(actor, 'Solo un administrador puede eliminar tipos.');
+export async function setPetTypeActive(
+  actor: PetActor,
+  typeId: string,
+  active: boolean,
+  meta: RequestMeta,
+) {
+  requireAdmin(actor, 'Solo un administrador puede cambiar tipos.');
   return prisma.$transaction(async (tx) => {
     const row = await tx.animalType.findUnique({ where: { id: typeId }, select: typeSelect });
-    if (!row) throw new PetTypeNotFoundError();
+    if (!row) throw new PetTypeMissingError();
     if (isBuiltinType(row.name)) throw new PetTypeBuiltinError();
     const { count } = await tx.animalType.updateMany({
-      where: { id: typeId, active: true },
-      data: { active: false },
+      where: { id: typeId, active: !active },
+      data: { active },
     });
     if (count > 0) {
       await recordAuditLog(tx, {
         actorUserId: actor.userId,
-        action: 'pet.type.deactivated',
+        action: active ? 'pet.type.reactivated' : 'pet.type.deactivated',
         entityType: 'AnimalType',
         entityId: typeId,
-        previousState: { active: true },
-        newState: { active: false },
+        previousState: { active: !active },
+        newState: { active },
         ipAddress: meta.ipAddress,
         userAgent: meta.userAgent,
       });
     }
-    return { type: { ...serializeType({ ...row, active: false }) } };
+    return { type: { ...serializeType({ ...row, active }) } };
   });
+}
+
+/**
+ * Eliminar un tipo AGREGADO por error (ADMIN): solo si ninguna mascota
+ * (activa o inactiva) lo usa; nunca se borran mascotas. Los 9 precargados
+ * no se eliminan.
+ */
+export async function deletePetType(actor: PetActor, typeId: string, meta: RequestMeta) {
+  requireAdmin(actor, 'Solo un administrador puede eliminar tipos.');
+  await runEntityDeletion(
+    async (tx) => {
+      const row = await tx.animalType.findUnique({ where: { id: typeId }, select: typeSelect });
+      if (!row) throw new PetTypeMissingError();
+      if (isBuiltinType(row.name)) throw new PetTypeBuiltinError();
+      if ((await tx.animal.count({ where: { animalTypeId: typeId } })) > 0) {
+        throw new PetTypeInUseError();
+      }
+      await recordAuditLog(tx, {
+        actorUserId: actor.userId,
+        action: 'pet.type.deleted',
+        entityType: 'AnimalType',
+        entityId: typeId,
+        previousState: { name: row.name, icon: row.icon, active: row.active },
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      });
+      const { count } = await tx.animalType.deleteMany({ where: { id: typeId } });
+      if (count === 0) throw new PetTypeMissingError();
+    },
+    () => new PetTypeInUseError(),
+  );
 }
 
 // ── Mascotas ──────────────────────────────────────────────────────────────
@@ -295,12 +336,19 @@ export async function deactivatePetType(actor: PetActor, typeId: string, meta: R
  * para TODA la página, nunca una por mascota).
  */
 export async function listPets(
-  _actor: PetActor,
-  filters: { typeId?: string; page: number; pageSize: number },
+  actor: PetActor,
+  filters: {
+    typeId?: string;
+    status?: 'active' | 'inactive' | 'all';
+    page: number;
+    pageSize: number;
+  },
   now = new Date(),
 ) {
+  const status = filters.status ?? 'active';
+  if (status !== 'active') requireAdmin(actor, 'Solo un administrador ve mascotas inactivas.');
   const where: Prisma.AnimalWhereInput = {
-    active: true,
+    ...(status === 'all' ? {} : { active: status === 'active' }),
     ...(filters.typeId ? { animalTypeId: filters.typeId } : {}),
   };
   const [total, rows] = await Promise.all([
@@ -454,6 +502,75 @@ export async function updatePet(
   return getPet(actor, petId, now);
 }
 
+/**
+ * Desactivar (murió, se entregó, ya no está) o reactivar una mascota
+ * (ADMIN). Inactiva: fuera del listado por defecto, visible en el filtro
+ * administrativo y en su ficha; no acepta registros ni fotos nuevas.
+ */
+export async function setPetActive(
+  actor: PetActor,
+  petId: string,
+  active: boolean,
+  meta: RequestMeta,
+  now = new Date(),
+) {
+  requireAdmin(actor, 'Solo un administrador puede cambiar el estado de una mascota.');
+  await prisma.$transaction(async (tx) => {
+    const exists = await tx.animal.count({ where: { id: petId } });
+    if (exists === 0) throw new PetNotFoundError();
+    const { count } = await tx.animal.updateMany({
+      where: { id: petId, active: !active },
+      data: { active },
+    });
+    if (count > 0) {
+      await recordAuditLog(tx, {
+        actorUserId: actor.userId,
+        action: active ? 'pet.reactivated' : 'pet.deactivated',
+        entityType: 'Animal',
+        entityId: petId,
+        previousState: { active: !active },
+        newState: { active },
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      });
+    }
+  });
+  return getPet(actor, petId, now);
+}
+
+/**
+ * Eliminar una mascota creada por error (ADMIN): solo sin ningún registro
+ * clínico (tampoco anulado) ni archivo (tampoco eliminado lógicamente). Si
+ * tiene historia → 409 ANIMAL_IN_USE ("Desactivala").
+ */
+export async function deletePet(actor: PetActor, petId: string, meta: RequestMeta) {
+  requireAdmin(actor, 'Solo un administrador puede eliminar mascotas.');
+  await runEntityDeletion(
+    async (tx) => {
+      const pet = await tx.animal.findUnique({
+        where: { id: petId },
+        select: { name: true, animalTypeId: true, breed: true, birthDate: true, active: true },
+      });
+      if (!pet) throw new PetNotFoundError();
+      const records = await tx.animalMedicalRecord.count({ where: { animalId: petId } });
+      const files = await tx.fileAsset.count({ where: { animalId: petId } });
+      if (records > 0 || files > 0) throw new AnimalInUseError();
+      await recordAuditLog(tx, {
+        actorUserId: actor.userId,
+        action: 'pet.deleted',
+        entityType: 'Animal',
+        entityId: petId,
+        previousState: { ...auditPetState(pet), active: pet.active },
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      });
+      const { count } = await tx.animal.deleteMany({ where: { id: petId } });
+      if (count === 0) throw new PetNotFoundError();
+    },
+    () => new AnimalInUseError(),
+  );
+}
+
 // ── Registros clínicos ────────────────────────────────────────────────────
 
 export async function listPetRecords(
@@ -512,7 +629,8 @@ export async function createPetRecord(
 
   const write = async (tx: Prisma.TransactionClient) => {
     const pet = await tx.animal.findUnique({ where: { id: petId }, select: { active: true } });
-    if (!pet?.active) throw new PetNotFoundError();
+    if (!pet) throw new PetNotFoundError();
+    if (!pet.active) throw new PetInactiveError();
     const row = await tx.animalMedicalRecord.create({
       data: {
         animalId: petId,

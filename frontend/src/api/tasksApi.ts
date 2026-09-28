@@ -57,6 +57,11 @@ export async function setTaskActive(
   });
 }
 
+/** Eliminación definitiva (ADMIN): solo una tarea sin historia; si no, 409 `TASK_IN_USE`. */
+export async function deleteTask(taskId: string): Promise<void> {
+  return apiRequest<void>(`/tasks/${taskId}`, { method: 'DELETE', authenticated: true });
+}
+
 /**
  * `employeeId` solo lo envía un ADMIN (quién realizó la tarea). Un EMPLOYEE
  * llama sin argumento: el backend usa su propio empleado de la sesión.

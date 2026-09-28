@@ -35,11 +35,25 @@ export function usePetsCache() {
     [queryClient, userId],
   );
 
+  /**
+   * Mascota eliminada: su ficha y su historial se quitan de la caché (no se
+   * vuelven a pedir: darían 404); listado, conteos por tipo y cumpleaños se
+   * invalidan.
+   */
+  const afterPetDeleted = useCallback(
+    (petId: string) => {
+      queryClient.removeQueries({ queryKey: queryKeys.pets.detail(userId, petId) });
+      queryClient.removeQueries({ queryKey: queryKeys.pets.records(userId, petId) });
+      afterPetChange();
+    },
+    [queryClient, userId, afterPetChange],
+  );
+
   /** Catálogo de tipos: tipos + listados/fichas (embeben nombre e ícono del tipo). */
   const afterTypeChange = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.pets.typesAll(userId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.pets.listAll(userId) });
   }, [queryClient, userId]);
 
-  return { afterRecordChange, afterPetChange, afterTypeChange };
+  return { afterRecordChange, afterPetChange, afterPetDeleted, afterTypeChange };
 }

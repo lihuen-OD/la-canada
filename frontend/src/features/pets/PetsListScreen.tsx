@@ -33,6 +33,9 @@ export function PetsListScreen() {
   const { userId, enabled } = useSessionScope();
   const { typeFilter, setTypeFilter } = usePetsModuleState();
   const [dialog, setDialog] = useState<'none' | 'pet' | 'types'>('none');
+  // Filtro administrativo de estado; un EMPLOYEE solo ve activas (lo impone el backend).
+  const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all'>('active');
+  const status = isAdmin ? statusFilter : 'active';
   const handleSessionExpired = useCallback(() => {
     void logout();
   }, [logout]);
@@ -45,9 +48,9 @@ export function PetsListScreen() {
     staleTime: STALE_TIME.catalog,
   });
   const listQuery = useInfiniteQuery({
-    queryKey: queryKeys.pets.list(userId, typeFilter),
+    queryKey: queryKeys.pets.list(userId, typeFilter, status),
     queryFn: ({ pageParam }) =>
-      fetchPets({ typeId: typeFilter ?? undefined, page: pageParam, pageSize: PAGE_SIZE }),
+      fetchPets({ typeId: typeFilter ?? undefined, status, page: pageParam, pageSize: PAGE_SIZE }),
     initialPageParam: 1,
     getNextPageParam: (last) => (last.page < last.totalPages ? last.page + 1 : undefined),
     enabled,
@@ -97,6 +100,26 @@ export function PetsListScreen() {
         }
       />
 
+      {isAdmin ? (
+        <div className="filter-scroller" role="group" aria-label="Filtrar por estado">
+          {(
+            [
+              ['active', 'Activas'],
+              ['inactive', 'Inactivas'],
+              ['all', 'Todas'],
+            ] as const
+          ).map(([value, label]) => (
+            <Chip
+              key={value}
+              selected={statusFilter === value}
+              onSelect={() => setStatusFilter(value)}
+            >
+              {label}
+            </Chip>
+          ))}
+        </div>
+      ) : null}
+
       <div className="filter-scroller" role="group" aria-label="Filtrar por tipo">
         <Chip selected={typeFilter === null} onSelect={() => setTypeFilter(null)}>
           Todas
@@ -145,7 +168,13 @@ export function PetsListScreen() {
                     <Link to={`/pets/${pet.id}`} className="pet-card">
                       <PetPhoto pet={pet} size="md" />
                       <span className="pet-card__body">
-                        <span className="pet-card__name">{pet.name}</span>
+                        <span className="pet-card__name">
+                          {pet.name}
+                          {!pet.active ? (
+                            <span className="visually-hidden"> (inactiva)</span>
+                          ) : null}
+                        </span>
+                        {!pet.active ? <span className="pet-card__inactive">Inactiva</span> : null}
                         <span className="pet-card__meta">{petSummary(pet)}</span>
                         {pet.lastWeight ? (
                           <span className="pet-card__weight">

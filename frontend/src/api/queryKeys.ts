@@ -83,8 +83,11 @@ export const queryKeys = {
       [...scope(userId), 'pets', 'types', status] as const,
     typesAll: (userId: string) => [...scope(userId), 'pets', 'types'] as const,
     /** Listado paginado (`useInfiniteQuery`) por filtro de tipo. */
-    list: (userId: string, typeId: string | null) =>
-      [...scope(userId), 'pets', 'list', typeId ?? 'all'] as const,
+    list: (
+      userId: string,
+      typeId: string | null,
+      status: 'active' | 'inactive' | 'all' = 'active',
+    ) => [...scope(userId), 'pets', 'list', typeId ?? 'all', status] as const,
     listAll: (userId: string) => [...scope(userId), 'pets', 'list'] as const,
     /** Ficha + KPIs de UNA mascota. */
     detail: (userId: string, petId: string) => [...scope(userId), 'pets', 'detail', petId] as const,

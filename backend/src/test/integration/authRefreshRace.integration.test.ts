@@ -138,7 +138,7 @@ describe('refresh concurrente — nunca 500, una sola rotación, revocación con
       for (const response of responses.filter((r) => r.status !== 200)) {
         expect(response.status).toBe(401);
         expect(response.body).toEqual({
-          error: { message: 'Sesión inválida o expirada.', code: 'AUTH_SESSION_INVALID' },
+          error: { message: 'Tu sesión venció. Volvé a ingresar.', code: 'AUTH_SESSION_INVALID' },
         });
       }
       expect(await activeSessions()).toBe(0);

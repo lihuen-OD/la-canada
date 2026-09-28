@@ -11,13 +11,16 @@ import {
   IdempotencyKeyInvalidError,
   IdempotencyRecordPendingError,
   StockBalanceLimitError,
+  StockCategoryHasItemsError,
   StockCategoryInUseError,
   StockCategoryInactiveError,
   StockCategoryNotFoundError,
   StockDestinationDuplicateError,
+  StockDestinationInUseError,
   StockDestinationInactiveError,
   StockDestinationNotFoundError,
   StockInsufficientQuantityError,
+  StockItemInUseError,
   StockItemInactiveError,
   StockItemNotFoundError,
   ValidationError,
@@ -28,6 +31,7 @@ import {
   parseLocalDate,
   toLocalDate,
 } from '../lib/businessTime';
+import { runEntityDeletion } from '../lib/deletion';
 import { prisma } from '../lib/prisma';
 import { resolveActor, type RequestMeta, type TaskActor } from '../tasks/tasksService';
 import { buildStockLevelIdsSql, computeStockLevel, type StockLevel } from './stockLevel';
@@ -1091,4 +1095,130 @@ export async function createStockMovement(
     // movimiento ni auditoría.
     return { kind: 'replay', status: record.responseStatus, body: record.responseBody };
   }
+}
+
+// ── Eliminación definitiva (ADMIN, solo sin historia) ─────────────────────
+//
+// Misma receta en las tres: transacción, verificación de dependencias con
+// `count` DENTRO de la transacción, auditoría con snapshot antes de borrar,
+// `deleteMany` condicionado (un segundo DELETE simultáneo ve 0 filas → 404)
+// y clave foránea rota por una dependencia agregada en paralelo → 409. Nunca
+// se borra en cascada ni se toca el ledger de movimientos.
+
+/** Categoría sin ningún producto (activo o inactivo). */
+export async function deleteStockCategory(
+  actor: StockActor,
+  categoryId: string,
+  meta: RequestMeta,
+): Promise<void> {
+  requireAdmin(actor);
+  await runEntityDeletion(
+    async (tx) => {
+      const category = await tx.stockCategory.findUnique({
+        where: { id: categoryId },
+        select: { name: true, area: true, active: true },
+      });
+      if (!category) throw new StockCategoryNotFoundError();
+      if ((await tx.stockItem.count({ where: { categoryId } })) > 0) {
+        throw new StockCategoryHasItemsError();
+      }
+      await recordAuditLog(tx, {
+        actorUserId: actor.userId,
+        action: 'stock.category.deleted',
+        entityType: 'StockCategory',
+        entityId: categoryId,
+        previousState: { ...category },
+        ...meta,
+      });
+      const { count } = await tx.stockCategory.deleteMany({ where: { id: categoryId } });
+      if (count === 0) throw new StockCategoryNotFoundError();
+    },
+    () => new StockCategoryHasItemsError(),
+  );
+}
+
+/**
+ * Producto sin ningún movimiento (tampoco `OPENING_BALANCE`) y con saldo
+ * exactamente 0: los productos del seed tienen apertura y solo se desactivan.
+ */
+export async function deleteStockItem(
+  actor: StockActor,
+  itemId: string,
+  meta: RequestMeta,
+): Promise<void> {
+  requireAdmin(actor);
+  await runEntityDeletion(
+    async (tx) => {
+      const item = await tx.stockItem.findUnique({
+        where: { id: itemId },
+        select: {
+          name: true,
+          area: true,
+          categoryId: true,
+          unit: true,
+          minimumQuantity: true,
+          currentQuantity: true,
+          active: true,
+        },
+      });
+      if (!item) throw new StockItemNotFoundError();
+      const movements = await tx.stockMovement.count({ where: { stockItemId: itemId } });
+      if (movements > 0 || !item.currentQuantity.isZero()) throw new StockItemInUseError();
+      await recordAuditLog(tx, {
+        actorUserId: actor.userId,
+        action: 'stock.item.deleted',
+        entityType: 'StockItem',
+        entityId: itemId,
+        previousState: {
+          ...item,
+          minimumQuantity: item.minimumQuantity.toString(),
+          currentQuantity: item.currentQuantity.toString(),
+        },
+        ...meta,
+      });
+      // El saldo se vuelve a exigir en 0 en la misma sentencia de borrado.
+      const { count } = await tx.stockItem.deleteMany({
+        where: { id: itemId, currentQuantity: 0 },
+      });
+      if (count === 0) {
+        const stillThere = await tx.stockItem.count({ where: { id: itemId } });
+        throw stillThere > 0 ? new StockItemInUseError() : new StockItemNotFoundError();
+      }
+    },
+    () => new StockItemInUseError(),
+  );
+}
+
+/** Destino nunca usado en un movimiento. */
+export async function deleteStockDestination(
+  actor: StockActor,
+  destinationId: string,
+  meta: RequestMeta,
+): Promise<void> {
+  requireAdmin(actor);
+  await runEntityDeletion(
+    async (tx) => {
+      const destination = await tx.consumptionDestination.findUnique({
+        where: { id: destinationId },
+        select: { name: true, type: true, active: true },
+      });
+      if (!destination) throw new StockDestinationNotFoundError();
+      if ((await tx.stockMovement.count({ where: { destinationId } })) > 0) {
+        throw new StockDestinationInUseError();
+      }
+      await recordAuditLog(tx, {
+        actorUserId: actor.userId,
+        action: 'stock.destination.deleted',
+        entityType: 'ConsumptionDestination',
+        entityId: destinationId,
+        previousState: { ...destination },
+        ...meta,
+      });
+      const { count } = await tx.consumptionDestination.deleteMany({
+        where: { id: destinationId },
+      });
+      if (count === 0) throw new StockDestinationNotFoundError();
+    },
+    () => new StockDestinationInUseError(),
+  );
 }

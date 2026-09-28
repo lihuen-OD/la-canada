@@ -7,6 +7,7 @@ import {
   getTasks,
   patchTask,
   patchTaskStatus,
+  deleteTaskHandler,
   postTask,
   postTaskCompletion,
   postTaskRevert,
@@ -28,5 +29,6 @@ tasksRouter.get('/history', getTaskHistory);
 tasksRouter.post('/', requireJsonContentType, postTask);
 tasksRouter.patch('/:id', requireJsonContentType, patchTask);
 tasksRouter.patch('/:id/status', requireJsonContentType, patchTaskStatus);
+tasksRouter.delete('/:id', deleteTaskHandler);
 tasksRouter.post('/:id/complete', requireJsonContentType, postTaskCompletion);
 tasksRouter.post('/:id/revert', requireJsonContentType, postTaskRevert);

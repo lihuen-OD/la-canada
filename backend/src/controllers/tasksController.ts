@@ -20,6 +20,7 @@ import {
   resolveActor,
   revertTaskCompletion,
   setTaskActive,
+  deleteTask,
   updateTask,
   type RequestMeta,
   type TaskActor,
@@ -95,6 +96,13 @@ export async function patchTaskStatus(req: Request, res: Response): Promise<void
   const taskId = taskIdFrom(req);
   const { active } = parseOrThrow(taskStatusBodySchema, req.body, 'El body debe incluir active.');
   send(res, 200, await setTaskActive(actor, taskId, active, requestMeta(req)));
+}
+
+/** `DELETE /tasks/:id` — solo una tarea sin historia; si no, 409 TASK_IN_USE. */
+export async function deleteTaskHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  await deleteTask(actor, taskIdFrom(req), requestMeta(req));
+  res.set('Cache-Control', 'no-store').status(204).end();
 }
 
 export async function postTaskCompletion(req: Request, res: Response): Promise<void> {

@@ -13,6 +13,7 @@ const db = vi.hoisted(() => {
       findUnique: fn(),
       create: fn(),
       update: fn(),
+      updateMany: fn(),
       findMany: fn(),
       count: fn(),
       groupBy: fn(),
@@ -46,7 +47,9 @@ import {
   createPet,
   createPetRecord,
   createPetType,
-  deactivatePetType,
+  listPets,
+  setPetActive,
+  setPetTypeActive,
   updatePet,
   voidPetRecord,
   type PetActor,
@@ -88,7 +91,7 @@ describe('permisos ADMIN (admin-only del prototipo)', () => {
     ['agregar mascota', () => createPet(EMPLOYEE, { name: 'X', animalTypeId: TYPE_ID }, META)],
     ['editar mascota', () => updatePet(EMPLOYEE, PET_ID, { name: 'X' }, META)],
     ['agregar tipo', () => createPetType(EMPLOYEE, { name: 'Ternero', icon: '🐂' }, META)],
-    ['eliminar tipo', () => deactivatePetType(EMPLOYEE, TYPE_ID, META)],
+    ['desactivar tipo', () => setPetTypeActive(EMPLOYEE, TYPE_ID, false, META)],
     ['eliminar registro', () => voidPetRecord(EMPLOYEE, PET_ID, PET_ID, META)],
     [
       'cambiar foto',
@@ -115,7 +118,7 @@ describe('tipos', () => {
       icon: '🐕',
       active: true,
     });
-    await expect(deactivatePetType(ADMIN, TYPE_ID, META)).rejects.toMatchObject({
+    await expect(setPetTypeActive(ADMIN, TYPE_ID, false, META)).rejects.toMatchObject({
       code: 'PET_TYPE_BUILTIN',
     });
     db.animalType.findUnique.mockResolvedValueOnce({
@@ -125,9 +128,23 @@ describe('tipos', () => {
       active: true,
     });
     db.animalType.updateMany.mockResolvedValue({ count: 1 });
-    const result = await deactivatePetType(ADMIN, TYPE_ID, META);
+    const result = await setPetTypeActive(ADMIN, TYPE_ID, false, META);
     expect(result.type).toMatchObject({ active: false, builtin: false });
     expect(db.auditLog.create.mock.calls[0]?.[0].data.action).toBe('pet.type.deactivated');
+    // Reactivar un tipo agregado: condicionado a que esté inactivo, auditado.
+    db.animalType.findUnique.mockResolvedValueOnce({
+      id: TYPE_ID,
+      name: 'Ternero',
+      icon: '🐂',
+      active: false,
+    });
+    const reactivated = await setPetTypeActive(ADMIN, TYPE_ID, true, META);
+    expect(reactivated.type).toMatchObject({ active: true });
+    expect(db.animalType.updateMany).toHaveBeenLastCalledWith({
+      where: { id: TYPE_ID, active: false },
+      data: { active: true },
+    });
+    expect(db.auditLog.create.mock.calls[1]?.[0].data.action).toBe('pet.type.reactivated');
   });
 
   it('duplicado activo → 409 "Este tipo ya existe."; inactivo → se reactiva con su nuevo símbolo', async () => {
@@ -296,7 +313,7 @@ describe('fotos', () => {
   it('flujo: PENDING_UPLOAD → PUT → AVAILABLE; la anterior pasa a baja lógica y luego se borra', async () => {
     const storage = fakeStorage();
     setObjectStorageForTests(storage);
-    db.animal.findUnique.mockResolvedValue({ id: PET_ID });
+    db.animal.findUnique.mockResolvedValue({ id: PET_ID, active: true });
     db.fileAsset.create.mockResolvedValue({ id: 'file-new' });
     db.$queryRaw.mockResolvedValue([{ id: PET_ID }]);
     db.fileAsset.findMany.mockResolvedValue([{ id: 'file-old', objectKey: 'animals/x/old.jpg' }]);
@@ -339,7 +356,7 @@ describe('fotos', () => {
     setObjectStorageForTests(
       fakeStorage({ putObject: vi.fn(async () => Promise.reject(new Error('boom'))) }),
     );
-    db.animal.findUnique.mockResolvedValue({ id: PET_ID });
+    db.animal.findUnique.mockResolvedValue({ id: PET_ID, active: true });
     db.fileAsset.create.mockResolvedValue({ id: 'file-new' });
     await expect(
       uploadPetPhoto(
@@ -354,5 +371,72 @@ describe('fotos', () => {
       data: { status: 'UPLOAD_FAILED' },
     });
     expect(db.$transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('estado de la mascota (desactivar / reactivar)', () => {
+  it('EMPLOYEE no cambia el estado ni ve inactivas', async () => {
+    await expect(setPetActive(EMPLOYEE, PET_ID, false, META)).rejects.toMatchObject({
+      statusCode: 403,
+    });
+    await expect(
+      listPets(EMPLOYEE, { status: 'inactive', page: 1, pageSize: 24 }),
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('ADMIN desactiva y reactiva, condicionado al estado previo y auditado', async () => {
+    db.animal.count.mockResolvedValue(1);
+    db.animal.updateMany.mockResolvedValue({ count: 1 });
+    db.animal.findUnique.mockResolvedValue(null); // getPet posterior: irrelevante acá
+    await setPetActive(ADMIN, PET_ID, false, META).catch(() => undefined);
+    expect(db.animal.updateMany).toHaveBeenLastCalledWith({
+      where: { id: PET_ID, active: true },
+      data: { active: false },
+    });
+    expect(db.auditLog.create.mock.calls.at(-1)?.[0].data.action).toBe('pet.deactivated');
+    await setPetActive(ADMIN, PET_ID, true, META).catch(() => undefined);
+    expect(db.animal.updateMany).toHaveBeenLastCalledWith({
+      where: { id: PET_ID, active: false },
+      data: { active: true },
+    });
+    expect(db.auditLog.create.mock.calls.at(-1)?.[0].data.action).toBe('pet.reactivated');
+  });
+
+  it('inexistente → 404', async () => {
+    db.animal.count.mockResolvedValue(0);
+    await expect(setPetActive(ADMIN, PET_ID, false, META)).rejects.toMatchObject({
+      code: 'PET_NOT_FOUND',
+    });
+  });
+
+  it('filtro ADMIN: activas por defecto, inactivas y todas', async () => {
+    db.animal.count.mockResolvedValue(0);
+    db.animal.findMany.mockResolvedValue([]);
+    for (const [status, where] of [
+      ['active', { active: true }],
+      ['inactive', { active: false }],
+      ['all', {}],
+    ] as const) {
+      await listPets(ADMIN, { status, page: 1, pageSize: 24 });
+      expect(db.animal.findMany.mock.calls.at(-1)?.[0].where).toEqual(where);
+    }
+  });
+
+  it('una mascota inactiva no acepta registros ni fotos nuevas (409 PET_INACTIVE)', async () => {
+    db.animal.findUnique.mockResolvedValue({ active: false });
+    await expect(
+      createPetRecord(ADMIN, PET_ID, { type: 'VACCINE', recordDate: '2026-09-25' }, META, NOW),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'PET_INACTIVE' });
+    setObjectStorageForTests(fakeStorage());
+    await expect(
+      uploadPetPhoto(
+        ADMIN,
+        PET_ID,
+        { body: JPEG, declaredType: 'image/jpeg', filename: undefined },
+        META,
+      ),
+    ).rejects.toMatchObject({ code: 'PET_INACTIVE' });
+    expect(db.fileAsset.create).not.toHaveBeenCalled();
   });
 });

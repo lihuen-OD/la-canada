@@ -295,3 +295,23 @@ Repetido aquí por completitud del pedido original — el detalle completo y el 
 - No contiene Clima, Mascotas ni accesos rápidos: esas pantallas existen en sus módulos, pero no eran widgets del Inicio original.
 - **Desempeño en Inicio (5D)**: mismo cálculo y mismo período predeterminado (últimos 7 días) que Tareas → Desempeño; ADMIN ve "Avance del equipo" con el cumplimiento personal de cada persona, EMPLOYEE ve "Mi desempeño" solo con sus cifras. El KPI "Tareas completadas" sigue siendo operativo (período vigente) y no se mezcla con el cumplimiento personal.
 - **Fechas**: toda fecha completa visible se muestra `dd/mm/aaaa` (con hora, `dd/mm/aaaa HH:mm`); se conservan los relativos del diseño ("Hoy", "Mañana", "hace 2 días") y las etiquetas parciales de grillas/gráficos (día y mes).
+
+## Política de eliminación, desactivación y anulación (Etapa 5E)
+
+| Entidad | Editar | Desactivar / reactivar | Eliminar definitivo (solo ADMIN) | Anular / revertir |
+| --- | --- | --- | --- | --- |
+| Tarea | ADMIN | ADMIN | Solo sin ninguna ejecución (tampoco revertida) ni archivo → si no, `409 TASK_IN_USE`. Sus intervalos técnicos se borran en la misma transacción. | Ejecución: reversión auditada |
+| Categoría de stock | ADMIN | ADMIN (no con productos activos) | Solo sin ningún producto (activo o inactivo) → `409 STOCK_CATEGORY_IN_USE` | — |
+| Producto de stock | ADMIN | ADMIN | Solo sin ningún movimiento (tampoco `OPENING_BALANCE`) y saldo 0 → `409 STOCK_ITEM_IN_USE`. Los 14 del seed solo se desactivan. | — |
+| Destino | ADMIN | ADMIN | Solo si nunca se usó en un movimiento → `409 STOCK_DESTINATION_IN_USE` | — |
+| Movimiento de stock | Nunca | — | Nunca | Ledger inmutable (correcciones por ajuste) |
+| Tipo de mascota | — | ADMIN, solo agregados (los 9 precargados no cambian) | Solo agregados y sin ninguna mascota (activa o inactiva) → `409 PET_TYPE_IN_USE` / `409 PET_TYPE_BUILTIN` | — |
+| Mascota | ADMIN | ADMIN (murió, se entregó, ya no está); inactiva: fuera del listado por defecto, filtro ADMIN Activas/Inactivas/Todas, sin registros ni fotos nuevas (`409 PET_INACTIVE`) | Solo sin registros clínicos (tampoco anulados) ni archivos (tampoco eliminados lógicamente) → `409 ANIMAL_IN_USE` | Registro clínico: anulación |
+| Recolección / gallinero | — | — | Nunca | Recolección: anulación; ajustes de gallinas con historial |
+| Evento | ADMIN | — | Nunca físico | Anulación lógica (también para eventos futuros) |
+| Foto (galería / mascota) | — | — | El objeto se borra del almacenamiento; el `FileAsset` queda como baja lógica | Baja lógica |
+| Novedad | — | — | No (historia operativa; el prototipo tampoco borraba) | — |
+| Usuario / empleado | ADMIN | Estados (suspender, deshabilitar, reactivar) | No (sesiones, auditoría e historia) | — |
+| Hijo (Mi perfil) | Propietario | — | Propietario, como en el prototipo (sin dependencias; auditado con snapshot mínimo) | — |
+
+Toda eliminación: `DELETE` explícito, `204`/`403`/`404`/`409 *_IN_USE`, transacción con verificación de dependencias por `count` dentro de ella, auditoría con snapshot (sin PIN, hashes ni binarios) escrita antes del borrado, borrado condicionado (dos DELETE simultáneos → `204` + `404`) y clave foránea rota por una dependencia agregada en paralelo → el mismo `409 *_IN_USE` de la entidad (nunca `500`). La traducción de la FK solo ocurre dentro de la eliminación: fuera de ella, un P2003 inesperado es un error genérico («Ocurrió un error inesperado. Intentá nuevamente.»), sin detalles. Sin `ON DELETE CASCADE` y sin borrar historia para poder eliminar.
