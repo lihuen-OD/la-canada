@@ -297,15 +297,50 @@ describe('Gallinero — sin configuración real', () => {
 describe('Gallinero — ADMIN', () => {
   beforeEach(asAdmin);
 
+  it('da de baja varias gallinas en una sola operación y confirma el total', async () => {
+    const user = userEvent.setup();
+    api.adjustChickenCoopHens.mockResolvedValue({
+      coop: { configured: true, activeHensCount: 6, updatedAt: null },
+    });
+    await renderScreen();
+    await user.click(screen.getByRole('button', { name: 'Dar de baja gallinas' }));
+    const formDialog = await screen.findByRole('dialog');
+    await user.clear(within(formDialog).getByLabelText('Cantidad de gallinas'));
+    await user.type(within(formDialog).getByLabelText('Cantidad de gallinas'), '4');
+    await user.click(within(formDialog).getByRole('button', { name: 'Continuar' }));
+    const confirmation = await screen.findByRole('dialog');
+    expect(confirmation).toHaveTextContent('Dar de baja 4 gallinas');
+    expect(confirmation).toHaveTextContent('Gallinas activas: de 10 a 6.');
+    await user.click(within(confirmation).getByRole('button', { name: 'Confirmar baja' }));
+    await waitFor(() => expect(api.adjustChickenCoopHens).toHaveBeenCalledWith(-4, 10));
+  });
+
+  it('no deja confirmar una baja mayor que las gallinas disponibles', async () => {
+    const user = userEvent.setup();
+    await renderScreen();
+    await user.click(screen.getByRole('button', { name: 'Dar de baja gallinas' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.clear(within(dialog).getByLabelText('Cantidad de gallinas'));
+    await user.type(within(dialog).getByLabelText('Cantidad de gallinas'), '11');
+    await user.click(within(dialog).getByRole('button', { name: 'Continuar' }));
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      'La cantidad final debe estar entre 0',
+    );
+    expect(api.adjustChickenCoopHens).not.toHaveBeenCalled();
+  });
+
   it('"+ Alta" confirma "¿Cambiar gallinas activas de 10 a 11?" y envía la cantidad confirmada', async () => {
     const user = userEvent.setup();
     api.adjustChickenCoopHens.mockResolvedValue({
       coop: { configured: true, activeHensCount: 11, updatedAt: null },
     });
     await renderScreen();
-    await user.click(screen.getByRole('button', { name: 'Dar de alta una gallina' }));
+    await user.click(screen.getByRole('button', { name: 'Dar de alta gallinas' }));
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Continuar' }),
+    );
     const dialog = await screen.findByRole('dialog');
-    expect(dialog).toHaveTextContent('¿Cambiar gallinas activas de 10 a 11?');
+    expect(dialog).toHaveTextContent('Gallinas activas: de 10 a 11.');
     await user.click(within(dialog).getByRole('button', { name: 'Confirmar alta' }));
     await waitFor(() => expect(api.adjustChickenCoopHens).toHaveBeenCalledWith(1, 10));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
@@ -321,9 +356,12 @@ describe('Gallinero — ADMIN', () => {
       ),
     );
     await renderScreen();
-    await user.click(screen.getByRole('button', { name: 'Dar de baja una gallina' }));
+    await user.click(screen.getByRole('button', { name: 'Dar de baja gallinas' }));
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Continuar' }),
+    );
     const dialog = await screen.findByRole('dialog');
-    expect(dialog).toHaveTextContent('¿Cambiar gallinas activas de 10 a 9?');
+    expect(dialog).toHaveTextContent('Gallinas activas: de 10 a 9.');
     await user.click(within(dialog).getByRole('button', { name: 'Confirmar baja' }));
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('cambió mientras tanto');
     await waitFor(() => expect(api.fetchChickenCoopSummary).toHaveBeenCalledTimes(2));
@@ -334,7 +372,7 @@ describe('Gallinero — ADMIN', () => {
       makeSummary({ coop: { configured: true, activeHensCount: 0, updatedAt: null } }),
     );
     await renderScreen();
-    expect(screen.getByRole('button', { name: 'Dar de baja una gallina' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Dar de baja gallinas' })).toBeDisabled();
   });
 
   it('"¿Quién juntó?": elige entre empleados activos y lo envía; el actor real lo pone el backend', async () => {

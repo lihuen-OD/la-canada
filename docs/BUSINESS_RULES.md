@@ -19,6 +19,7 @@ La reconstrucción conserva las funciones y permisos del prototipo tal como los 
   - Crear/editar/eliminar eventos.
   - Alta de tipos de mascota; edición de ficha de mascota; eliminación de registros clínicos.
   - Alta/baja de gallinas (`ajustarGallinas`, botones "+ Alta"/"− Baja" con clase `admin-only`).
+    - En la app actual, el ADMIN ingresa una cantidad entera positiva por alta o baja y confirma el total anterior y el nuevo. El backend impide un saldo negativo, más de 100.000 gallinas y cambios sobre un total modificado por otra persona.
   - Ver panel "Cumplimiento por persona" y "Tareas más incumplidas" en Desempeño.
   - Ver "Configuración" y "Datos del equipo".
   - Cambiar el PIN de admin y el PIN de cualquier persona (desde Configuración → Personas).

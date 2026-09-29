@@ -264,18 +264,18 @@ describe('gallinas activas', () => {
     db.chickenCoop.updateMany.mockResolvedValue({ count: 1 });
     db.chickenCoop.findUnique.mockResolvedValue({
       id: 'coop-1',
-      activeHensCount: 4,
+      activeHensCount: 2,
       updatedAt: NOW,
     });
-    await adjustChickenCoopHens(ADMIN, { delta: -1, expectedCount: 5 }, META);
+    await adjustChickenCoopHens(ADMIN, { delta: -3, expectedCount: 5 }, META);
     expect(db.chickenCoop.updateMany.mock.calls[0]?.[0]).toEqual({
       where: { code: 'main', activeHensCount: 5 },
-      data: { activeHensCount: 4 },
+      data: { activeHensCount: 2 },
     });
     expect(db.auditLog.create.mock.calls[0]?.[0].data).toMatchObject({
       action: 'chicken_coop.hens_adjusted',
       previousState: { activeHensCount: 5 },
-      newState: { activeHensCount: 4, delta: -1 },
+      newState: { activeHensCount: 2, delta: -3 },
     });
   });
 

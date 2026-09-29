@@ -87,14 +87,17 @@ describe('otros schemas', () => {
     ).toBe(false);
   });
 
-  it('alta/baja: de a una gallina, con la cantidad confirmada', () => {
-    expect(adjustChickenCoopHensBodySchema.parse({ delta: -1, expectedCount: 4 })).toEqual({
-      delta: -1,
+  it('alta/baja: una o varias gallinas, con la cantidad confirmada', () => {
+    expect(adjustChickenCoopHensBodySchema.parse({ delta: -3, expectedCount: 4 })).toEqual({
+      delta: -3,
       expectedCount: 4,
     });
-    expect(adjustChickenCoopHensBodySchema.safeParse({ delta: 2, expectedCount: 4 }).success).toBe(
-      false,
-    );
+    expect(adjustChickenCoopHensBodySchema.parse({ delta: 2, expectedCount: 4 }).delta).toBe(2);
+    for (const delta of [0, 1.5, 100001, -100001, '2']) {
+      expect(adjustChickenCoopHensBodySchema.safeParse({ delta, expectedCount: 4 }).success).toBe(
+        false,
+      );
+    }
     expect(adjustChickenCoopHensBodySchema.safeParse({ delta: 1 }).success).toBe(false);
   });
 });

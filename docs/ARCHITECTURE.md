@@ -731,7 +731,7 @@ Schemas Zod `.strict()`; `from`/`to` son fechas de `BUSINESS_TIME_ZONE`, con má
 | `POST /collections` (+ `Idempotency-Key` opcional) | todos (persona según rol) | transacción: reserva → validación de persona → alta → auditoría → respuesta |
 | `POST /collections/:id/void` | ADMIN | `updateMany … WHERE voided_at IS NULL` + auditoría |
 | `POST /configuration` | ADMIN | alta única del singleton (unique `code`) + auditoría |
-| `POST /hens-adjustments` `{ delta: ±1, expectedCount }` | ADMIN | `updateMany … WHERE active_hens_count = expected` + auditoría |
+| `POST /hens-adjustments` `{ delta: entero distinto de 0, expectedCount }` | ADMIN | `updateMany … WHERE active_hens_count = expected` + auditoría; alta/baja de varias gallinas en una operación |
 
 Sin `PUT/PATCH/DELETE`. Auditorías: `chicken_coop.collection_created`, `chicken_coop.collection_voided`, `chicken_coop.configured`, `chicken_coop.hens_adjusted`. Idempotencia genérica en `lib/idempotency.ts` sobre `idempotency_records` (Stock conserva su implementación). Consultas secuenciales dentro de las transacciones interactivas (§21).
 
