@@ -21,13 +21,21 @@ export async function login(params: { userId: string; pin: string }): Promise<Lo
  * incluido siempre por `httpClient`). Tampoco es elegible para el
  * reintento-tras-401 — evita cualquier posibilidad de loop.
  */
-export async function refreshSession(): Promise<RefreshResponse> {
-  return apiRequest<RefreshResponse>('/auth/refresh', { method: 'POST' });
+export async function refreshSession(attemptId: string): Promise<RefreshResponse> {
+  // Etapa 5R: el intento hace idempotente el reenvío tras una respuesta perdida.
+  return apiRequest<RefreshResponse>('/auth/refresh', { method: 'POST', body: { attemptId } });
 }
 
-/** Idempotente en el backend — nunca lanza por "no había sesión". */
-export async function logoutSession(): Promise<void> {
-  return apiRequest<void>('/auth/logout', { method: 'POST' });
+/**
+ * Idempotente en el backend — nunca lanza por "no había sesión". Con un
+ * intento de refresh en duda (Etapa 5R), el backend revoca también la
+ * sucesora que ese intento pudo haber creado.
+ */
+export async function logoutSession(attemptId?: string | null): Promise<void> {
+  return apiRequest<void>('/auth/logout', {
+    method: 'POST',
+    body: attemptId ? { attemptId } : {},
+  });
 }
 
 export async function fetchMe(): Promise<MeResponse> {

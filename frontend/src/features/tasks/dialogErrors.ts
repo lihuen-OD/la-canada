@@ -1,12 +1,12 @@
 import { ApiError } from '../../api/httpClient';
 
-import { NETWORK_ERROR_MESSAGE } from '../../api/errorMessages';
+import { NETWORK_ERROR_MESSAGE, connectivityMessage } from '../../api/errorMessages';
 
 export { NETWORK_ERROR_MESSAGE };
 
 /** Mensaje humano del backend (`ApiError.message`) o de conectividad — nunca JSON crudo ni errores internos. */
 export function errorMessageOf(error: unknown): string {
-  return error instanceof ApiError ? error.message : NETWORK_ERROR_MESSAGE;
+  return error instanceof ApiError ? error.message : connectivityMessage(error);
 }
 
 /** 401 tras el refresh-y-reintento de `httpClient`: la sesión ya no es válida. */

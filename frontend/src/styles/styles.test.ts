@@ -129,7 +129,12 @@ describe('estilos — tokens y guardas', () => {
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .replace(/\/\/.*$/gm, '');
       const name = path.relative(srcDir, file);
-      expect(code, `${name} usa storage`).not.toMatch(/localStorage|sessionStorage|indexedDB/);
+      // Etapa 5R: única excepción, el intento de refresh (sin tokens; ver ese módulo).
+      const storage =
+        name === path.join('auth', 'refreshAttempt.ts')
+          ? /sessionStorage|indexedDB/
+          : /localStorage|sessionStorage|indexedDB/;
+      expect(code, `${name} usa storage`).not.toMatch(storage);
       expect(code, `${name} usa innerHTML`).not.toMatch(/dangerouslySetInnerHTML|\.innerHTML\s*=/);
     }
   });

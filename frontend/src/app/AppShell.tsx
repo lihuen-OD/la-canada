@@ -4,6 +4,7 @@ import { useAuth } from '../auth/useAuth';
 import { getRoleLabel, getUserDisplayName } from '../auth/userDisplay';
 import { Avatar } from '../components/ui/Avatar';
 import { Brand } from '../components/ui/Brand';
+import { ConnectionBanner } from '../components/ConnectionBanner';
 import { HomeIcon, UsersIcon } from '../components/ui/icons';
 import { LogoutButton } from '../features/auth/LogoutButton';
 import { APP_ROUTES, getVisibleNavigation } from '../routes/navigation';
@@ -154,6 +155,9 @@ export function AppShell() {
           <Outlet />
         </div>
       </main>
+
+      {/* Etapa 5R: aviso flotante de conectividad; nunca reemplaza ni desmonta la ruta. */}
+      <ConnectionBanner />
     </div>
   );
 }

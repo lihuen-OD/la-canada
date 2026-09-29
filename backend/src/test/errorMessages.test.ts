@@ -166,7 +166,8 @@ describe('mensajes públicos en español', () => {
     expect(source).toContain(
       'Realizaste demasiados intentos. Esperá unos minutos antes de volver a intentar.',
     );
-    expect(source.match(/code: 'RATE_LIMITED'/g)).toHaveLength(3);
+    // General, imágenes, health (Etapa 5R) y auth: los cuatro con el mismo código.
+    expect(source.match(/code: 'RATE_LIMITED'/g)).toHaveLength(4);
   });
 
   it('Zod sin mensaje propio responde en español; con mensaje propio lo conserva', () => {

@@ -122,6 +122,26 @@ const envSchema = z.object({
       .default(DEFAULT_BUSINESS_TIME_ZONE),
   ),
 
+  /**
+   * Etapa 5R — cuántos proxies propios hay delante del backend (ver
+   * `config/trustProxy.ts`). `0` (por defecto): no se confía en
+   * `X-Forwarded-For` y `req.ip` es la dirección del socket. Solo un número
+   * chico de saltos: nunca `true` (confiar en toda la cadena dejaría a
+   * cualquier cliente elegir su IP y esquivar los rate limits).
+   */
+  TRUST_PROXY_HOPS: z.preprocess(
+    emptyStringToUndefined,
+    z.coerce
+      .number({
+        message:
+          'TRUST_PROXY_HOPS debe ser la cantidad de proxies delante del backend (0 a 3), nunca "true".',
+      })
+      .int('TRUST_PROXY_HOPS debe ser un número entero de 0 a 3.')
+      .min(0, 'TRUST_PROXY_HOPS debe ser un número entero de 0 a 3.')
+      .max(3, 'TRUST_PROXY_HOPS debe ser un número entero de 0 a 3.')
+      .default(0),
+  ),
+
   OBJECT_STORAGE_ENDPOINT: z.string().optional(),
   OBJECT_STORAGE_REGION: z.string().optional(),
   OBJECT_STORAGE_BUCKET: z.string().optional(),

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { personDisplayNameSchema } from '../lib/personName';
 import { PIN_PATTERN } from './pin';
+import { REFRESH_ATTEMPT_ID_PATTERN } from './tokens';
 
 const PIN_MESSAGE = 'El PIN debe tener exactamente 4 dígitos (0-9).';
 
@@ -58,3 +59,18 @@ export const listUsersQuerySchema = z.object({
   status: z.enum(['PENDING_ACTIVATION', 'ACTIVE', 'SUSPENDED', 'DEACTIVATED']).optional(),
   role: z.enum(['ADMIN', 'EMPLOYEE']).optional(),
 });
+
+/**
+ * Etapa 5R — body opcional de `POST /auth/refresh` y `POST /auth/logout`:
+ * el intento de refresh en curso del cliente. Sin body, `{}` o sin
+ * `attemptId`, el servidor se comporta como antes (intento aleatorio: sin
+ * reenvío posible).
+ */
+export const refreshAttemptBodySchema = z
+  .object({
+    attemptId: z
+      .string()
+      .regex(REFRESH_ATTEMPT_ID_PATTERN, 'El identificador del intento no es válido.')
+      .optional(),
+  })
+  .strict();

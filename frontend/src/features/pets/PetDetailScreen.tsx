@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { ApiError } from '../../api/httpClient';
+import { OfflineError } from '../../api/transportErrors';
 import { IdempotencyIntent, intentFingerprint } from '../../api/idempotency';
 import {
   createPetRecord,
@@ -356,7 +357,7 @@ function RecordForm({
           setPhase('idle');
         }
         setError(
-          caught instanceof ApiError && caught.status < 500
+          (caught instanceof ApiError && caught.status < 500) || caught instanceof OfflineError
             ? errorMessageOf(caught)
             : 'No pudimos confirmar el registro. Podés reintentar: no se guardará dos veces.',
         );

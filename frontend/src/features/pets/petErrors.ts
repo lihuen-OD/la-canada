@@ -1,6 +1,6 @@
 import { ApiError } from '../../api/httpClient';
 
-import { NETWORK_ERROR_MESSAGE } from '../../api/errorMessages';
+import { NETWORK_ERROR_MESSAGE, connectivityMessage } from '../../api/errorMessages';
 
 export { NETWORK_ERROR_MESSAGE };
 
@@ -13,7 +13,7 @@ const MESSAGES: Readonly<Record<string, string>> = {
 };
 
 export function errorMessageOf(error: unknown): string {
-  if (!(error instanceof ApiError)) return NETWORK_ERROR_MESSAGE;
+  if (!(error instanceof ApiError)) return connectivityMessage(error);
   return (error.code && MESSAGES[error.code]) || error.message;
 }
 

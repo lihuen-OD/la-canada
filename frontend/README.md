@@ -45,6 +45,8 @@ Todas las requests usan rutas **relativas** bajo `/api` (`src/api/httpClient.ts`
   /*      /index.html                              200
   ```
 
+  `/api/v1/health` (Etapa 5R) queda cubierto por la misma regla `/api/*`: no necesita una propia, pero **no** debe quedar debajo del catch-all.
+
   **El orden importa**: la regla de `/api/*` tiene que ir *antes* que el catch-all de la SPA. Si se invierte, cualquier request a `/api/...` recibiría el `index.html` de la SPA en vez de llegar al backend, y el frontend interpretaría eso como una respuesta inválida (no como un error de red obvio).
 
   Además, para que `POST /auth/refresh`/`POST /auth/logout` no fallen con `403 AUTH_ORIGIN_INVALID` (`validateOrigin` en el backend):
@@ -138,3 +140,14 @@ O, desde la raíz del monorepo, `npm run dev`/`npm run build`/`npm run test`/etc
 Vitest + `@testing-library/react` + `@testing-library/user-event`, mismo estilo que ya usaba el resto del proyecto (`describe`/`it` en español, mocks vía `vi.mock`/`vi.stubGlobal`). Cobertura de la Etapa 3C: estados del selector de identidad (carga/vacío/error/cargado), teclado de PIN (pantalla y físico, incluido el cero inicial), prevención de doble envío, ausencia de `localStorage`/`sessionStorage`, single-flight de refresh bajo concurrencia real (incluido un test con `<StrictMode>` real), reintento único tras 401 sin loops, logout durante un refresh en vuelo, rutas protegidas. Cobertura nueva de la Etapa 3D (`/admin/users`): acceso exclusivo de `ADMIN` (anónimo → login, `EMPLOYEE` → acceso denegado), listado real sin datos inventados, estados de pantalla (carga/vacío/error con reintento), activación con validación de 4 dígitos exactos y preservación del cero inicial, coincidencia de PIN/confirmación, doble envío bloqueado, limpieza de PIN al cancelar/fallar, advertencia de revocación de sesiones en el cambio de PIN, transiciones de estado limitadas a las que el backend permite, auto-bloqueo nunca ofrecido, cambio sobre la propia cuenta terminando en `logout()` en vez de refrescar la lista, accesibilidad del diálogo (foco inicial, Escape, `aria-live`).
 
 Cobertura nueva de la Etapa 3E: app shell (solo destinos implementados, Usuarios únicamente para `ADMIN`, `aria-current` en el destino activo, landmarks), rutas futuras redirigidas, acceso denegado con salida segura, selector con una/varias identidades, nombres largos y `colorHex` inválido, teclado navegable por Tab y con ceros iniciales, PIN nunca presente en el DOM, `Modal` (foco contenido, Escape, foco restaurado, bloqueo durante el envío), badges con texto, estructura semántica del listado, Inicio sin cifras ni datos de negocio, y guardas de estilos (colores solo en tokens, `prefers-reduced-motion`, fuentes locales, zoom no bloqueado).
+
+## Arranque en frío y conectividad (Etapa 5R)
+
+- `src/connectivity/backendAvailability.ts`: coordinador único (un health en vuelo, backoff 2/4/8/10 s, pausa con la pestaña oculta o sin Internet, reset en logout). `ConnectionStatusProvider` conecta los eventos del navegador; `useWakeNotice` deriva el aviso (demora de 1,5 s, espera prolongada a los 60 s).
+- `src/api/transportErrors.ts` + `errorClassification.ts`: red, timeout y 5xx de proxy son fallas de transporte; un 5xx con el cuerpo JSON del backend es un error del servidor disponible.
+- `httpClient`: los `GET` esperan el despertar compartido y se reintentan una vez; las mutaciones nunca se repiten. TanStack Query no reintenta (`retry: false`).
+- Refresh: health → refresh → `/auth/me`. Cada refresh lleva un intento (`auth/refreshAttempt.ts`, único dato en `localStorage`: `{ id, startedAt }`, sin tokens, máx. 24 h) guardado antes de enviar; reenviarlo tras una respuesta perdida o una recarga recupera la misma sesión en el backend. Tras un fallo ambiguo no se reintenta solo: "Reintentar" (mismo intento) o "Volver a ingresar". Nunca un logout automático por una falla temporal.
+- Escrituras sin Internet: `apiRequest` las rechaza antes de enviarlas (`OfflineError`), el formulario conserva lo cargado y el reintento es manual. Las mutaciones de TanStack usan `networkMode: 'always'` (nunca quedan en pausa).
+- Componentes: `BackendWakeScreen`/`BackendWakeNotice` y `ConnectionBanner`; estilos en `styles/connectivity.css`.
+- Tests: `connectivity/backendAvailability.test.ts`, `api/httpClient.transport.test.ts`, `test/coldStart.test.tsx` (app completa con latencia simulada). `test/setup.ts` arranca cada test con el backend `online`; los tests de arranque en frío llaman a `resetBackendAvailability()`.
+- No hay keep-alive: el health solo se consulta mientras hay una falla abierta. Ver `docs/ARCHITECTURE.md` §32.

@@ -4,7 +4,7 @@ import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { AlertIcon } from '../../components/ui/icons';
 import { ApiError } from '../../api/httpClient';
-import { NETWORK_ERROR_MESSAGE } from '../../api/errorMessages';
+import { connectivityMessage } from '../../api/errorMessages';
 
 export interface ConfirmDialogProps {
   title: string;
@@ -44,7 +44,7 @@ export function ConfirmDialog({
 
     onConfirm()
       .catch((error: unknown) => {
-        setErrorMessage(error instanceof ApiError ? error.message : NETWORK_ERROR_MESSAGE);
+        setErrorMessage(error instanceof ApiError ? error.message : connectivityMessage(error));
       })
       .finally(() => {
         submittingRef.current = false;

@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { createEggCollection } from '../../api/chickenCoopApi';
 import type { CreateEggCollectionRequest } from '../../api/chickenCoopTypes';
 import { ApiError } from '../../api/httpClient';
+import { OfflineError } from '../../api/transportErrors';
 import { IdempotencyIntent, intentFingerprint } from '../../api/idempotency';
 import { STALE_TIME } from '../../api/queryClient';
 import { queryKeys } from '../../api/queryKeys';
@@ -166,7 +167,7 @@ export function CollectionForm({ today, onSessionExpired }: CollectionFormProps)
           setPhase('idle');
         }
         setError(
-          caught instanceof ApiError && caught.status < 500
+          (caught instanceof ApiError && caught.status < 500) || caught instanceof OfflineError
             ? errorMessageOf(caught)
             : 'No pudimos confirmar el registro. Podés reintentar: no se registrará dos veces.',
         );

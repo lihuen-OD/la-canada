@@ -6,12 +6,19 @@ import {
 } from '../errors/AppError';
 import { verifyAgainstDummy, verifyPin } from './pin';
 import {
+  deriveSuccessorRefreshToken,
+  generateRefreshAttemptId,
   generateRefreshToken,
   hashRefreshToken,
   signAccessToken,
   type AccessTokenClaims,
 } from './tokens';
-import { accessTokenSecret, accessTokenTtlSeconds, refreshTokenTtlSeconds } from './config';
+import {
+  accessTokenSecret,
+  accessTokenTtlSeconds,
+  refreshRotationKey,
+  refreshTokenTtlSeconds,
+} from './config';
 import { recordAuditLog, recordAuditLogSafe } from './auditLog';
 
 export interface RequestMeta {
@@ -333,13 +340,32 @@ export interface RefreshResult {
 type RotationOutcome =
   | { kind: 'invalid' }
   | {
-      kind: 'rotated';
+      /** `replayed`: reenvío idempotente de una rotación ya hecha por el mismo intento. */
+      kind: 'rotated' | 'replayed';
       accessToken: string;
       refreshToken: string;
       previousSessionId: string;
       newSessionId: string;
       userId: string;
     };
+
+/**
+ * Etapa 5R — hasta cuándo un intento puede reproducir la sucesora que ya
+ * generó. Cubre una respuesta perdida seguida de un reintento, una recarga o
+ * reabrir la pestaña al día siguiente. Pasado este plazo, la sucesora intacta
+ * se revoca (queda huérfana) y se responde 401 — nunca se revocan las
+ * sesiones de otros dispositivos por esto.
+ */
+export const REFRESH_REPLAY_WINDOW_SECONDS = 24 * 60 * 60;
+
+/** Lo que un pedido de refresh presenta: el token viejo y la sucesora que le corresponde a su intento. */
+interface RotationRequest {
+  tokenHash: string;
+  successorToken: string;
+  successorHash: string;
+}
+
+type SessionRow = { id: string; userId: string };
 
 /** Revoca todas las sesiones activas de un usuario y audita el motivo — usado tanto ante reuso clásico como ante una carrera de rotación concurrente detectada. */
 async function revokeAllActiveSessionsAndAudit(
@@ -362,6 +388,78 @@ async function revokeAllActiveSessionsAndAudit(
     ipAddress: params.ipAddress,
     userAgent: params.userAgent,
   });
+}
+
+/**
+ * Etapa 5R — ¿este mismo intento ya rotó `session`? Si la sucesora derivada
+ * de (token presentado, intento) existe, es del mismo usuario y sigue
+ * INTACTA (nunca se usó para rotar: `revokedAt` nulo), la rotación ya se hizo
+ * y solo se perdió la respuesta: se devuelve la MISMA sucesora con un access
+ * token nuevo, sin crear otra sesión.
+ *
+ * No es una ventana de gracia: un token rotado presentado con otro intento
+ * (o sin intento) nunca coincide y sigue siendo reuso; una sucesora ya usada
+ * tampoco coincide (quien la recibió ya rotó); y fuera de
+ * `REFRESH_REPLAY_WINDOW_SECONDS` la sucesora huérfana se revoca. Si un
+ * tercero reproduce el intento, obtiene la misma sucesora que el cliente
+ * legítimo: el primero que la rote deja al otro con un token revocado y la
+ * detección de reuso actúa como siempre.
+ *
+ * `null` = no hay rotación previa de este intento: quien llama decide (reuso).
+ */
+async function replayPristineSuccessor(
+  db: Prisma.TransactionClient,
+  session: SessionRow,
+  request: RotationRequest,
+  params: RequestMeta,
+): Promise<RotationOutcome | null> {
+  const successor = await db.session.findUnique({
+    where: { refreshTokenHash: request.successorHash },
+    select: { id: true, userId: true, revokedAt: true, expiresAt: true, createdAt: true },
+  });
+  const now = Date.now();
+  if (
+    !successor ||
+    successor.userId !== session.userId ||
+    successor.revokedAt !== null ||
+    successor.expiresAt.getTime() <= now
+  ) {
+    return null;
+  }
+  if (now - successor.createdAt.getTime() > REFRESH_REPLAY_WINDOW_SECONDS * 1000) {
+    await db.session.updateMany({
+      where: { id: successor.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    await recordAuditLog(db, {
+      actorUserId: session.userId,
+      action: 'auth.refresh.replay_expired',
+      entityType: 'Session',
+      entityId: successor.id,
+      previousState: { sessionId: session.id },
+      ipAddress: params.ipAddress,
+      userAgent: params.userAgent,
+    });
+    return { kind: 'invalid' };
+  }
+  const user = await db.user.findUnique({
+    where: { id: session.userId },
+    select: { id: true, role: true, status: true },
+  });
+  if (!user || user.status !== 'ACTIVE') return { kind: 'invalid' };
+  const accessToken = await signAccessToken(
+    { userId: user.id, sessionId: successor.id, role: user.role },
+    accessTokenSecret,
+    accessTokenTtlSeconds,
+  );
+  return {
+    kind: 'replayed',
+    accessToken,
+    refreshToken: request.successorToken,
+    previousSessionId: session.id,
+    newSessionId: successor.id,
+    userId: user.id,
+  };
 }
 
 /**
@@ -392,27 +490,44 @@ async function revokeAllActiveSessionsAndAudit(
  * bloqueada hasta que la primera confirme — al desbloquearse, Postgres
  * vuelve a evaluar el `WHERE` contra la fila ya committeada por la primera,
  * así que la segunda ve `revoked_at` ya no nulo y su `updateMany` afecta 0
- * filas. No hace falta `SERIALIZABLE` ni un `SELECT ... FOR UPDATE`
- * explícito: la propia semántica de re-chequeo del `UPDATE` en READ
- * COMMITTED ya es la exclusión mutua. Si `count !== 1`, se trata igual que
- * un reuso (no se sabe si fue una carrera benigna o un robo real corriendo
- * en paralelo a la rotación legítima): no se emite un refresh token nuevo,
- * se revocan conservadoramente todas las sesiones activas del usuario
- * (incluida la que la solicitud ganadora acababa de crear, si ya llegó a
- * confirmar), se audita, y se responde con el mismo error genérico.
+ * filas. Si `count !== 1`: si la ganadora fue el MISMO intento (una recarga
+ * mientras el primer pedido seguía en vuelo), su sucesora ya está confirmada
+ * y visible para esta sentencia nueva, y se reenvía (Etapa 5R). Si no, se
+ * trata igual que un reuso (no se sabe si fue una carrera benigna o un robo
+ * real corriendo en paralelo a la rotación legítima): no se emite un refresh
+ * token nuevo, se revocan conservadoramente todas las sesiones activas del
+ * usuario (incluida la que la solicitud ganadora acababa de crear, si ya
+ * llegó a confirmar), se audita, y se responde con el mismo error genérico.
+ *
+ * **Respuesta perdida (Etapa 5R)**: la sucesora se deriva del token
+ * presentado y del intento del cliente (`deriveSuccessorRefreshToken`). Un
+ * cliente que no recibió la respuesta reenvía el MISMO intento con el token
+ * viejo y recupera la misma sucesora (`replayPristineSuccessor`) en lugar de
+ * disparar la revocación masiva. Ver docs/ARCHITECTURE.md §32.
  */
 export async function refresh(
   prisma: PrismaClient,
-  params: { refreshToken: string } & RequestMeta,
+  params: { refreshToken: string; attemptId?: string } & RequestMeta,
 ): Promise<RefreshResult> {
-  const tokenHash = hashRefreshToken(params.refreshToken);
+  // Sin intento del cliente: uno aleatorio — ningún reenvío podrá reproducirlo.
+  const attemptId = params.attemptId ?? generateRefreshAttemptId();
+  const successorToken = deriveSuccessorRefreshToken(
+    refreshRotationKey,
+    params.refreshToken,
+    attemptId,
+  );
+  const request: RotationRequest = {
+    tokenHash: hashRefreshToken(params.refreshToken),
+    successorToken,
+    successorHash: hashRefreshToken(successorToken),
+  };
 
   let outcome: RotationOutcome;
   try {
-    outcome = await rotateSession(prisma, tokenHash, params);
+    outcome = await rotateSession(prisma, request, params);
   } catch (error) {
     if (!isTransactionUnavailable(error)) throw error;
-    outcome = await resolveInterruptedRotation(prisma, tokenHash, params);
+    outcome = await resolveInterruptedRotation(prisma, request, params);
   }
 
   if (outcome.kind === 'invalid') {
@@ -421,7 +536,7 @@ export async function refresh(
 
   await recordAuditLogSafe(prisma, {
     actorUserId: outcome.userId,
-    action: 'auth.refresh.rotated',
+    action: outcome.kind === 'replayed' ? 'auth.refresh.replayed' : 'auth.refresh.rotated',
     entityType: 'Session',
     entityId: outcome.newSessionId,
     previousState: { sessionId: outcome.previousSessionId },
@@ -456,11 +571,12 @@ function isTransactionUnavailable(error: unknown): boolean {
  * Etapa 5P — la transacción de rotación no confirmó nada (ver
  * `isTransactionUnavailable`). Se decide contra el estado REAL, releído
  * fuera de la transacción revertida:
- * - sesión revocada: otra solicitud concurrente ya consumió este token →
- *   esta es un perdedor de la carrera. Se aplica la misma respuesta de
- *   seguridad que la rama `claim.count !== 1` (revocación conservadora +
- *   auditoría) en una transacción NUEVA y corta — así el efecto de
- *   seguridad no depende de la transacción que expiró — y error genérico;
+ * - sesión revocada: otra solicitud ya consumió este token. Si fue el mismo
+ *   intento (Etapa 5R), se reenvía su sucesora intacta; si no, esta es un
+ *   perdedor de la carrera y se aplica la misma respuesta de seguridad que la
+ *   rama `claim.count !== 1` (revocación conservadora + auditoría). Ambas, en
+ *   una transacción NUEVA y corta — así el efecto no depende de la
+ *   transacción que expiró;
  * - sesión inexistente o vencida: inválida, como siempre;
  * - sesión activa y vigente: nadie la tocó — fue una falla de
  *   infraestructura sin carrera. `503` reintentable: no se rota ni se
@@ -468,11 +584,11 @@ function isTransactionUnavailable(error: unknown): boolean {
  */
 async function resolveInterruptedRotation(
   prisma: PrismaClient,
-  tokenHash: string,
+  request: RotationRequest,
   params: RequestMeta,
 ): Promise<RotationOutcome> {
   const session = await prisma.session.findUnique({
-    where: { refreshTokenHash: tokenHash },
+    where: { refreshTokenHash: request.tokenHash },
     select: { id: true, userId: true, revokedAt: true, expiresAt: true },
   });
   if (!session) return { kind: 'invalid' };
@@ -481,35 +597,43 @@ async function resolveInterruptedRotation(
     throw new SessionRefreshUnavailableError();
   }
   try {
-    await prisma.$transaction((tx) =>
-      revokeAllActiveSessionsAndAudit(tx, {
+    return await prisma.$transaction(async (tx): Promise<RotationOutcome> => {
+      const replay = await replayPristineSuccessor(tx, session, request, params);
+      if (replay) return replay;
+      await revokeAllActiveSessionsAndAudit(tx, {
         userId: session.userId,
         action: 'auth.refresh.concurrent_rotation_detected',
         relatedSessionId: session.id,
         ipAddress: params.ipAddress,
         userAgent: params.userAgent,
-      }),
-    );
+      });
+      return { kind: 'invalid' };
+    });
   } catch (error) {
     // Sin la revocación confirmada no se afirma nada: reintentable, nunca 500.
     if (isTransactionUnavailable(error)) throw new SessionRefreshUnavailableError();
     throw error;
   }
-  return { kind: 'invalid' };
 }
 
 async function rotateSession(
   prisma: PrismaClient,
-  tokenHash: string,
+  request: RotationRequest,
   params: RequestMeta,
 ): Promise<RotationOutcome> {
-  return prisma.$transaction(async (tx) => {
-    const session = await tx.session.findUnique({ where: { refreshTokenHash: tokenHash } });
+  return prisma.$transaction(async (tx): Promise<RotationOutcome> => {
+    const session = await tx.session.findUnique({
+      where: { refreshTokenHash: request.tokenHash },
+    });
     if (!session) {
       return { kind: 'invalid' };
     }
 
     if (session.revokedAt) {
+      // Token ya rotado. Si lo rotó este mismo intento y la respuesta se
+      // perdió, se reenvía su sucesora intacta (Etapa 5R).
+      const replay = await replayPristineSuccessor(tx, session, request, params);
+      if (replay) return replay;
       // Reuso de un refresh token ya revocado: posible robo. Se revocan
       // TODAS las sesiones activas de ese usuario (no solo la reusada) —
       // el modelo actual no rastrea "familias" de tokens, así que la
@@ -538,13 +662,15 @@ async function rotateSession(
     }
 
     // Toma atómica de la sesión: solo una solicitud concurrente puede ganar
-    // esta escritura condicionada (ver comentario de la función). Si otra
+    // esta escritura condicionada (ver comentario de `refresh`). Si otra
     // ya la reclamó entre nuestra lectura y este `updateMany`, `count` da 0.
     const claim = await tx.session.updateMany({
       where: { id: session.id, revokedAt: null, expiresAt: { gt: new Date() } },
       data: { revokedAt: new Date() },
     });
     if (claim.count !== 1) {
+      const replay = await replayPristineSuccessor(tx, session, request, params);
+      if (replay) return replay;
       await revokeAllActiveSessionsAndAudit(tx, {
         userId: session.userId,
         action: 'auth.refresh.concurrent_rotation_detected',
@@ -555,13 +681,10 @@ async function rotateSession(
       return { kind: 'invalid' };
     }
 
-    const newRefreshToken = generateRefreshToken();
-    const newRefreshTokenHash = hashRefreshToken(newRefreshToken);
-
     const newSession = await tx.session.create({
       data: {
         userId: user.id,
-        refreshTokenHash: newRefreshTokenHash,
+        refreshTokenHash: request.successorHash,
         ipAddress: params.ipAddress,
         userAgent: params.userAgent,
         expiresAt: new Date(Date.now() + refreshTokenTtlSeconds * 1000),
@@ -578,7 +701,7 @@ async function rotateSession(
     return {
       kind: 'rotated',
       accessToken,
-      refreshToken: newRefreshToken,
+      refreshToken: request.successorToken,
       previousSessionId: session.id,
       newSessionId: newSession.id,
       userId: user.id,
@@ -590,25 +713,46 @@ async function rotateSession(
  * Idempotente y sin revelar si el token existía: siempre "éxito" desde la
  * perspectiva del cliente. Si había una sesión activa para ese hash, se
  * revoca (nunca se borra la fila).
+ *
+ * Etapa 5R: si el token ya estaba rotado y el cliente informa el intento de
+ * refresh que quedó en duda, se revoca también la sucesora intacta que ese
+ * intento produjo — la sesión cuya respuesta nunca llegó no queda viva y
+ * huérfana. Un logout nunca dispara la detección de reuso.
  */
 export async function logout(
   prisma: PrismaClient,
-  params: { refreshToken: string | undefined } & RequestMeta,
+  params: { refreshToken: string | undefined; attemptId?: string } & RequestMeta,
 ): Promise<void> {
   if (!params.refreshToken) {
     return;
   }
   const tokenHash = hashRefreshToken(params.refreshToken);
   const session = await prisma.session.findUnique({ where: { refreshTokenHash: tokenHash } });
-  if (!session || session.revokedAt) {
+  if (!session) {
     return;
   }
-  await prisma.session.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
+  let target: string = session.id;
+  if (session.revokedAt) {
+    if (!params.attemptId) return;
+    const successorHash = hashRefreshToken(
+      deriveSuccessorRefreshToken(refreshRotationKey, params.refreshToken, params.attemptId),
+    );
+    const successor = await prisma.session.findUnique({
+      where: { refreshTokenHash: successorHash },
+    });
+    if (!successor || successor.userId !== session.userId || successor.revokedAt) return;
+    target = successor.id;
+  }
+  const revoked = await prisma.session.updateMany({
+    where: { id: target, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+  if (revoked.count !== 1) return;
   await recordAuditLogSafe(prisma, {
     actorUserId: session.userId,
     action: 'auth.logout',
     entityType: 'Session',
-    entityId: session.id,
+    entityId: target,
     ipAddress: params.ipAddress,
     userAgent: params.userAgent,
   });

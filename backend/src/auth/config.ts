@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { config } from '../config';
 
 /**
@@ -9,3 +10,14 @@ import { config } from '../config';
 export const accessTokenSecret: Uint8Array = new TextEncoder().encode(config.jwtAccessSecret);
 export const accessTokenTtlSeconds = config.accessTokenTtlSeconds;
 export const refreshTokenTtlSeconds = config.refreshTokenTtlSeconds;
+
+/**
+ * Etapa 5R — clave de derivación de sucesoras de refresh
+ * (`deriveSuccessorRefreshToken`). Derivada de `JWT_ACCESS_SECRET` con una
+ * etiqueta propia (separación de dominio): no reutiliza el secreto crudo para
+ * otro propósito y no agrega una variable de entorno más. Rotar
+ * `JWT_ACCESS_SECRET` solo invalida los reenvíos pendientes, nunca las sesiones.
+ */
+export const refreshRotationKey: Uint8Array = createHmac('sha256', config.jwtAccessSecret)
+  .update('la-canada:refresh-rotation:v1')
+  .digest();

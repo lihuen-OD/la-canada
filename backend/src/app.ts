@@ -6,7 +6,12 @@ import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
 import { config } from './config';
 import { corsOptions } from './config/cors';
-import { createApiRateLimiter, createImageRateLimiter } from './config/rateLimit';
+import { configureTrustProxy } from './config/trustProxy';
+import {
+  createApiRateLimiter,
+  createHealthRateLimiter,
+  createImageRateLimiter,
+} from './config/rateLimit';
 import { apiV1Router } from './routes';
 import { getRoot } from './controllers/rootController';
 import { notFoundHandler } from './middleware/notFoundHandler';
@@ -23,6 +28,8 @@ configureSpanishValidation();
  */
 export function createApp(): Express {
   const app = express();
+  // Antes de cualquier middleware que lea `req.ip` (rate limits, auditoría).
+  configureTrustProxy(app, config.trustProxyHops);
 
   app.use(helmet());
   app.use(cors(corsOptions));
@@ -45,7 +52,13 @@ export function createApp(): Express {
   }
 
   app.get('/', getRoot);
-  app.use('/api/v1', createImageRateLimiter(), createApiRateLimiter(), apiV1Router);
+  app.use(
+    '/api/v1',
+    createHealthRateLimiter(),
+    createImageRateLimiter(),
+    createApiRateLimiter(),
+    apiV1Router,
+  );
 
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -11,13 +11,31 @@ import type { AuthenticatedUser, SystemRole } from '../api/types';
 export type AuthStatus =
   'bootstrapping' | 'anonymous' | 'authenticating' | 'authenticated' | 'sessionError';
 
+/**
+ * Por qué no se pudo restaurar la sesión (`status === 'sessionError'`, Etapa
+ * 5R). Ninguno cierra la sesión solo:
+ * - `temporary`: el backend falló o no respondió; reintentar es seguro;
+ * - `rateLimited`: 429 del backend — se muestra su mensaje, no es "dormido";
+ * - `uncertain`: un refresh enviado quedó sin respuesta y pudo haber rotado
+ *   la sesión. No se reintenta solo; la persona puede reintentar (se reenvía
+ *   el MISMO intento, que el backend reconoce) o volver a ingresar (ver
+ *   `refreshCoordinator.ts`).
+ */
+export type SessionIssue = 'temporary' | 'rateLimited' | 'uncertain';
+
 export interface AuthContextValue {
   status: AuthStatus;
+  /** Solo con `status === 'sessionError'`; `null` en cualquier otro estado. */
+  sessionIssue: SessionIssue | null;
   user: AuthenticatedUser | null;
   /** Lanza (nunca devuelve un booleano de éxito) — la pantalla de PIN decide qué mostrar según el error. */
   login: (userId: string, pin: string) => Promise<void>;
   logout: () => Promise<void>;
-  /** Reintenta la restauración de sesión — solo tiene sentido desde `sessionError` (falla de red). */
+  /**
+   * Reintenta la restauración de sesión desde `sessionError`. Si el refresh
+   * ya había funcionado, repite solo `/auth/me`; si quedó en duda, lo reenvía
+   * con el mismo intento.
+   */
   retryBootstrap: () => void;
   hasRole: (role: SystemRole) => boolean;
   /**

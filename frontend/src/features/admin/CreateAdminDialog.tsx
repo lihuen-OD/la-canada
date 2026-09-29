@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 import { createAdminUser } from '../../api/adminApi';
 import type { CreatedAdminResponse } from '../../api/adminTypes';
 import { ApiError } from '../../api/httpClient';
-import { NETWORK_ERROR_MESSAGE } from '../../api/errorMessages';
+import { connectivityMessage } from '../../api/errorMessages';
 import { IdempotencyIntent, intentFingerprint } from '../../api/idempotency';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
@@ -84,7 +84,7 @@ export function CreateAdminDialog({ onCancel, onCreated }: CreateAdminDialogProp
         if (!(error instanceof ApiError && error.code === 'IDEMPOTENCY_RECORD_PENDING')) {
           intent.current.discard();
         }
-        setErrorMessage(error instanceof ApiError ? error.message : NETWORK_ERROR_MESSAGE);
+        setErrorMessage(error instanceof ApiError ? error.message : connectivityMessage(error));
       })
       .finally(() => {
         submittingRef.current = false;

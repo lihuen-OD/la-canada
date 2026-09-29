@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useAuth } from '../../auth/useAuth';
+import { classifyError } from '../../api/errorClassification';
+import { RATE_LIMITED_MESSAGE, TEMPORARY_ERROR_MESSAGE } from '../../api/errorMessages';
 import { ApiError } from '../../api/httpClient';
 import {
-  NETWORK_ERROR_MESSAGE,
-  RATE_LIMITED_MESSAGE,
-  UNEXPECTED_ERROR_MESSAGE,
-} from '../../api/errorMessages';
+  LOGIN_OFFLINE_MESSAGE,
+  LOGIN_WAKING_MESSAGE,
+} from '../../connectivity/connectivityMessages';
 import type { LoginOption } from '../../api/types';
 import { Avatar } from '../../components/ui/Avatar';
 import { Button } from '../../components/ui/Button';
@@ -20,12 +21,27 @@ const GENERIC_ERROR_MESSAGE = 'Identidad o PIN incorrectos.';
  * Identidad/PIN incorrectos, cuenta bloqueada o inactiva: el mismo mensaje
  * genérico (sin enumerar usuarios). El límite de intentos (429) y un servicio
  * caído (5xx) NO son "PIN incorrecto": se dice lo que realmente pasó.
+ *
+ * Etapa 5R: si el backend no respondió (red, timeout, Render despertando),
+ * el login NO se reenvía solo — no se sabe si llegó — y se pide volver a
+ * ingresar el PIN cuando el servidor termine de iniciar. El frontend nunca
+ * cuenta intentos ni inventa un resultado.
  */
 function loginErrorMessage(error: unknown): string {
-  if (!(error instanceof ApiError)) return NETWORK_ERROR_MESSAGE;
-  if (error.status === 429) return RATE_LIMITED_MESSAGE;
-  if (error.status >= 500) return UNEXPECTED_ERROR_MESSAGE;
-  return GENERIC_ERROR_MESSAGE;
+  switch (classifyError(error)) {
+    case 'rateLimit':
+      return RATE_LIMITED_MESSAGE;
+    case 'offline':
+      return LOGIN_OFFLINE_MESSAGE;
+    case 'backendUnavailable':
+    case 'network':
+    case 'timeout':
+      return LOGIN_WAKING_MESSAGE;
+    case 'server':
+      return TEMPORARY_ERROR_MESSAGE;
+    default:
+      return error instanceof ApiError ? GENERIC_ERROR_MESSAGE : TEMPORARY_ERROR_MESSAGE;
+  }
 }
 
 interface PinEntryScreenProps {

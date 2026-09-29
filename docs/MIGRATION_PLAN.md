@@ -498,3 +498,18 @@ Cambios de esta revisión:
 - «＋ Nuevo administrador» en Usuarios; `POST /admin/users/admins` con alta atómica (User ADMIN activo + UserProfile + auditoría), username técnico aleatorio, PIN Argon2id e idempotencia sin PIN. Sin migraciones.
 - Gobierno: nunca desactivarse a sí mismo, nunca 0 ADMIN activos, carrera cruzada resuelta con bloqueo de filas (`adminLockout.ts`); renombrar a otro ADMIN desde Usuarios (`PATCH /admin/users/:id/display-name`).
 - Validación: unitarios (`adminAccounts.test.ts`, `adminLockout.test.ts`), integración `adminGovernance.integration.test.ts` y `adminCreation.integration.test.ts` contra `demo` (fixtures `test-5u-<RUN>`, 0 residuos, ADMIN real sin cambios) y tests frontend de Usuarios.
+
+## Etapa 5R — Arranque en frío, conectividad y recuperación de sesión 🟡 sin commit — pendiente de revisión visual
+
+- Coordinador único de disponibilidad (`connectivity/backendAvailability.ts`): un health en vuelo, backoff 2/4/8/10 s con jitter, pausa oculta/offline, "Reintentar ahora", reset en logout, nada en storage.
+- Arranque health → refresh → `/auth/me`; "🌿 Preparando La Cañada" tras 1,5 s (nunca con backend rápido), espera prolongada a los 60 s, aviso sin Internet; banner discreto en la app con datos visibles y "Conexión restablecida".
+- Clasificación explícita de errores; `GET` espera el despertar compartido y reintenta una vez; mutaciones nunca se repiten; TanStack Query sin reintentos propios.
+- Refresh ambiguo → sin repetición automática, sin logout automático, acción "Volver a ingresar". Login: sin reenvío, PIN limpio, identidad conservada.
+- Backend: `GET /api/v1/health` reducido a `{ status: "ok" }`, sin base ni datos internos, con rate limit propio. Sin migraciones, seed ni integración contra Neon.
+- Validación: tests dirigidos (coordinador, cliente HTTP, AuthProvider, app completa con latencia simulada, health y su rate limit), suites completas, typecheck, lint, build, format, `git diff --check`, escaneo de secretos y revisión de bundle; revisión visual en Chrome headless contra Vite real y un backend simulado en 360/390/768/1366/1920 px.
+- Ver `docs/ARCHITECTURE.md` §32.
+- **Cierre de riesgos (antes de la revisión visual):**
+  1. *Refresh ambiguo y recarga*: sucesora determinística `HMAC(token ‖ intento)` + intento del cliente persistido antes de enviar; reenvío idempotente de una sucesora intacta (24 h), detección de robo intacta, logout que revoca la sucesora huérfana, "Reintentar" seguro. Sin migración.
+  2. *IP detrás de proxies*: `TRUST_PROXY_HOPS` acotado (0 a 3, nunca `true`); falta el dato de topología para el valor productivo.
+  3. *Escrituras sin conexión*: no había `useMutation` (nada se encolaba; el cierre anterior lo afirmó por error); ahora ninguna escritura sale sin Internet (`OfflineError`, mensaje claro, datos conservados, reintento manual) y `mutations.networkMode = 'always'` por defensa.
+  - Validación: tests unitarios y HTTP del protocolo, IP efectiva y rate limit por IP, persistencia del intento, escrituras sin conexión, suites completas, typecheck, lint, build, format; revisión visual aislada (simulador en puertos propios) en móvil y escritorio.

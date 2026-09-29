@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ApiError } from '../../api/httpClient';
+import { OfflineError } from '../../api/transportErrors';
 import { IdempotencyIntent, intentFingerprint } from '../../api/idempotency';
 import { STALE_TIME } from '../../api/queryClient';
 import { queryKeys } from '../../api/queryKeys';
@@ -238,7 +239,7 @@ export function MovementDialog({
           if (isStockConflict(error)) afterMovement(item.id);
         }
         setErrorMessage(
-          error instanceof ApiError && error.status < 500
+          (error instanceof ApiError && error.status < 500) || error instanceof OfflineError
             ? errorMessageOf(error)
             : 'No pudimos confirmar el registro. Podés reintentar: el reintento usa el mismo envío y no se registrará dos veces.',
         );

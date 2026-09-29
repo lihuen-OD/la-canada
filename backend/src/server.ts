@@ -4,6 +4,14 @@ import { disconnectPrisma } from './lib/prisma';
 
 const app = createApp();
 
+if (config.isProduction && config.trustProxyHops === 0) {
+  // eslint-disable-next-line no-console -- aviso de configuración intencional
+  console.warn(
+    'TRUST_PROXY_HOPS=0 en producción: detrás del balanceador de Render todos los usuarios ' +
+      'compartirían la misma IP en los rate limits. Ver docs/ARCHITECTURE.md §32.',
+  );
+}
+
 const server = app.listen(config.port, () => {
   // eslint-disable-next-line no-console -- log de arranque intencional
   console.log(`La Cañada API escuchando en el puerto ${config.port} (${config.nodeEnv})`);

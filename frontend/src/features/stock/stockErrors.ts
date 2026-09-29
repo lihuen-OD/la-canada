@@ -1,6 +1,6 @@
 import { ApiError } from '../../api/httpClient';
 
-import { NETWORK_ERROR_MESSAGE } from '../../api/errorMessages';
+import { NETWORK_ERROR_MESSAGE, connectivityMessage } from '../../api/errorMessages';
 
 export { NETWORK_ERROR_MESSAGE };
 
@@ -26,7 +26,7 @@ const STOCK_ERROR_MESSAGES: Readonly<Record<string, string>> = {
 
 /** Mensaje humano del backend (`ApiError.message`, que ya trae texto legible para los códigos `STOCK_*`). */
 export function errorMessageOf(error: unknown): string {
-  if (!(error instanceof ApiError)) return NETWORK_ERROR_MESSAGE;
+  if (!(error instanceof ApiError)) return connectivityMessage(error);
   return (error.code && STOCK_ERROR_MESSAGES[error.code]) || error.message;
 }
 

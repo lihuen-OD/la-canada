@@ -19,8 +19,15 @@ vi.mock('../api/authApi', () => ({
 }));
 
 import { ApiError } from '../api/httpClient';
+import { BackendUnavailableError, NetworkError } from '../api/transportErrors';
+import {
+  ensureBackendAwake,
+  getBackendAvailability,
+  reportBackendUnavailable,
+} from '../connectivity/backendAvailability';
 import { AuthProvider } from './AuthProvider';
 import { clearAccessToken, getAccessToken } from './accessTokenStore';
+import { getRefreshRecovery } from './refreshRecovery';
 import { useAuth } from './useAuth';
 
 const USER = { id: 'user-1', role: 'EMPLOYEE' as const, status: 'ACTIVE', employee: null };
@@ -340,5 +347,137 @@ describe('AuthProvider — logout', () => {
     );
     const { result } = renderAuth();
     await waitFor(() => expect(result.current.status).toBe('sessionError'));
+  });
+});
+
+describe('AuthProvider — arranque en frío y fallas temporales (Etapa 5R)', () => {
+  beforeEach(() => {
+    fetchMeMock.mockReset();
+    loginMock.mockReset();
+    logoutSessionMock.mockReset();
+    refreshSessionMock.mockReset();
+  });
+
+  afterEach(() => {
+    clearAccessToken();
+  });
+
+  it('refresh sin respuesta (red): queda en duda sin reintento automático; retryBootstrap reenvía el MISMO intento', async () => {
+    refreshSessionMock.mockRejectedValueOnce(new NetworkError());
+    const { result } = renderAuth();
+    await waitFor(() => expect(result.current.sessionIssue).toBe('uncertain'));
+    expect(result.current.status).toBe('sessionError');
+    expect(getRefreshRecovery()).toBe('uncertain');
+    await act(async () => undefined);
+    expect(refreshSessionMock).toHaveBeenCalledTimes(1);
+    expect(logoutSessionMock).not.toHaveBeenCalled();
+
+    refreshSessionMock.mockResolvedValueOnce({ accessToken: 'token-2', expiresIn: 720 });
+    fetchMeMock.mockResolvedValueOnce({ user: USER });
+    act(() => result.current.retryBootstrap());
+    await waitFor(() => expect(result.current.status).toBe('authenticated'));
+    const [first, second] = refreshSessionMock.mock.calls.map((call) => call[0] as string);
+    expect(second).toBe(first);
+    expect(first).toMatch(/^[A-Za-z0-9_-]{22,}$/);
+  });
+
+  it('volver a ingresar desde una sesión en duda: logout seguro, selector y estado limpio', async () => {
+    refreshSessionMock.mockRejectedValue(new BackendUnavailableError(504));
+    logoutSessionMock.mockResolvedValue(undefined);
+    const { result } = renderAuth();
+    await waitFor(() => expect(result.current.sessionIssue).toBe('uncertain'));
+
+    const attempt = refreshSessionMock.mock.calls[0]?.[0] as string;
+    await act(() => result.current.logout());
+    expect(result.current.status).toBe('anonymous');
+    expect(getRefreshRecovery()).toBe('none');
+    // El logout informa el intento en duda: el backend revoca la sucesora huérfana.
+    expect(logoutSessionMock).toHaveBeenCalledWith(attempt);
+    expect(refreshSessionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('429 al restaurar: se muestra el límite, no se trata como sesión vencida ni como backend dormido', async () => {
+    refreshSessionMock.mockRejectedValue(
+      new ApiError(429, 'Realizaste demasiados intentos.', 'RATE_LIMITED'),
+    );
+    const { result } = renderAuth();
+    await waitFor(() => expect(result.current.sessionIssue).toBe('rateLimited'));
+    expect(getBackendAvailability().status).toBe('online');
+  });
+
+  it('503 AUTH_REFRESH_UNAVAILABLE: temporal, y el reintento sí repite el refresh (el backend garantiza que no rotó)', async () => {
+    refreshSessionMock
+      .mockRejectedValueOnce(new ApiError(503, 'x', 'AUTH_REFRESH_UNAVAILABLE'))
+      .mockResolvedValueOnce({ accessToken: 'token-2', expiresIn: 720 });
+    fetchMeMock.mockResolvedValue({ user: USER });
+    const { result } = renderAuth();
+    await waitFor(() => expect(result.current.sessionIssue).toBe('temporary'));
+    act(() => result.current.retryBootstrap());
+    expect(result.current.status).toBe('bootstrapping');
+    await waitFor(() => expect(result.current.status).toBe('authenticated'));
+    expect(refreshSessionMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('/me falla tras un refresh exitoso: el reintento repite solo /me, nunca otro refresh', async () => {
+    refreshSessionMock.mockResolvedValue({ accessToken: 'token-1', expiresIn: 720 });
+    fetchMeMock
+      .mockRejectedValueOnce(new ApiError(500, 'Ocurrió un error inesperado.', undefined))
+      .mockResolvedValueOnce({ user: USER });
+    const { result } = renderAuth();
+    await waitFor(() => expect(result.current.sessionIssue).toBe('temporary'));
+    act(() => result.current.retryBootstrap());
+    await waitFor(() => expect(result.current.status).toBe('authenticated'));
+    expect(refreshSessionMock).toHaveBeenCalledTimes(1);
+    expect(fetchMeMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('un 5xx o una falla de red no borran la sesión ni la caché', async () => {
+    refreshSessionMock.mockResolvedValue({ accessToken: 'token-1', expiresIn: 720 });
+    fetchMeMock.mockResolvedValue({ user: USER });
+    const queryClient = createTestQueryClient();
+    const { result } = renderAuth(queryClient);
+    await waitFor(() => expect(result.current.status).toBe('authenticated'));
+    queryClient.setQueryData(['session', USER.id, 'tasks', 'list', 'active'], { tasks: [] });
+
+    // Una request en uso falla por red y el backend entra en recuperación.
+    act(() => reportBackendUnavailable());
+    await act(async () => undefined);
+
+    expect(result.current.status).toBe('authenticated');
+    expect(getAccessToken()).toBe('token-1');
+    expect(queryClient.getQueryData(['session', USER.id, 'tasks', 'list', 'active'])).toEqual({
+      tasks: [],
+    });
+  });
+
+  it('logout limpia el coordinador: cancela la espera del backend y vuelve a idle', async () => {
+    refreshSessionMock.mockResolvedValue({ accessToken: 'token-1', expiresIn: 720 });
+    fetchMeMock.mockResolvedValue({ user: USER });
+    logoutSessionMock.mockResolvedValue(undefined);
+    const { result } = renderAuth();
+    await waitFor(() => expect(result.current.status).toBe('authenticated'));
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise(() => {})),
+    );
+    act(() => reportBackendUnavailable());
+    const waiting = ensureBackendAwake();
+    expect(getBackendAvailability().status).toBe('checking');
+
+    await act(() => result.current.logout());
+    await expect(waiting).rejects.toThrow();
+    expect(getBackendAvailability().status).toBe('idle');
+    vi.unstubAllGlobals();
+  });
+
+  it('login exitoso limpia un refresh en duda anterior', async () => {
+    refreshSessionMock.mockRejectedValue(new NetworkError());
+    const { result } = renderAuth();
+    await waitFor(() => expect(result.current.sessionIssue).toBe('uncertain'));
+    loginMock.mockResolvedValue({ accessToken: 'token-login', expiresIn: 720, user: USER });
+    await act(() => result.current.login(USER.id, '1234'));
+    expect(result.current.status).toBe('authenticated');
+    expect(getRefreshRecovery()).toBe('none');
   });
 });

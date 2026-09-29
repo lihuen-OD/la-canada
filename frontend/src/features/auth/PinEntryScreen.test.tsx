@@ -6,6 +6,12 @@ const { loginMock } = vi.hoisted(() => ({ loginMock: vi.fn() }));
 vi.mock('../../auth/useAuth', () => ({ useAuth: () => ({ login: loginMock }) }));
 
 import { ApiError } from '../../api/httpClient';
+import {
+  BackendUnavailableError,
+  NetworkError,
+  OfflineError,
+  RequestTimeoutError,
+} from '../../api/transportErrors';
 import { PinEntryScreen } from './PinEntryScreen';
 
 const OPTION = {
@@ -99,8 +105,8 @@ describe('PinEntryScreen', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Identidad o PIN incorrectos.');
   });
 
-  it('error de red: muestra un mensaje distinto, nunca "PIN incorrecto"', async () => {
-    loginMock.mockRejectedValue(new TypeError('Failed to fetch'));
+  it('error de red (Etapa 5R): pide reingresar el PIN cuando el servidor inicie, nunca "PIN incorrecto" ni reenvío', async () => {
+    loginMock.mockRejectedValue(new NetworkError());
     render(<PinEntryScreen option={OPTION} onBack={vi.fn()} />);
     const user = userEvent.setup();
 
@@ -109,8 +115,39 @@ describe('PinEntryScreen', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).not.toMatch(/incorrect/i);
     expect(alert).toHaveTextContent(
-      'No pudimos conectar con el servidor. Revisá tu conexión e intentá nuevamente.',
+      'El servidor todavía está iniciando. Esperá un momento y volvé a ingresar tu PIN.',
     );
+    // El PIN se limpia, la identidad se conserva y el login no se reenvía solo.
+    expect(screen.getByRole('img', { name: /0 de 4/ })).toBeInTheDocument();
+    expect(screen.getByText(OPTION.displayName)).toBeInTheDocument();
+    expect(loginMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('sin Internet: el PIN no se envió; se pide reingresarlo, sin prometer un envío automático', async () => {
+    loginMock.mockRejectedValue(new OfflineError());
+    render(<PinEntryScreen option={OPTION} onBack={vi.fn()} />);
+    await userEvent.setup().keyboard('0000');
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(
+      'Sin conexión a Internet: tu PIN no se envió. Volvé a ingresarlo cuando vuelva la conexión.',
+    );
+    expect(alert.textContent).not.toMatch(/automáticamente/);
+    expect(screen.getByRole('img', { name: /0 de 4/ })).toBeInTheDocument();
+    expect(loginMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['timeout', () => new RequestTimeoutError()],
+    ['502 de proxy', () => new BackendUnavailableError(502)],
+    ['504 de proxy', () => new BackendUnavailableError(504)],
+  ])('%s al ingresar: mismo aviso de servidor iniciando, un único intento', async (_, make) => {
+    loginMock.mockRejectedValue(make());
+    render(<PinEntryScreen option={OPTION} onBack={vi.fn()} />);
+    await userEvent.setup().keyboard('0000');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /el servidor todavía está iniciando/i,
+    );
+    expect(loginMock).toHaveBeenCalledTimes(1);
   });
 
   it('429: explica que hay que esperar, nunca «PIN incorrecto», y conserva la protección', async () => {
@@ -144,8 +181,9 @@ describe('PinEntryScreen', () => {
     loginMock.mockRejectedValueOnce(new ApiError(500, 'x', undefined));
     render(<PinEntryScreen option={OPTION} onBack={vi.fn()} />);
     await userEvent.setup().keyboard('0000');
+    // Etapa 5R: el backend respondió con un 5xx — error temporal, nunca "despertando".
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Ocurrió un error inesperado. Intentá nuevamente.',
+      'No pudimos comunicarnos con el servidor. Intentá nuevamente.',
     );
   });
 

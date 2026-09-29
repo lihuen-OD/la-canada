@@ -1,4 +1,4 @@
-import { randomBytes, createHash } from 'node:crypto';
+import { randomBytes, createHash, createHmac } from 'node:crypto';
 import { z } from 'zod';
 
 /**
@@ -110,4 +110,36 @@ export function generateRefreshToken(): string {
 /** Determinístico (SHA-256) — lo único que se persiste en `Session.refreshTokenHash`, nunca el token original. */
 export function hashRefreshToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
+}
+
+/**
+ * Etapa 5R — identificador del INTENTO de refresh, generado por el cliente
+ * antes de enviar el pedido y reutilizado mientras el resultado no se
+ * conozca (respuesta perdida, recarga o cierre de pestaña en vuelo). No es
+ * un token: solo, no autoriza nada; únicamente reproduce la sucesora de una
+ * rotación que ese mismo intento ya produjo (ver `deriveSuccessorRefreshToken`).
+ */
+export const REFRESH_ATTEMPT_ID_PATTERN = /^[A-Za-z0-9_-]{22,128}$/;
+
+export function generateRefreshAttemptId(): string {
+  return randomBytes(16).toString('base64url');
+}
+
+/**
+ * Sucesora DETERMINÍSTICA de una rotación: HMAC-SHA256 con una clave del
+ * servidor sobre (token presentado, intento). El mismo intento con el mismo
+ * token reproduce exactamente la misma sucesora — así un reenvío tras una
+ * respuesta perdida es idempotente —, mientras que cualquier otro intento (o
+ * ninguno) da un valor distinto y sigue cayendo en la detección de reuso.
+ * Sin la clave, conocer el token viejo y el intento no permite calcularla.
+ * Mismo formato que `generateRefreshToken` (32 bytes, base64url).
+ */
+export function deriveSuccessorRefreshToken(
+  rotationKey: Uint8Array,
+  presentedToken: string,
+  attemptId: string,
+): string {
+  return createHmac('sha256', rotationKey)
+    .update(`${presentedToken}\u0000${attemptId}`)
+    .digest('base64url');
 }

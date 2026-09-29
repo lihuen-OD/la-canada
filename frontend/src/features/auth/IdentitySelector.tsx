@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchLoginOptions } from '../../api/authApi';
 import type { LoginOption } from '../../api/types';
+import { BackendWakeNotice } from '../../components/BackendWakeScreen';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
+import { useWakeNotice } from '../../connectivity/useBackendAvailability';
 import { IdentityCard } from './IdentityCard';
 
 type LoadState =
@@ -22,6 +24,8 @@ interface IdentitySelectorProps {
  */
 export function IdentitySelector({ onSelect }: IdentitySelectorProps) {
   const [state, setState] = useState<LoadState>({ status: 'loading' });
+  const wake = useWakeNotice();
+  const startedRef = useRef(false);
 
   // Sin `setState` síncrono en el cuerpo del efecto (el estado inicial ya
   // es `loading`) — el efecto solo dispara el fetch; `setState` corre
@@ -37,12 +41,19 @@ export function IdentitySelector({ onSelect }: IdentitySelectorProps) {
     fetchOptions();
   }, [fetchOptions]);
 
+  // Una sola carga por montaje, también bajo StrictMode (el ref sobrevive al
+  // doble efecto de desarrollo): nunca dos `GET /auth/login-options`.
   useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
     fetchOptions();
   }, [fetchOptions]);
 
   if (state.status === 'loading') {
-    return <LoadingState label="Cargando identidades…" />;
+    // Etapa 5R: con el backend despertando, la request espera sola en
+    // `httpClient` y las identidades aparecen cuando responde — mientras
+    // tanto, "Preparando La Cañada" en lugar de un error técnico.
+    return wake.visible ? <BackendWakeNotice /> : <LoadingState label="Cargando identidades…" />;
   }
 
   if (state.status === 'error') {

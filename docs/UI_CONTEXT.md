@@ -325,6 +325,15 @@ Desempeño se integra mediante navegación secundaria en chips `📋 Tareas | �
 - No mostrar errores técnicos o respuestas crudas.
 - Distinguir ausencia real de datos de una falla de carga.
 
+## Arranque en frío y conexión (Etapa 5R)
+
+- **"🌿 Preparando La Cañada"**: pantalla verde bosque (mismo splash que la restauración de sesión) cuando el backend no responde pasada una demora de 1,5 s; con una respuesta rápida nunca aparece. Incluye el spinner compartido, "Reintentando automáticamente…", el tiempo real transcurrido y el próximo intento, y "Reintentar ahora" (44 px). Nunca un porcentaje ni "unos minutos" antes de tiempo. A los 60 s: "El servidor está tardando más de lo habitual. Podés seguir esperando o reintentar ahora." Sin Internet: "Sin conexión a Internet. Volveremos a intentar cuando se restablezca." (sin botón).
+- En el login, el mismo aviso va dentro de la tarjeta, en lugar de "Cargando identidades…".
+- **Dentro de la app**: aviso flotante (fijo sobre la navegación inferior en móvil; a la derecha del sidebar en escritorio), fondo verde bosque, radio de tarjeta, sin mover el layout ni reemplazar los datos: "Reconectando con el servidor… Tus datos siguen visibles.", "Sin conexión a Internet. Cuando vuelva la conexión, intentaremos actualizar automáticamente." y "Conexión restablecida." (se retira solo a los 4 s).
+- Sesión en duda: "No pudimos confirmar tu sesión." con **Reintentar** (primario) y **Volver a ingresar** (secundario), en la pantalla de arranque y en el aviso flotante (`role="alert"`).
+- Escritura sin conexión: dentro del formulario, "Sin conexión a Internet: no se guardó ningún cambio. Cuando vuelva la conexión, volvé a intentarlo." — los campos conservan lo cargado. En el login: "Sin conexión a Internet: tu PIN no se envió. Volvé a ingresarlo cuando vuelva la conexión."
+- Accesibilidad: el mensaje va en una región `aria-live="polite"`/`role="status"`; el contador de segundos queda fuera para no anunciarse cada medio segundo. Sin animaciones propias: con `prefers-reduced-motion` el spinner queda estático. Alturas reservadas y cifras tabulares evitan saltos.
+
 ## Accesibilidad
 
 - Contraste WCAG AA como mínimo.

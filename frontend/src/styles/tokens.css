@@ -177,6 +177,8 @@
   /* ── Capas ───────────────────────────────────────────────────────────── */
   --z-header: 30;
   --z-nav: 30;
+  /* Aviso de conectividad (Etapa 5R): sobre la navegación, bajo los modales. */
+  --z-banner: 40;
   --z-overlay: 100;
   --z-skip-link: 200;
 

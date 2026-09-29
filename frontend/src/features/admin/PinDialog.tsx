@@ -4,7 +4,7 @@ import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { AlertIcon } from '../../components/ui/icons';
 import { ApiError } from '../../api/httpClient';
-import { NETWORK_ERROR_MESSAGE } from '../../api/errorMessages';
+import { connectivityMessage } from '../../api/errorMessages';
 
 const PIN_PATTERN = /^\d{4}$/;
 
@@ -72,7 +72,7 @@ export function PinDialog({ mode, targetDisplayName, isSelf, onCancel, onSubmit 
       })
       .catch((error: unknown) => {
         clearFields();
-        setErrorMessage(error instanceof ApiError ? error.message : NETWORK_ERROR_MESSAGE);
+        setErrorMessage(error instanceof ApiError ? error.message : connectivityMessage(error));
       })
       .finally(() => {
         submittingRef.current = false;

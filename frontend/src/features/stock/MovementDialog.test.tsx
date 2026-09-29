@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '../../test/render';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../api/httpClient';
+import { OfflineError } from '../../api/transportErrors';
 import { DESTINATION, makeItem } from '../../test/fixtures/stock';
 import { MovementDialog } from './MovementDialog';
 
@@ -203,6 +204,22 @@ describe('MovementDialog — Idempotency-Key', () => {
     const { onSuccess } = renderDialog();
     const user = await fillAndSubmit();
     expect(await screen.findByRole('alert')).toHaveTextContent(/no se registrará dos veces/);
+    await user.click(screen.getByRole('button', { name: 'Reintentar' }));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+    expect(keysSent()).toHaveLength(2);
+    expect(keysSent()[1]).toBe(keysSent()[0]);
+  });
+
+  it('sin Internet (Etapa 5R): avisa que no se envió, conserva la clave y el reintento manual no duplica', async () => {
+    api.createStockMovement
+      .mockRejectedValueOnce(new OfflineError())
+      .mockResolvedValueOnce({ movement: {}, item });
+    const { onSuccess } = renderDialog();
+    const user = await fillAndSubmit();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /Sin conexión a Internet: no se guardó/,
+    );
+    expect(onSuccess).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Reintentar' }));
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
     expect(keysSent()).toHaveLength(2);

@@ -1,0 +1,124 @@
+/* Etapa 5R — arranque en frío y conectividad: pantalla "Preparando La
+   Cañada" (splash verde bosque, mismo layout que la restauración de sesión)
+   y aviso flotante dentro de la app. Sin animaciones propias: el único
+   movimiento es el spinner compartido, que prefers-reduced-motion deja
+   estático (base.css). docs/UI_CONTEXT.md, "Arranque en frío y conexión". */
+
+/* ── Pantalla / aviso de arranque en frío ──────────────────────────────── */
+
+.wake {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 28rem;
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.wake__emoji {
+  font-size: var(--font-size-brand-hero);
+  line-height: 1;
+}
+
+.wake__title {
+  font-family: var(--font-display);
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  color: var(--color-text);
+}
+
+.splash .wake__title {
+  font-size: var(--font-size-brand-hero);
+}
+
+.wake__message {
+  /* Alto reservado para el texto más largo: pasar de "iniciando" a "tarda
+     más de lo habitual" no mueve el botón. */
+  min-height: calc(var(--font-size-md) * var(--line-height-base) * 3);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-base);
+  overflow-wrap: anywhere;
+}
+
+.wake__progress {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.wake__timing {
+  min-height: calc(var(--font-size-sm) * var(--line-height-base) * 2);
+  font-size: var(--font-size-sm);
+  /* Cifras de ancho fijo: el contador no hace "bailar" la línea. */
+  font-variant-numeric: tabular-nums;
+}
+
+.wake__actions {
+  display: flex;
+  justify-content: center;
+  min-height: var(--tap-target);
+}
+
+/* ── Aviso flotante dentro de la app ───────────────────────────────────── */
+
+.connection-banner-region {
+  position: fixed;
+  left: max(var(--page-gutter), env(safe-area-inset-left));
+  right: max(var(--page-gutter), env(safe-area-inset-right));
+  bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom) + var(--space-3));
+  z-index: var(--z-banner);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  /* La región vacía nunca intercepta toques sobre el contenido. */
+  pointer-events: none;
+}
+
+.connection-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  width: 100%;
+  max-width: 32rem;
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-brand);
+  box-shadow: var(--shadow-raised);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  pointer-events: auto;
+}
+
+.connection-banner__text {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.connection-banner .button {
+  flex: 0 0 auto;
+}
+
+.connection-banner--recovered {
+  border-color: var(--color-brand-accent);
+}
+
+.connection-banner--alert {
+  border-color: var(--color-danger);
+}
+
+@media (min-width: 900px) {
+  .connection-banner-region {
+    left: calc(var(--sidebar-width) + var(--space-6));
+    right: var(--space-6);
+    bottom: var(--space-5);
+  }
+}

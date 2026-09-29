@@ -144,16 +144,14 @@ curl http://localhost:4000/api/v1/health
 Responde `200` con:
 
 ```json
-{
-  "status": "ok",
-  "service": "la-canada-api",
-  "environment": "development",
-  "timestamp": "2026-09-22T15:11:16.330Z",
-  "version": "0.1.0"
-}
+{ "status": "ok" }
 ```
 
-No incluye estado de Neon todavía porque ningún endpoint de negocio usa la base en esta etapa (el módulo de conexión existe, y el servidor ya requiere `DATABASE_URL` para arrancar, pero nada lo llama desde un endpoint HTTP todavía).
+Contrato mínimo desde la Etapa 5R: sin autenticación, sin consultar la base (no despierta Neon) y sin datos internos (ni versión, ni entorno, ni hora). El frontend lo usa para saber si Render terminó de despertar el backend antes de enviar el refresh de sesión, y solo mientras hay una falla real: **no es un keep-alive** y no hay cron ni ping periódico (ver `docs/ARCHITECTURE.md` §32). Tiene un rate limit propio (300 cada 15 min por IP), separado del general.
+
+**IP detrás de proxies**: `TRUST_PROXY_HOPS` (0 a 3, vacío = 0) indica cuántos proxies propios hay delante del backend; de eso depende la IP que usan los rate limits. En Render hay que fijarlo (con 0, todos los usuarios compartirían una IP). El valor exacto depende de si el frontend llama a Render directo (1) o vía el proxy de Netlify — ver `docs/ARCHITECTURE.md` §32.
+
+**Render gratuito** detiene el backend tras un rato sin tráfico; el primer request lo despierta (hasta ~1 minuto). La app muestra "🌿 Preparando La Cañada" mientras tanto y continúa sola; un error temporal nunca cierra la sesión, las mutaciones nunca se repiten solas y un refresh sin respuesta no se reintenta automáticamente.
 
 ## Base de datos (Prisma + Neon)
 

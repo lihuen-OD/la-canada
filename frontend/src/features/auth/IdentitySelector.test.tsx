@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { render, screen, waitFor, within } from '../../test/render';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -32,6 +33,17 @@ describe('IdentitySelector', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('StrictMode (Etapa 5R): una sola carga de identidades, nunca dos GET', async () => {
+    fetchLoginOptionsMock.mockResolvedValue({ options: [EMPLOYEE_OPTION] });
+    render(
+      <StrictMode>
+        <IdentitySelector onSelect={vi.fn()} />
+      </StrictMode>,
+    );
+    expect(await screen.findByRole('button', { name: /Coke/ })).toBeInTheDocument();
+    expect(fetchLoginOptionsMock).toHaveBeenCalledTimes(1);
   });
 
   it('muestra un estado de carga mientras llega la respuesta', () => {

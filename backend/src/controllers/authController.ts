@@ -8,7 +8,7 @@ import {
   refresh as refreshService,
   type RequestMeta,
 } from '../auth/authService';
-import { loginBodySchema } from '../auth/schemas';
+import { loginBodySchema, refreshAttemptBodySchema } from '../auth/schemas';
 import {
   REFRESH_TOKEN_COOKIE_NAME,
   clearedRefreshTokenCookieOptions,
@@ -18,6 +18,19 @@ import { AuthenticationRequiredError, ValidationError } from '../errors/AppError
 
 function requestMeta(req: Request): RequestMeta {
   return { ipAddress: req.ip ?? null, userAgent: req.header('user-agent') ?? null };
+}
+
+/**
+ * Etapa 5R — intento de refresh informado por el cliente (body opcional).
+ * Un valor mal formado es un 400: nunca se lo ignora en silencio, porque sin
+ * él el reenvío dejaría de ser idempotente.
+ */
+function readRefreshAttemptId(req: Request): string | undefined {
+  const parsed = refreshAttemptBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    throw new ValidationError('El identificador del intento de renovación no es válido.');
+  }
+  return parsed.data.attemptId;
 }
 
 function readRefreshTokenCookie(req: Request): string | undefined {
@@ -61,7 +74,11 @@ export async function postRefresh(req: Request, res: Response): Promise<void> {
     throw new AuthenticationRequiredError();
   }
 
-  const result = await refreshService(prisma, { refreshToken, ...requestMeta(req) });
+  const result = await refreshService(prisma, {
+    refreshToken,
+    attemptId: readRefreshAttemptId(req),
+    ...requestMeta(req),
+  });
 
   res.cookie(REFRESH_TOKEN_COOKIE_NAME, result.refreshToken, refreshTokenCookieOptions());
   res.set('Cache-Control', 'no-store');
@@ -72,7 +89,11 @@ export async function postRefresh(req: Request, res: Response): Promise<void> {
 
 export async function postLogout(req: Request, res: Response): Promise<void> {
   const refreshToken = readRefreshTokenCookie(req);
-  await logoutService(prisma, { refreshToken, ...requestMeta(req) });
+  await logoutService(prisma, {
+    refreshToken,
+    attemptId: readRefreshAttemptId(req),
+    ...requestMeta(req),
+  });
   res.clearCookie(REFRESH_TOKEN_COOKIE_NAME, clearedRefreshTokenCookieOptions());
   res.set('Cache-Control', 'no-store');
   res.status(204).send();

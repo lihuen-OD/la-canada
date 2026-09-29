@@ -27,13 +27,19 @@ import { RequireRole } from './RequireRole';
  * módulos futuros) cae en el catch-all y redirige.
  */
 export function AppRoutes() {
-  const { status, retryBootstrap } = useAuth();
+  const { status, sessionIssue, retryBootstrap, logout } = useAuth();
 
   if (status === 'bootstrapping') {
     return <BootstrappingScreen />;
   }
   if (status === 'sessionError') {
-    return <SessionRestoreErrorScreen onRetry={retryBootstrap} />;
+    return (
+      <SessionRestoreErrorScreen
+        issue={sessionIssue}
+        onRetry={retryBootstrap}
+        onReenter={() => void logout()}
+      />
+    );
   }
 
   return (

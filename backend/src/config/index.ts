@@ -32,5 +32,7 @@ export const config = {
    */
   /** Zona IANA de negocio para períodos de tareas (ver `lib/businessTime.ts`). */
   businessTimeZone: env.BUSINESS_TIME_ZONE,
+  /** Proxies propios delante del backend (ver `config/trustProxy.ts`). */
+  trustProxyHops: env.TRUST_PROXY_HOPS,
   cookieSameSite: env.COOKIE_SAME_SITE ?? (env.NODE_ENV === 'production' ? 'none' : 'lax'),
 } as const;
