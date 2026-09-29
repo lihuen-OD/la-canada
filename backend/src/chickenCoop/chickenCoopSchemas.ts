@@ -102,13 +102,19 @@ export const configureChickenCoopBodySchema = z
   .strict();
 
 /**
- * "+ Alta" / "− Baja" del prototipo: de a una gallina, con la cantidad que
+ * "+ Alta" / "− Baja": una o varias gallinas, con la cantidad que
  * el ADMIN confirmó ("¿Cambiar gallinas activas de X a Y?"). Si la cantidad
  * real ya no es `expectedCount`, el backend no aplica nada (409).
  */
 export const adjustChickenCoopHensBodySchema = z
   .object({
-    delta: z.union([z.literal(1), z.literal(-1)], { message: 'El ajuste es de a una gallina.' }),
+    delta: z
+      .number()
+      .int('La cantidad debe ser un número entero.')
+      .refine(
+        (value) => value !== 0 && Math.abs(value) <= MAX_ACTIVE_HENS,
+        `La cantidad debe estar entre 1 y ${MAX_ACTIVE_HENS.toLocaleString('es-AR')}.`,
+      ),
     expectedCount: countSchema('La cantidad actual', MAX_ACTIVE_HENS),
   })
   .strict();

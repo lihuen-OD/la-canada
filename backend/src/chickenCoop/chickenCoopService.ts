@@ -402,7 +402,7 @@ export async function configureChickenCoop(
 }
 
 /**
- * "+ Alta" / "− Baja" de a una gallina. Actualización condicional atómica
+ * "+ Alta" / "− Baja" de una o varias gallinas. Actualización condicional atómica
  * sobre la cantidad que el ADMIN confirmó: si otro cambio llegó antes, no se
  * aplica nada (409) — nunca un valor distinto del confirmado, nunca negativo.
  */

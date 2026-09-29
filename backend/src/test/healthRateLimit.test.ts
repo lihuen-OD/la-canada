@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import request from 'supertest';
 
 /**
@@ -26,13 +26,19 @@ describe('rate limit del health check', () => {
   });
 
   it('tiene un cupo propio: supera el límite general (100) sin consumirlo, y corta con 429 al pasar el suyo', async () => {
-    const app = createApp();
+    // Un único servidor en 127.0.0.1 para las 302 requests: `request(app)`
+    // levantaría y cerraría un servidor efímero por cada una, lo que bajo la
+    // carga de la suite en paralelo cortaba conexiones de forma intermitente.
+    const server = createApp().listen(0, '127.0.0.1');
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    onTestFinished(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    const app = request(server);
     for (let index = 0; index < HEALTH_LIMIT; index += 1) {
-      const response = await request(app).get('/api/v1/health');
+      const response = await app.get('/api/v1/health');
       expect(response.status).toBe(200);
     }
 
-    const limited = await request(app).get('/api/v1/health');
+    const limited = await app.get('/api/v1/health');
     expect(limited.status).toBe(429);
     expect(limited.body).toEqual({
       error: {
@@ -43,7 +49,7 @@ describe('rate limit del health check', () => {
     });
 
     // El cupo general de la API sigue intacto.
-    const other = await request(app).get('/api/v1/ruta-que-no-existe');
+    const other = await app.get('/api/v1/ruta-que-no-existe');
     expect(other.status).toBe(404);
   }, 60_000);
 });

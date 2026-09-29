@@ -65,7 +65,7 @@ export async function configureChickenCoop(
 }
 
 export async function adjustChickenCoopHens(
-  delta: 1 | -1,
+  delta: number,
   expectedCount: number,
 ): Promise<ChickenCoopMutationResponse> {
   return apiRequest<ChickenCoopMutationResponse>('/chicken-coop/hens-adjustments', {
