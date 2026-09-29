@@ -156,7 +156,7 @@ describe('☰ Más — grilla', () => {
     expect(await grid.findByText('2 hoy')).toBeInTheDocument();
     expect(grid.getByText('3 próximos')).toBeInTheDocument();
     expect(grid.getByText('1 foto')).toBeInTheDocument();
-    expect(grid.getByText('Villa Elisa, E.Ríos')).toBeInTheDocument();
+    expect(grid.getByText('Arroyo Barú, E.Ríos')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /cerrar sesión/i })).toBeInTheDocument();
     expect(api.fetchMoreSummary).toHaveBeenCalledTimes(1);
   });

@@ -50,7 +50,7 @@ export function MoreHome() {
       title: 'Eventos',
       subtitle: data ? plural(data.events.upcoming, 'próximo', 'próximos') : '—',
     },
-    { to: '/more/weather', icon: '🌤️', title: 'Clima', subtitle: 'Villa Elisa, E.Ríos' },
+    { to: '/more/weather', icon: '🌤️', title: 'Clima', subtitle: 'Arroyo Barú, E.Ríos' },
     {
       to: '/more/photos',
       icon: '📸',
