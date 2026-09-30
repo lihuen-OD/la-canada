@@ -7,7 +7,7 @@ import type {
 } from '../../api/stockTypes';
 import { LEVEL_LABEL } from './stockLabels';
 
-const LEVELS: readonly StockLevel[] = ['critical', 'low', 'ok', 'pending'];
+const LEVELS: readonly StockLevel[] = ['critical', 'low', 'ok'];
 
 interface StockFiltersProps {
   area: StockItemArea;

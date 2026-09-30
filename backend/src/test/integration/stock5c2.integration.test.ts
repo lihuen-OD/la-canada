@@ -312,7 +312,8 @@ describe('GET /stock/reports/summary — agregaciones reales', () => {
 
     // Niveles actuales (solo activos de la categoría): kg 12 ≤ (10 + 20) / 2 →
     // bajo; litros 4 > (1 + 5) / 2 → ok.
-    expect(body.currentLevels).toMatchObject({ critical: 0, low: 1, ok: 1, pending: 0 });
+    expect(body.currentLevels).toMatchObject({ critical: 0, low: 1, ok: 1 });
+    expect(body.currentLevels).not.toHaveProperty('pending');
 
     expect(body.products.withMovements).toBe(3);
     expect(body.products.mostMoved[0]).toMatchObject({

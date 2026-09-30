@@ -14,6 +14,8 @@ describe('computeStockLevel — mínimo y stock objetivo (docs/BUSINESS_RULES.md
     // Ejemplo acordado: mínimo 20, objetivo 50 → punto medio 35.
     ['19', '20', '50', 'critical'],
     ['20', '20', '50', 'critical'], // exactamente el mínimo ya es crítico
+    ['30', '20', '50', 'low'],
+    ['36', '20', '50', 'ok'],
     ['20.01', '20', '50', 'low'],
     ['35', '20', '50', 'low'], // el punto medio es bajo
     ['35.01', '20', '50', 'ok'],
@@ -42,16 +44,17 @@ describe('computeStockLevel — mínimo y stock objetivo (docs/BUSINESS_RULES.md
     ['0', '0', 'critical'],
     ['20', '20', 'critical'],
     ['19', '20', 'critical'],
-    ['20.01', '20', 'pending'],
-    ['1000', '20', 'pending'],
+    ['20.01', '20', 'ok'],
+    ['1000', '20', 'ok'],
   ] as const)(
-    'sin objetivo (producto anterior): actual %s / mínimo %s → %s (nunca «bajo» inventado)',
+    'sin objetivo (producto anterior): actual %s / mínimo %s → %s (sin umbral de «bajo» inventado)',
     (current, minimum, expected) => {
       expect(computeStockLevel(current, minimum, null)).toBe(expected);
     },
   );
 
-  it('el nivel es total: exactamente uno de los cuatro cumple el predicado', () => {
+  it('solo tres estados, y el nivel es total: exactamente uno cumple el predicado', () => {
+    expect(STOCK_LEVELS).toEqual(['critical', 'low', 'ok']);
     for (const [current, minimum, target] of [
       ['2', '3', '8'],
       ['3', '3', '8'],
@@ -72,6 +75,7 @@ describe('computeSuggestedPurchase — objetivo − actual, exacto', () => {
   it.each([
     ['19', '50', '31'], // ejemplo acordado: comprar 31 para llegar a 50
     ['20', '50', '30'],
+    ['30', '50', '20'], // bajo: también se sugiere cuánto falta para el objetivo
     ['0', '12.5', '12.5'],
     ['3.25', '8', '4.75'],
     ['0.01', '0.5', '0.49'],
@@ -95,11 +99,12 @@ describe('SQL de niveles — la misma regla en Postgres', () => {
   it('mismas ramas y orden que computeStockLevel, con el punto medio sin dividir', () => {
     for (const text of [buildStockLevelIdsSql('ok').strings.join(' '), STOCK_LEVEL_CASE_SQL.sql]) {
       const critical = text.indexOf('"current_quantity" <= ');
-      const pending = text.indexOf('"target_quantity" IS NULL');
+      const withoutTarget = text.indexOf('"target_quantity" IS NULL THEN \'ok\'');
       const low = text.indexOf('"current_quantity" * 2 <= ');
       expect(critical).toBeGreaterThan(-1);
-      expect(pending).toBeGreaterThan(critical);
-      expect(low).toBeGreaterThan(pending);
+      expect(withoutTarget).toBeGreaterThan(critical);
+      expect(low).toBeGreaterThan(withoutTarget);
+      expect(text).not.toContain('pending');
       expect(text).not.toMatch(/\/\s*2|ROUND|FLOOR|CEIL/i);
     }
   });

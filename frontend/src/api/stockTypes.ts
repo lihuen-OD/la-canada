@@ -25,11 +25,11 @@ export type DestinationType = 'VEHICLE' | 'SECTOR';
 /**
  * Nivel calculado por el BACKEND (`stock/stockLevel.ts`), con mínimo y
  * objetivo: `critical` actual ≤ mínimo; `low` hasta el punto medio
- * (mínimo + objetivo) / 2; `ok` por encima; `pending` fuera de crítico y sin
- * objetivo cargado (producto anterior: estado neutral de configuración).
+ * (mínimo + objetivo) / 2; `ok` por encima. Un producto anterior sin objetivo
+ * es `critical` (≤ mínimo) u `ok` (> mínimo): nunca hay un cuarto estado.
  * El frontend nunca lo recalcula: solo lo muestra (y dibuja su barra).
  */
-export type StockLevel = 'ok' | 'low' | 'critical' | 'pending';
+export type StockLevel = 'ok' | 'low' | 'critical';
 export type StockListSort = 'area' | 'name';
 export type StockDestinationStatusFilter = 'active' | 'all';
 
@@ -259,14 +259,7 @@ export interface StockReportSummary {
     critical: number;
     low: number;
     ok: number;
-    pending: number;
-    byArea: {
-      area: StockItemArea;
-      critical: number;
-      low: number;
-      ok: number;
-      pending: number;
-    }[];
+    byArea: { area: StockItemArea; critical: number; low: number; ok: number }[];
   };
   products: {
     withMovements: number;

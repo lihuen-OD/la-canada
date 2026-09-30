@@ -53,26 +53,25 @@ export const OPERATIONAL_MOVEMENT_ORDER: readonly OperationalMovementType[] = [
   'ADJUSTMENT_DECREASE',
 ];
 
-/**
- * Etiquetas del prototipo (`OK`/`Bajo`/`Crítico`) para el `stockLevel` que
- * devuelve el backend, más el estado neutral de un producto sin objetivo.
- */
+/** Etiquetas del prototipo (`OK`/`Bajo`/`Crítico`) para el `stockLevel` que devuelve el backend. */
 export const LEVEL_LABEL: Record<StockLevel, string> = {
   ok: 'OK',
   low: 'Bajo',
   critical: 'Crítico',
-  pending: 'Stock objetivo pendiente',
 };
 
 export const LEVEL_TONE: Record<StockLevel, BadgeTone> = {
   ok: 'positive',
   low: 'warning',
   critical: 'danger',
-  pending: 'neutral',
 };
 
-/** Texto de un producto anterior sin stock objetivo cargado. */
-export const TARGET_PENDING_TEXT = 'Stock objetivo pendiente';
+/** Compras: prioridad textual derivada del nivel (crítico antes que bajo). */
+export const LEVEL_PRIORITY: Record<Exclude<StockLevel, 'ok'>, string> = {
+  critical: 'Prioridad alta',
+  low: 'Prioridad media',
+};
+
 /** Compras: en lugar de una cantidad inventada cuando falta el objetivo. */
 export const COMPLETE_TARGET_TEXT = 'Completar stock objetivo';
 /** Ayuda del campo en altas y ediciones. */

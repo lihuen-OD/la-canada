@@ -590,7 +590,6 @@ function CurrentLevelsCard({ summary }: { summary: StockReportSummary }) {
             <th scope="col">Críticos</th>
             <th scope="col">Bajos</th>
             <th scope="col">Normales</th>
-            <th scope="col">Sin objetivo</th>
           </tr>
         </thead>
         <tbody>
@@ -603,19 +602,18 @@ function CurrentLevelsCard({ summary }: { summary: StockReportSummary }) {
               <td>{row.critical}</td>
               <td>{row.low}</td>
               <td>{row.ok}</td>
-              <td>{row.pending}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      {summary.currentLevels.critical > 0 ? (
+      {summary.currentLevels.critical + summary.currentLevels.low > 0 ? (
         <p className="stock-reports__link">
           <Link to="/stock/purchases">
-            <span aria-hidden="true">🛒 </span>Ver productos críticos en Compras
+            <span aria-hidden="true">🛒 </span>Ver productos críticos y bajos en Compras
           </Link>
         </p>
       ) : (
-        <p className="stock-reports__note">No hay productos críticos.</p>
+        <p className="stock-reports__note">No hay productos críticos ni bajos.</p>
       )}
     </Card>
   );

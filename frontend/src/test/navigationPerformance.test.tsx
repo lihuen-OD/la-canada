@@ -339,10 +339,10 @@ describe('Stock — subvistas SPA (Etapa 5C.2)', () => {
 
     await user.click(within(stockNav()).getByRole('link', { name: 'Compras' }));
     await screen.findByText('1 producto por reponer');
-    // Compras lista solo críticos: UNA consulta (antes críticos + bajos).
+    // Compras: una consulta por nivel (críticos y bajos), sin duplicados.
     const purchases = gets().filter((call) => call.includes('stockLevel='));
-    expect(purchases).toHaveLength(1);
-    expect(purchases[0]).toContain('stockLevel=critical');
+    expect(purchases).toHaveLength(2);
+    expect(new Set(purchases).size).toBe(2);
 
     await user.click(within(stockNav()).getByRole('link', { name: 'Reportes' }));
     await screen.findByRole('region', { name: 'Resumen del período' });

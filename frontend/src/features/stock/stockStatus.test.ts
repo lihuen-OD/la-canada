@@ -15,24 +15,26 @@ describe('cantidad sugerida de Compras: responsabilidad exclusiva del backend', 
   });
 });
 
-describe('stockBarPercent — actual / objetivo', () => {
-  it('representa actual / objetivo', () => {
-    expect(stockBarPercent('25', '50')).toBe(50);
-    expect(stockBarPercent('19', '50')).toBe(38);
-    expect(stockBarPercent('0', '50')).toBe(0);
+describe('stockBarPercent', () => {
+  it('con objetivo: actual / objetivo', () => {
+    expect(stockBarPercent('25', '20', '50')).toBe(50);
+    expect(stockBarPercent('19', '20', '50')).toBe(38);
+    expect(stockBarPercent('0', '20', '50')).toBe(0);
   });
 
   it('por encima del objetivo: el stock puede superarlo, la barra se limita a 100%', () => {
-    expect(stockBarPercent('50', '50')).toBe(100);
-    expect(stockBarPercent('80', '50')).toBe(100);
+    expect(stockBarPercent('50', '20', '50')).toBe(100);
+    expect(stockBarPercent('80', '20', '50')).toBe(100);
   });
 
-  it('sin objetivo (producto anterior) → null: la UI oculta la barra', () => {
-    expect(stockBarPercent('7', null)).toBeNull();
+  it('sin objetivo (producto anterior): la fórmula previa, min(100, round(stock / (min*2) * 100))', () => {
+    expect(stockBarPercent('10', '10', null)).toBe(50);
+    expect(stockBarPercent('30', '10', null)).toBe(100);
+    expect(stockBarPercent('7', '0', null)).toBeNull(); // mínimo 0: sin barra
   });
 
   it('cantidad no numérica → null', () => {
-    expect(stockBarPercent('abc', '10')).toBeNull();
+    expect(stockBarPercent('abc', '10', '20')).toBeNull();
   });
 });
 

@@ -21,10 +21,11 @@ export interface InventoryFilters {
   stockLevel: StockLevel | '';
 }
 
+export type PurchaseLevelFilter = 'all' | 'critical' | 'low';
 export type AreaFilter = 'all' | StockItemArea;
 
-/** Compras lista solo críticos: no hay filtro por nivel. */
 export interface PurchaseFilters {
+  level: PurchaseLevelFilter;
   area: AreaFilter;
   categoryId: string;
   q: string;
@@ -60,7 +61,7 @@ const EMPTY_INVENTORY: InventoryFilters = {
 
 export const INITIAL_STOCK_VIEW_STATE: StockViewState = {
   inventory: { HOUSE: EMPTY_INVENTORY, GARDEN: EMPTY_INVENTORY },
-  purchases: { area: 'all', categoryId: '', q: '' },
+  purchases: { level: 'all', area: 'all', categoryId: '', q: '' },
   reports: null,
 };
 

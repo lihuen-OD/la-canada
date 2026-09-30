@@ -140,7 +140,9 @@ describe('Dashboard de Inicio', () => {
     // Igual al mínimo ya es crítico; sin objetivo, no se inventa una cantidad.
     const legacy = within(card).getByText('Producto sintético antiguo').closest('li')!;
     expect(within(legacy as HTMLElement).getByText('Completar stock objetivo')).toBeInTheDocument();
-    expect(legacy.querySelector('.home-stock__bar')).toBeNull();
+    // Sin objetivo, la barra previa (5 / (5 × 2) = 50%) y el estado sigue siendo «Crítico».
+    expect(legacy.querySelector('.home-stock__bar')).not.toBeNull();
+    expect(within(legacy as HTMLElement).getByText('Crítico')).toBeInTheDocument();
     expect(card).not.toHaveTextContent(/Bajo/);
     expect(within(card).getByRole('link', { name: 'Ver compras' })).toHaveAttribute(
       'href',

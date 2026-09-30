@@ -329,10 +329,9 @@ describe('getStockReportSummary — DTO sin mezclar unidades', () => {
       critical: 1,
       low: 2,
       ok: 5,
-      pending: 0,
       byArea: [
-        { area: 'HOUSE', critical: 1, low: 0, ok: 5, pending: 0 },
-        { area: 'GARDEN', critical: 0, low: 2, ok: 0, pending: 0 },
+        { area: 'HOUSE', critical: 1, low: 0, ok: 5 },
+        { area: 'GARDEN', critical: 0, low: 2, ok: 0 },
       ],
     });
     expect(summary.products.withMovements).toBe(2);

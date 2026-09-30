@@ -127,7 +127,11 @@ function DashboardContent({ data, refreshing }: { data: DashboardResponse; refre
             {data.stockAlerts.length ? (
               <ul className="home-list">
                 {data.stockAlerts.map((item) => {
-                  const percent = stockBarPercent(item.currentQuantity, item.targetQuantity);
+                  const percent = stockBarPercent(
+                    item.currentQuantity,
+                    item.minimumQuantity,
+                    item.targetQuantity,
+                  );
                   return (
                     <li className="home-stock" key={item.id}>
                       <span className="home-stock__body">

@@ -111,6 +111,8 @@ beforeAll(async () => {
   // Ejemplo acordado: mínimo 20, objetivo 50 → punto medio 35.
   await createItem('bajo-minimo', '19', '20', '50');
   await createItem('igual-minimo', '20', '20', '50');
+  await createItem('bajo-30', '30', '20', '50');
+  await createItem('normal-36', '36', '20', '50');
   await createItem('punto-medio', '35', '20', '50');
   await createItem('sobre-medio', '35.01', '20', '50');
   await createItem('sobre-objetivo', '80', '20', '50');
@@ -120,7 +122,7 @@ beforeAll(async () => {
   // Stock cero y mínimo cero.
   await createItem('cero-cero', '0', '0', '10');
   // Productos anteriores sin objetivo.
-  await createItem('antiguo-pendiente', '25', '20', null);
+  await createItem('antiguo-normal', '25', '20', null);
   await createItem('antiguo-critico', '20', '20', null);
   // Inactivo y crítico: nunca en Compras ni en Inicio.
   await createItem('inactivo-critico', '0', '5', '10', false);
@@ -153,9 +155,9 @@ describe('niveles con stock objetivo — misma regla en Postgres y en el DTO', (
   it('el filtro por nivel coincide con los límites acordados, sin redondear el punto medio', async () => {
     const expected: Record<string, string[]> = {
       critical: ['bajo-minimo', 'igual-minimo', 'cero-cero', 'antiguo-critico'],
-      low: ['punto-medio', 'medio-decimal'],
-      ok: ['sobre-medio', 'sobre-objetivo', 'medio-decimal-ok'],
-      pending: ['antiguo-pendiente'],
+      low: ['bajo-30', 'punto-medio', 'medio-decimal'],
+      // Sin objetivo y por encima del mínimo: normal (nunca un cuarto estado).
+      ok: ['normal-36', 'sobre-medio', 'sobre-objetivo', 'medio-decimal-ok', 'antiguo-normal'],
     };
     for (const [level, keys] of Object.entries(expected)) {
       const response = await list(employee, { stockLevel: level, status: 'active' });
@@ -167,7 +169,7 @@ describe('niveles con stock objetivo — misma regla en Postgres y en el DTO', (
     }
   });
 
-  it('DTO: objetivo, cantidad sugerida exacta y «pendiente» sin inventar valores', async () => {
+  it('DTO: objetivo, cantidad sugerida exacta y productos antiguos con estado válido', async () => {
     // `status=all` es de ADMIN (regla existente); el DTO es el mismo para todos.
     const response = await list(admin, { status: 'all' });
     const byId = new Map(
@@ -181,6 +183,16 @@ describe('niveles con stock objetivo — misma regla en Postgres y en el DTO', (
       suggestedPurchaseQuantity: '31',
     });
     expect(byId.get(ids['medio-decimal']!)).toMatchObject({ suggestedPurchaseQuantity: '2.5' });
+    expect(byId.get(ids['bajo-30']!)).toMatchObject({
+      stockLevel: 'low',
+      suggestedPurchaseQuantity: '20',
+    });
+    expect(byId.get(ids['normal-36']!)).toMatchObject({ stockLevel: 'ok' });
+    expect(byId.get(ids['antiguo-normal']!)).toMatchObject({
+      targetQuantity: null,
+      stockLevel: 'ok',
+      suggestedPurchaseQuantity: null,
+    });
     expect(byId.get(ids['sobre-objetivo']!)).toMatchObject({
       stockLevel: 'ok',
       suggestedPurchaseQuantity: '0',
@@ -192,7 +204,7 @@ describe('niveles con stock objetivo — misma regla en Postgres y en el DTO', (
     });
   });
 
-  it('Compras (críticos activos) excluye bajos e inactivos', async () => {
+  it('Compras (críticos y bajos activos, por separado) excluye inactivos; los bajos traen su sugerencia', async () => {
     const response = await list(employee, {
       stockLevel: 'critical',
       status: 'active',
@@ -200,22 +212,28 @@ describe('niveles con stock objetivo — misma regla en Postgres y en el DTO', (
     });
     expect(idsOf(response.body)).not.toContain(ids['inactivo-critico']);
     expect(idsOf(response.body)).not.toContain(ids['punto-medio']);
+    const low = await list(employee, { stockLevel: 'low', status: 'active', sort: 'name' });
+    const low30 = (low.body.items as { id: string }[]).find((item) => item.id === ids['bajo-30']);
+    expect(low30).toMatchObject({ stockLevel: 'low', suggestedPurchaseQuantity: '20' });
     // El inactivo conserva su nivel matemático (visible para ADMIN con status=all).
     const all = await list(admin, { stockLevel: 'critical', status: 'all' });
     expect(idsOf(all.body)).toContain(ids['inactivo-critico']);
   });
 
-  it('reportes: «Estado actual» cuenta con la misma regla (solo activos), incluidos los pendientes', async () => {
+  it('reportes: «Estado actual» cuenta con la misma regla (solo activos), sin un cuarto estado', async () => {
     const today = new Date().toISOString().slice(0, 10);
     const response = await request(app)
       .get('/api/v1/stock/reports/summary')
       .set(as(employee))
       .query({ from: today, to: today, categoryId });
     expect(response.status).toBe(200);
-    expect(response.body.currentLevels).toMatchObject({ critical: 4, low: 2, ok: 3, pending: 1 });
+    expect(response.body.currentLevels).toEqual(
+      expect.objectContaining({ critical: 4, low: 3, ok: 5 }),
+    );
+    expect(response.body.currentLevels).not.toHaveProperty('pending');
   });
 
-  it('Inicio muestra críticos (igual al mínimo incluido) y excluye bajos, pendientes e inactivos', async () => {
+  it('Inicio muestra críticos (igual al mínimo incluido) y excluye bajos, normales e inactivos', async () => {
     const response = await request(app).get('/api/v1/dashboard').set(as(employee));
     expect(response.status).toBe(200);
     const alerts = (response.body.stockAlerts as { id: string; stockLevel: string }[]).filter(
@@ -300,7 +318,7 @@ describe('alta y edición del objetivo', () => {
   });
 
   it('un producto antiguo se desactiva sin completar el objetivo; EMPLOYEE no edita', async () => {
-    const itemId = ids['antiguo-pendiente']!;
+    const itemId = ids['antiguo-normal']!;
     const off = await request(app)
       .patch(`/api/v1/stock/items/${itemId}/status`)
       .set(as(admin))

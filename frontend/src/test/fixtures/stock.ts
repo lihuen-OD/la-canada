@@ -88,7 +88,7 @@ export function makeZeroMinItem(): StockItem {
   });
 }
 
-/** Producto anterior al stock objetivo: sin objetivo, fuera de crítico → pendiente. */
+/** Producto anterior al stock objetivo: sin objetivo y por encima del mínimo → normal. */
 export function makeLegacyItem(overrides: Partial<StockItem> = {}): StockItem {
   return makeItem({
     id: '00000000-0000-4000-8000-00000000i005',
@@ -96,7 +96,7 @@ export function makeLegacyItem(overrides: Partial<StockItem> = {}): StockItem {
     minimumQuantity: '10',
     targetQuantity: null,
     currentQuantity: '12',
-    stockLevel: 'pending',
+    stockLevel: 'ok',
     suggestedPurchaseQuantity: null,
     ...overrides,
   });
@@ -177,10 +177,9 @@ export function emptyReportSummary(from = '2026-08-27', to = '2026-09-25'): Stoc
       critical: 0,
       low: 0,
       ok: 0,
-      pending: 0,
       byArea: [
-        { area: 'HOUSE', critical: 0, low: 0, ok: 0, pending: 0 },
-        { area: 'GARDEN', critical: 0, low: 0, ok: 0, pending: 0 },
+        { area: 'HOUSE', critical: 0, low: 0, ok: 0 },
+        { area: 'GARDEN', critical: 0, low: 0, ok: 0 },
       ],
     },
     products: { withMovements: 0, mostMoved: [], mostConsumed: [] },

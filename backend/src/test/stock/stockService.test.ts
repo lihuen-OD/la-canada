@@ -943,13 +943,14 @@ describe('updateStockItem / setStockItemActive', () => {
     });
   });
 
-  it('producto antiguo sin objetivo: «pendiente» y se puede renombrar/desactivar sin completarlo', async () => {
+  it('producto antiguo sin objetivo: estado válido (normal/crítico) y se puede renombrar/desactivar sin completarlo', async () => {
     const fake = getFakeStockPrisma();
     Object.assign(fake.items.get(ITEM_DETERGENTE)!, { targetQuantity: null, currentQuantity: '8' });
     const legacy = await getStockItem(ITEM_DETERGENTE);
+    // Actual 8 > mínimo 1: normal (sin objetivo no hay umbral de bajo ni cuarto estado).
     expect(legacy.item).toMatchObject({
       targetQuantity: null,
-      stockLevel: 'pending',
+      stockLevel: 'ok',
       suggestedPurchaseQuantity: null,
     });
     await updateStockItem(admin, ITEM_DETERGENTE, { name: 'Detergente viejo' }, meta);

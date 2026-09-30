@@ -272,13 +272,13 @@ describe('Stock — tarjetas y reglas de estado', () => {
     const bar = okRow.querySelector('progress.stock-item__bar') as HTMLProgressElement;
     expect(bar.value).toBe(83); // 25 / 30
 
-    // Producto anterior sin objetivo: sin barra ni nivel inventado.
+    // Producto anterior sin objetivo: la fila de siempre (actual / mínimo y la
+    // barra previa) con un estado válido — nunca un cuarto estado.
     const legacyRow = screen.getByText(legacy.name).closest('li') as HTMLElement;
-    expect(legacyRow.querySelector('progress')).toBeNull();
-    expect(visibleText(legacyRow)).toContain('12 kg · mín. 10');
-    expect(
-      within(legacyRow).getByText('Stock objetivo pendiente', { selector: '.badge' }),
-    ).toBeInTheDocument();
+    expect(visibleText(legacyRow)).toContain('12 / 10 kg');
+    expect((legacyRow.querySelector('progress') as HTMLProgressElement).value).toBe(60);
+    expect(within(legacyRow).getByText('OK', { selector: '.badge' })).toBeInTheDocument();
+    expect(legacyRow).not.toHaveTextContent(/pendiente/i);
   });
 
   it('por encima del objetivo la barra se limita al 100% (no es un máximo); mínimo 0 también tiene barra', async () => {
@@ -297,14 +297,15 @@ describe('Stock — tarjetas y reglas de estado', () => {
     expect((zeroMin.querySelector('progress') as HTMLProgressElement).value).toBe(70);
   });
 
-  it('crítico sin objetivo: badge «Crítico» y aviso «Stock objetivo pendiente»', async () => {
+  it('crítico sin objetivo: badge «Crítico», sin ningún estado extra', async () => {
     await renderInventory([
       makeLegacyItem({ currentQuantity: '4', stockLevel: 'critical' }),
       OK_ITEM,
     ]);
     const row = screen.getByText('Producto sintético sin objetivo').closest('li') as HTMLElement;
     expect(within(row).getByText('Crítico', { selector: '.badge' })).toBeInTheDocument();
-    expect(within(row).getByText('Stock objetivo pendiente')).toBeInTheDocument();
+    expect(row.querySelectorAll('.badge')).toHaveLength(1);
+    expect(row).not.toHaveTextContent(/pendiente/i);
   });
 });
 
@@ -333,7 +334,7 @@ describe('Stock — paginación', () => {
     expect(api.fetchStockItems).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }));
   });
 
-  it('barra ⚠️ de críticos: solo con todas las páginas cargadas y con el nivel del backend', async () => {
+  it('barra ⚠️ de bajos y críticos: solo con todas las páginas cargadas y con el nivel del backend', async () => {
     api.fetchStockItems.mockResolvedValueOnce({
       ...itemsList([OK_ITEM, LOW_ITEM]),
       page: 1,
@@ -344,7 +345,7 @@ describe('Stock — paginación', () => {
     renderStock();
     await screen.findByText(LOW_ITEM.name);
     // Con una página pendiente el conteo sería parcial: no se muestra.
-    expect(screen.queryByText(/bajo el mínimo/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/con stock bajo o/)).not.toBeInTheDocument();
 
     api.fetchStockItems.mockResolvedValueOnce({
       ...itemsList([CRIT_ITEM]),
@@ -353,12 +354,10 @@ describe('Stock — paginación', () => {
       total: 3,
     });
     await userEvent.setup().click(screen.getByRole('button', { name: /cargar más/i }));
-    // Solo críticos (en el mínimo o por debajo): el bajo no es una alerta.
-    const alert = (await screen.findByText(/1 ítem en o bajo el\s+mínimo/)).closest(
+    const alert = (await screen.findByText(/2 ítems con stock bajo o\s+crítico/)).closest(
       'p',
     ) as HTMLElement;
-    expect(alert).toHaveTextContent(CRIT_ITEM.name);
-    expect(alert).not.toHaveTextContent(LOW_ITEM.name);
+    expect(alert).toHaveTextContent(`${LOW_ITEM.name}, ${CRIT_ITEM.name}`);
     expect(alert).not.toHaveTextContent(OK_ITEM.name);
   });
 
@@ -981,8 +980,8 @@ describe('Stock — stockLevel y filtro de nivel server-side', () => {
 });
 
 describe('Stock — 🛒 Compras (vista derivada)', () => {
-  // Ejemplo acordado: mínimo 20, objetivo 50, actual 19 → comprar 31.
-  const EXAMPLE = makeItem({
+  // Ejemplo acordado: mínimo 20, objetivo 50 (punto medio 35).
+  const CRITICAL_19 = makeItem({
     id: '00000000-0000-4000-8000-00000000i020',
     name: 'Bolsas de basura sintéticas',
     unit: 'u',
@@ -992,9 +991,19 @@ describe('Stock — 🛒 Compras (vista derivada)', () => {
     stockLevel: 'critical',
     suggestedPurchaseQuantity: '31',
   });
+  const LOW_30 = makeItem({
+    id: '00000000-0000-4000-8000-00000000i021',
+    name: 'Detergente sintético',
+    unit: 'u',
+    minimumQuantity: '20',
+    targetQuantity: '50',
+    currentQuantity: '30',
+    stockLevel: 'low',
+    suggestedPurchaseQuantity: '20',
+  });
   // Decimales: objetivo 8, actual 3.25 → 4.75 kg.
   const DECIMAL = makeItem({
-    id: '00000000-0000-4000-8000-00000000i021',
+    id: '00000000-0000-4000-8000-00000000i022',
     name: 'Fertilizante sintético',
     minimumQuantity: '3.5',
     targetQuantity: '8',
@@ -1002,42 +1011,52 @@ describe('Stock — 🛒 Compras (vista derivada)', () => {
     stockLevel: 'critical',
     suggestedPurchaseQuantity: '4.75',
   });
+  // Producto anterior sin objetivo, en crítico: estado válido, sin cantidad inventada.
   const NO_TARGET = makeLegacyItem({
     name: 'Producto sintético antiguo',
     currentQuantity: '2',
     stockLevel: 'critical',
   });
 
-  function mockPurchases(critical = [EXAMPLE, DECIMAL, NO_TARGET]) {
+  function mockPurchases(critical = [CRITICAL_19, DECIMAL, NO_TARGET], low = [LOW_30]) {
     api.fetchStockCategories.mockResolvedValue(categoriesResponse());
     api.fetchStockItems.mockImplementation(async (params: { stockLevel?: string }) =>
-      itemsList(params.stockLevel === 'critical' ? critical : []),
+      itemsList(
+        params.stockLevel === 'critical' ? critical : params.stockLevel === 'low' ? low : [],
+      ),
     );
   }
 
-  it('pide SOLO críticos activos al backend (nunca bajos), ordenados por nombre', async () => {
+  it('pide críticos y bajos activos al backend, ordenados por nombre, críticos primero', async () => {
     mockPurchases();
     renderStock('/stock/purchases');
-    expect(await screen.findByText('3 productos por reponer')).toBeInTheDocument();
+    expect(await screen.findByText('4 productos por reponer')).toBeInTheDocument();
     expect(itemCalls({ stockLevel: 'critical', status: 'active', sort: 'name' })).toHaveLength(1);
-    expect(itemCalls({ stockLevel: 'low' })).toHaveLength(0);
-    expect(screen.getByRole('region', { name: /Críticos/ })).toHaveTextContent('Críticos (3)');
-    expect(screen.queryByRole('group', { name: 'Filtrar por nivel' })).not.toBeInTheDocument();
+    expect(itemCalls({ stockLevel: 'low', status: 'active', sort: 'name' })).toHaveLength(1);
+    const sections = screen.getAllByRole('region');
+    expect(sections[0]).toHaveTextContent('Críticos (3)');
+    expect(sections[1]).toHaveTextContent('Bajos (1)');
     expect(screen.getByText(/no es una orden de compra/i)).toBeInTheDocument();
   });
 
-  it('cada fila: actual / objetivo, mínimo, nivel y la cantidad sugerida con su unidad', async () => {
+  it('cada fila: actual / mínimo · objetivo, nivel, prioridad y la cantidad sugerida con su unidad', async () => {
     mockPurchases();
     renderStock('/stock/purchases');
-    const row = (await screen.findByText(EXAMPLE.name)).closest('li') as HTMLElement;
-    expect(within(row).getByText('Crítico', { selector: '.badge' })).toBeInTheDocument();
-    expect(within(row).getByText('Prioridad alta')).toBeInTheDocument();
-    expect(visibleText(row)).toContain('19 / 50 u · mín. 20');
-    expect(within(row).getByText('Comprar: 31 u')).toBeInTheDocument();
+    const critical = (await screen.findByText(CRITICAL_19.name)).closest('li') as HTMLElement;
+    expect(within(critical).getByText('Crítico', { selector: '.badge' })).toBeInTheDocument();
+    expect(within(critical).getByText('Prioridad alta')).toBeInTheDocument();
+    expect(visibleText(critical)).toContain('19 / 20 u · objetivo 50');
+    expect(within(critical).getByText('Comprar: 31 u')).toBeInTheDocument();
+    // Bajo: también sugiere cuánto falta para el objetivo (50 − 30).
+    const low = screen.getByText(LOW_30.name).closest('li') as HTMLElement;
+    expect(within(low).getByText('Bajo', { selector: '.badge' })).toBeInTheDocument();
+    expect(within(low).getByText('Prioridad media')).toBeInTheDocument();
+    expect(within(low).getByText('Comprar: 20 u')).toBeInTheDocument();
     const decimal = screen.getByText(DECIMAL.name).closest('li') as HTMLElement;
     expect(within(decimal).getByText('Comprar: 4.75 kg')).toBeInTheDocument();
-    // Sin objetivo: nunca una cantidad inventada.
+    // Sin objetivo: «Completar stock objetivo» SOLO en lugar de la cantidad; el estado no cambia.
     const legacy = screen.getByText(NO_TARGET.name).closest('li') as HTMLElement;
+    expect(within(legacy).getByText('Crítico', { selector: '.badge' })).toBeInTheDocument();
     expect(within(legacy).getByText('Completar stock objetivo')).toBeInTheDocument();
     expect(legacy).not.toHaveTextContent(/Comprar:/);
   });
@@ -1047,7 +1066,7 @@ describe('Stock — 🛒 Compras (vista derivada)', () => {
     Object.defineProperty(navigator, 'share', { configurable: true, value: share });
     mockPurchases();
     renderStock('/stock/purchases');
-    await screen.findByText('3 productos por reponer');
+    await screen.findByText('4 productos por reponer');
     const user = userEvent.setup();
     await user.click(
       within(screen.getByRole('group', { name: 'Agrupar compras' })).getByRole('button', {
@@ -1059,11 +1078,16 @@ describe('Stock — 🛒 Compras (vista derivada)', () => {
     await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
     const text = share.mock.calls[0]?.[0].text as string;
     expect(text).toContain(
-      '• Bolsas de basura sintéticas — comprar: 31 u (actual: 19 u; mínimo: 20 u; objetivo: 50 u)',
+      '• Bolsas de basura sintéticas — actual: 19 u; mínimo: 20 u; objetivo: 50 u; comprar: 31 u',
     );
-    expect(text).toContain('• Fertilizante sintético — comprar: 4.75 kg');
     expect(text).toContain(
-      '• Producto sintético antiguo — Completar stock objetivo (actual: 2 kg; mínimo: 10 kg; stock objetivo pendiente)',
+      '• Detergente sintético — actual: 30 u; mínimo: 20 u; objetivo: 50 u; comprar: 20 u',
+    );
+    expect(text).toContain(
+      '• Fertilizante sintético — actual: 3.25 kg; mínimo: 3.5 kg; objetivo: 8 kg; comprar: 4.75 kg',
+    );
+    expect(text).toContain(
+      '• Producto sintético antiguo — actual: 2 kg; mínimo: 10 kg; Completar stock objetivo',
     );
     expect(await screen.findByText('Lista compartida.')).toBeInTheDocument();
     Object.defineProperty(navigator, 'share', { configurable: true, value: undefined });
@@ -1079,18 +1103,31 @@ describe('Stock — 🛒 Compras (vista derivada)', () => {
     });
     mockPurchases();
     renderStock('/stock/purchases');
-    await screen.findByText('3 productos por reponer');
+    await screen.findByText('4 productos por reponer');
     await user.click(screen.getByRole('button', { name: /compartir/i }));
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     expect(writeText.mock.calls[0]?.[0]).toContain('comprar: 31 u');
+    expect(writeText.mock.calls[0]?.[0]).toContain('comprar: 20 u');
     expect(await screen.findByText('Lista copiada al portapapeles.')).toBeInTheDocument();
   });
 
-  it('filtros: área y búsqueda viajan al backend, siempre sobre críticos', async () => {
+  it('filtros: «Bajos» y «Críticos» consultan solo ese nivel; área y búsqueda viajan al backend', async () => {
     mockPurchases();
     renderStock('/stock/purchases');
-    await screen.findByText('3 productos por reponer');
+    await screen.findByText('4 productos por reponer');
     const user = userEvent.setup();
+    const levels = () => within(screen.getByRole('group', { name: 'Filtrar por nivel' }));
+
+    await user.click(levels().getByRole('button', { name: /bajos/i }));
+    expect(await screen.findByText('1 producto por reponer')).toBeInTheDocument();
+    const low = screen.getByText(LOW_30.name).closest('li') as HTMLElement;
+    expect(within(low).getByText('Comprar: 20 u')).toBeInTheDocument();
+    expect(screen.queryByText(CRITICAL_19.name)).not.toBeInTheDocument();
+
+    await user.click(levels().getByRole('button', { name: /críticos/i }));
+    expect(await screen.findByText('3 productos por reponer')).toBeInTheDocument();
+    expect(screen.queryByText(LOW_30.name)).not.toBeInTheDocument();
+
     api.fetchStockItems.mockClear();
     await user.click(
       within(screen.getByRole('group', { name: 'Filtrar por área' })).getByRole('button', {
@@ -1100,37 +1137,37 @@ describe('Stock — 🛒 Compras (vista derivada)', () => {
     await waitFor(() =>
       expect(itemCalls({ stockLevel: 'critical', area: 'GARDEN' }).length).toBeGreaterThan(0),
     );
-    expect(itemCalls({ stockLevel: 'low' })).toHaveLength(0);
+    expect(itemCalls({ stockLevel: 'low', area: 'GARDEN' })).toHaveLength(0);
   });
 
   it('vacío positivo: «No hay compras pendientes»', async () => {
-    mockPurchases([]);
+    mockPurchases([], []);
     renderStock('/stock/purchases');
     expect(await screen.findByText('No hay compras pendientes.')).toBeInTheDocument();
   });
 
-  it('registrar una entrada desde Compras invalida la lista y el producto que salió de crítico desaparece', async () => {
+  it('registrar una entrada desde Compras invalida la lista y el producto que volvió a normal desaparece', async () => {
     mockPurchases();
     api.createStockMovement.mockResolvedValue({ movement: {}, item: {} });
     renderStock('/stock/purchases');
-    const row = (await screen.findByText(EXAMPLE.name)).closest('li') as HTMLElement;
+    const row = (await screen.findByText(LOW_30.name)).closest('li') as HTMLElement;
     const user = userEvent.setup();
     await user.click(within(row).getByRole('button', { name: /registrar entrada/i }));
     const dialog = await screen.findByRole('dialog');
-    await user.type(within(dialog).getByLabelText('Cantidad'), '31');
+    await user.type(within(dialog).getByLabelText('Cantidad'), '20');
 
-    // A partir de ahora el backend ya no lo devuelve como crítico.
-    mockPurchases([DECIMAL, NO_TARGET]);
+    // A partir de ahora el backend ya no lo devuelve como bajo.
+    mockPurchases([CRITICAL_19, DECIMAL, NO_TARGET], []);
     await user.click(within(dialog).getByRole('button', { name: /registrar movimiento/i }));
 
     expect(await screen.findByText('Ingreso registrado.')).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByText(EXAMPLE.name)).not.toBeInTheDocument());
-    expect(screen.getByText(DECIMAL.name)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(LOW_30.name)).not.toBeInTheDocument());
+    expect(screen.getByText(CRITICAL_19.name)).toBeInTheDocument();
     // La sugerencia no registró nada: el ingreso es el movimiento explícito.
     expect(api.createStockMovement).toHaveBeenCalledTimes(1);
     expect(api.createStockMovement).toHaveBeenCalledWith(
-      EXAMPLE.id,
-      expect.objectContaining({ type: 'INCOME', quantity: '31' }),
+      LOW_30.id,
+      expect.objectContaining({ type: 'INCOME', quantity: '20' }),
       expect.stringMatching(/^[A-Za-z0-9_-]{8,64}$/),
     );
   });
@@ -1146,11 +1183,14 @@ describe('Stock — 🛒 Compras (vista derivada)', () => {
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('Stock objetivo'), { target: { value: '15' } });
     // El backend devuelve el producto con su nueva sugerencia (15 − 2).
-    mockPurchases([
-      EXAMPLE,
-      DECIMAL,
-      { ...NO_TARGET, targetQuantity: '15', suggestedPurchaseQuantity: '13' },
-    ]);
+    mockPurchases(
+      [
+        CRITICAL_19,
+        DECIMAL,
+        { ...NO_TARGET, targetQuantity: '15', suggestedPurchaseQuantity: '13' },
+      ],
+      [LOW_30],
+    );
     await user.click(within(dialog).getByRole('button', { name: 'Guardar cambios' }));
     expect(api.updateStockItem).toHaveBeenCalledWith(NO_TARGET.id, { targetQuantity: '15' });
     const updated = (await screen.findByText('Comprar: 13 kg')).closest('li') as HTMLElement;

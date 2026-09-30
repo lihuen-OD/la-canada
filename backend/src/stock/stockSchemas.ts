@@ -174,7 +174,7 @@ export const listStockItemsQuerySchema = z
     q: z.string().min(1).max(100).optional(),
     /** Filtro server-side por nivel (ver `stock/stockLevel.ts`); la paginación se aplica después. */
     stockLevel: z
-      .enum(['ok', 'low', 'critical', 'pending'], { message: 'Nivel de stock inválido.' })
+      .enum(['ok', 'low', 'critical'], { message: 'Nivel de stock inválido.' })
       .optional(),
     /**
      * Orden del listado: `area` (Casa primero, luego nombre — inventario) o

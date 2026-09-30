@@ -18,7 +18,6 @@ import {
   AREA_LABEL,
   LEVEL_LABEL,
   LEVEL_TONE,
-  TARGET_PENDING_TEXT,
   MOVEMENT_FILTER_ORDER,
   MOVEMENT_LABEL,
   formatStockDay,
@@ -131,7 +130,7 @@ export function StockDetailDialog({ item, onCancel, onSessionExpired }: StockDet
             <dd>
               {latestItem.targetQuantity !== null
                 ? `${latestItem.targetQuantity} ${latestItem.unit}`
-                : TARGET_PENDING_TEXT}
+                : '—'}
             </dd>
           </div>
           <div>

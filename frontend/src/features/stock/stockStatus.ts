@@ -6,20 +6,23 @@
  */
 
 /**
- * Porcentaje de barra: actual / objetivo, limitado a 100% SOLO en la
- * representación (un ingreso puede dejar el stock por encima del objetivo).
- * Sin objetivo (producto anterior) no hay referencia: `null` y la UI oculta
- * la barra y muestra «Stock objetivo pendiente».
+ * Porcentaje de barra (solo representación, tope visual 100%: un ingreso
+ * puede dejar el stock por encima del objetivo):
+ *  - con objetivo: actual / objetivo;
+ *  - producto anterior sin objetivo: la fórmula previa del prototipo,
+ *    `min(100, round(stock / (min*2) * 100))`; con mínimo `0` devuelve `null`
+ *    y la UI oculta la barra (un 100% fijo sería engañoso).
  */
 export function stockBarPercent(
   currentQuantity: string,
+  minimumQuantity: string,
   targetQuantity: string | null,
 ): number | null {
-  if (targetQuantity === null) return null;
-  const target = Number(targetQuantity);
   const current = Number(currentQuantity);
-  if (!(target > 0) || !Number.isFinite(current)) return null;
-  return Math.min(100, Math.max(0, Math.round((current / target) * 100)));
+  if (!Number.isFinite(current)) return null;
+  const reference = targetQuantity !== null ? Number(targetQuantity) : Number(minimumQuantity) * 2;
+  if (!(reference > 0)) return null;
+  return Math.min(100, Math.max(0, Math.round((current / reference) * 100)));
 }
 
 /** `+`/`−`/nada según el efecto del movimiento sobre el saldo (display nomás). */
