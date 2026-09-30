@@ -10,7 +10,8 @@ import { matchesStockLevel, STOCK_LEVEL_IDS_SQL_PREFIX } from '../../stock/stock
  * toma/restaura un snapshot para imitar el rollback de PostgreSQL también
  * cuando el movimiento o la auditoría fallan después de actualizar el saldo,
  * y serializa las transacciones para poder ejercitar la colisión idempotente.
- * `$queryRaw` implementa UNA sola consulta — el filtro server-side por nivel
+ * `$queryRaw` implementa DOS consultas — los nombres visibles de un lote de
+ * usuarios y el filtro server-side por nivel
  * de `stock/stockLevel.ts` — con la misma semántica que su SQL y falla en
  * voz alta ante cualquier otra.
  */
@@ -64,6 +65,7 @@ export interface FakeMovement {
   quantity: string;
   effectiveDate: Date;
   employeeId: string | null;
+  participantUserId: string | null;
   destinationId: string | null;
   reason: string | null;
   reference: string | null;
@@ -101,7 +103,9 @@ export interface FakeStockSeed {
   items?: Omit<FakeStockItem, 'createdAt' | 'updatedAt'>[];
   destinations?: FakeDestination[];
   employees?: FakeEmployeeSummary[];
-  movements?: Omit<FakeMovement, 'createdAt' | 'updatedAt'>[];
+  movements?: (Omit<FakeMovement, 'createdAt' | 'updatedAt' | 'participantUserId'> & {
+    participantUserId?: string | null;
+  })[];
 }
 
 export interface FakeStockCalls {
@@ -204,6 +208,10 @@ export interface FakeStockPrisma {
 export interface FakeUserIdentity {
   employee: { displayName: string } | null;
   personalProfile: { displayName: string | null } | null;
+  /** Para validar un participante ADMIN (por defecto: ADMIN activo sin ficha). */
+  role?: 'ADMIN' | 'EMPLOYEE';
+  status?: string;
+  employeeId?: string | null;
 }
 
 export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma {
@@ -246,7 +254,12 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
     for (const row of newSeed.destinations ?? []) destinations.set(row.id, row);
     for (const row of newSeed.employees ?? []) employees.set(row.id, row);
     for (const row of newSeed.movements ?? []) {
-      movements.push({ ...row, createdAt: now, updatedAt: now });
+      movements.push({
+        ...row,
+        participantUserId: row.participantUserId ?? null,
+        createdAt: now,
+        updatedAt: now,
+      });
     }
   }
   reset(seed);
@@ -296,11 +309,24 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
     return true;
   }
 
+  function identityOf(userId: string) {
+    const user = users.get(userId);
+    return user
+      ? {
+          id: userId,
+          employeeId: user.employeeId ?? null,
+          employee: user.employee,
+          personalProfile: user.personalProfile,
+        }
+      : null;
+  }
+
   function withRelations(row: FakeMovement) {
     const destination = row.destinationId ? destinations.get(row.destinationId) : undefined;
     return {
       ...row,
       employee: row.employeeId ? summaryOf(employees.get(row.employeeId)) : null,
+      participantUser: row.participantUserId ? identityOf(row.participantUserId) : null,
       // Proyecta como el `select` real del service (sin `active`).
       destination: destination
         ? { id: destination.id, name: destination.name, type: destination.type }
@@ -501,6 +527,7 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
           ...data,
           quantity: String(data.quantity),
           employeeId: data.employeeId ?? null,
+          participantUserId: data.participantUserId ?? null,
           destinationId: data.destinationId ?? null,
           reason: data.reason ?? null,
           reference: data.reference ?? null,
@@ -619,6 +646,22 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
      */
     $queryRaw: async (query: any) => {
       const first = query?.strings?.[0];
+      // Segunda consulta admitida: nombres visibles de un lote de usuarios
+      // (`findUserIdentities`), resueltos desde `users` como la real.
+      if (typeof query?.sql === 'string' && query.sql.includes('FROM "users" u')) {
+        const [fallback, ...ids] = query.values as string[];
+        return ids
+          .filter((id) => users.has(id))
+          .map((id) => {
+            const user = users.get(id)!;
+            return {
+              id,
+              employeeId: user.employeeId ?? null,
+              displayName:
+                user.employee?.displayName ?? user.personalProfile?.displayName ?? fallback,
+            };
+          });
+      }
       if (typeof first !== 'string' || !first.startsWith(STOCK_LEVEL_IDS_SQL_PREFIX)) {
         throw new Error(
           `fakeStockPrisma: consulta $queryRaw no soportada: ${String(first ?? query)}`,
@@ -631,6 +674,18 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
       return [...items.values()]
         .filter((row) => matchesStockLevel(row.currentQuantity, row.minimumQuantity, level))
         .map((row) => ({ id: row.id }));
+    },
+    user: {
+      findUnique: async ({ where }: any) => {
+        const user = users.get(where.id);
+        return user
+          ? {
+              role: user.role ?? 'ADMIN',
+              status: user.status ?? 'ACTIVE',
+              employeeId: user.employeeId ?? null,
+            }
+          : null;
+      },
     },
     auditLog: {
       create: async ({ data }: any) => {
@@ -651,10 +706,7 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
               row.action === where.action &&
               (where.entityId.in as string[]).includes(row.entityId),
           )
-          .map((row) => ({
-            entityId: row.entityId,
-            actor: row.actorUserId ? (users.get(row.actorUserId) ?? null) : null,
-          })),
+          .map((row) => ({ entityId: row.entityId, actorUserId: row.actorUserId })),
     },
     $transaction: async (fn: (tx: any) => Promise<any>) => {
       const previous = transactionTail;

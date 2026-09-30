@@ -264,6 +264,11 @@ model User {
   /// plano del jardín. Siempre un ADMIN (el servicio lo exige otra vez).
   publishedGardenPlanVersions GardenPlanVersion[] @relation("GardenPlanVersionPublishedBy")
 
+  /// Participante ADMIN sin `Employee` (quien consumió / juntó), distinto del
+  /// actor que registró. Ver `StockMovement.participantUserId`.
+  participatedStockMovements StockMovement[] @relation("StockMovementParticipantUser")
+  participatedEggCollections EggCollection[] @relation("EggCollectionParticipantUser")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -644,6 +649,14 @@ model StockMovement {
   employeeId String?   @map("employee_id") @db.Uuid
   employee   Employee? @relation(fields: [employeeId], references: [id])
 
+  /// Persona que realizó el movimiento cuando es un ADMIN SIN `Employee`
+  /// (un ADMIN con ficha usa `employeeId`: nunca las dos). Distinta del actor
+  /// que lo registró (la auditoría `stock.movement.created`). CHECK en la
+  /// migración: `employee_id` y `participant_user_id` no pueden estar ambos.
+  /// Nula en los movimientos anteriores: nunca se deduce del autor.
+  participantUserId String? @map("participant_user_id") @db.Uuid
+  participantUser   User?   @relation("StockMovementParticipantUser", fields: [participantUserId], references: [id], onDelete: Restrict)
+
   destinationId String?                 @map("destination_id") @db.Uuid
   destination   ConsumptionDestination? @relation(fields: [destinationId], references: [id])
 
@@ -655,6 +668,7 @@ model StockMovement {
 
   @@index([stockItemId])
   @@index([employeeId])
+  @@index([participantUserId])
   @@index([destinationId])
   @@map("stock_movements")
 }
@@ -1071,6 +1085,11 @@ model EggCollection {
   employeeId String?   @map("employee_id") @db.Uuid
   employee   Employee? @relation(fields: [employeeId], references: [id])
 
+  /// Quien juntó cuando es un ADMIN SIN `Employee` (mismo criterio que
+  /// `StockMovement.participantUserId`; CHECK de exclusión con `employee_id`).
+  participantUserId String? @map("participant_user_id") @db.Uuid
+  participantUser   User?   @relation("EggCollectionParticipantUser", fields: [participantUserId], references: [id], onDelete: Restrict)
+
   notes String?
 
   /// Etapa 5G — actor real (User de la sesión) que registró la recolección.
@@ -1091,6 +1110,7 @@ model EggCollection {
 
   @@index([chickenCoopId])
   @@index([employeeId])
+  @@index([participantUserId])
   /// Etapa 5G — métricas por período e historial paginado por fecha.
   @@index([collectionDate])
   @@map("egg_collections")

@@ -41,13 +41,17 @@ const api = vi.hoisted(() => ({
   deleteStockItem: vi.fn(),
   deleteStockDestination: vi.fn(),
 }));
-const { useAuthMock, logoutMock, fetchTaskEmployeesMock } = vi.hoisted(() => ({
-  useAuthMock: vi.fn(),
-  logoutMock: vi.fn(),
-  fetchTaskEmployeesMock: vi.fn(),
-}));
+const { useAuthMock, logoutMock, fetchTaskEmployeesMock, fetchParticipantsMock } = vi.hoisted(
+  () => ({
+    useAuthMock: vi.fn(),
+    logoutMock: vi.fn(),
+    fetchTaskEmployeesMock: vi.fn(),
+    fetchParticipantsMock: vi.fn(),
+  }),
+);
 vi.mock('../../api/stockApi', () => api);
 vi.mock('../../api/tasksApi', () => ({ fetchTaskEmployees: fetchTaskEmployeesMock }));
+vi.mock('../../api/participantsApi', () => ({ fetchParticipants: fetchParticipantsMock }));
 vi.mock('../../auth/useAuth', () => ({ useAuth: useAuthMock }));
 
 import { StockModule } from './StockModule';
@@ -107,6 +111,8 @@ beforeEach(() => {
   logoutMock.mockReset();
   fetchTaskEmployeesMock.mockReset();
   fetchTaskEmployeesMock.mockResolvedValue({ employees: [] });
+  fetchParticipantsMock.mockReset();
+  fetchParticipantsMock.mockResolvedValue({ participants: [] });
   api.fetchStockDestinations.mockResolvedValue({ destinations: [] });
   api.fetchStockReportSummary.mockResolvedValue(emptyReportSummary());
   api.fetchStockReportMovements.mockResolvedValue(reportMovementsList());
@@ -479,7 +485,9 @@ describe('Stock — diálogos de movimiento', () => {
     const body = api.createStockMovement.mock.calls[0]?.[1];
     expect(body.type).toBe('ADJUSTMENT_INCREASE');
     expect(body.reason).toBe('Conteo sintético');
-    expect(body.employeeId).toBeNull();
+    // Por defecto, la persona es el propio ADMIN (sin ficha): su usuario.
+    expect(body.participantUserId).toBe('u-a');
+    expect(body).not.toHaveProperty('employeeId');
   });
 
   it.each([
@@ -505,7 +513,7 @@ describe('Stock — diálogos de movimiento', () => {
       type,
       quantity: '1.25',
       effectiveDate: '2020-01-02',
-      employeeId: null,
+      participantUserId: 'u-a',
     });
   });
 
@@ -709,6 +717,37 @@ describe('Stock — detalle e historial', () => {
     expect(await meta('Por la persona')).toContain('Persona sintética');
     expect(await meta('Apertura')).toContain('Sin persona registrada');
     expect(dialog).not.toHaveTextContent('Admin que mira');
+  });
+
+  it('Benja registra que Viki consumió: «Viki · Registró: Benja»; sin «Registró» si es la misma persona', async () => {
+    api.fetchStockItem.mockResolvedValue({ item: OK_ITEM });
+    api.fetchStockItemMovements.mockResolvedValue(
+      movementsList([
+        makeMovement({
+          id: 'm-viki',
+          reason: 'Bolsa de basura',
+          participantUser: { id: 'u-viki', displayName: 'Viki sintética' },
+          recordedBy: { displayName: 'Benja sintético' },
+        }),
+        makeMovement({
+          id: 'm-self',
+          reason: 'Uso propio',
+          participantUser: { id: 'u-benja', displayName: 'Benja sintético' },
+          recordedBy: null,
+        }),
+      ]),
+    );
+    await renderInventory();
+    await userEvent.setup().click(
+      within(screen.getByText(OK_ITEM.name).closest('li') as HTMLElement).getByRole('button', {
+        name: /historial/i,
+      }),
+    );
+    const dialog = await screen.findByRole('dialog');
+    const meta = async (reason: string) =>
+      (await within(dialog).findByText(new RegExp(reason))).closest('p')?.textContent ?? '';
+    expect(await meta('Bolsa de basura')).toMatch(/^Viki sintética · Registró: Benja sintético/);
+    expect(await meta('Uso propio')).toMatch(/^Benja sintético · Uso propio/);
   });
 
   it('una respuesta anterior no sobrescribe un filtro de historial más nuevo', async () => {
@@ -1085,7 +1124,7 @@ describe('Stock — 📊 Reportes', () => {
     expect(screen.getAllByText('No hubo consumos en el período.')).toHaveLength(2);
     // Los catálogos de los filtros avanzados no se piden hasta abrirlos.
     expect(api.fetchStockDestinations).not.toHaveBeenCalled();
-    expect(fetchTaskEmployeesMock).not.toHaveBeenCalled();
+    expect(fetchParticipantsMock).not.toHaveBeenCalled();
   });
 
   it('cantidades por unidad (nunca un total mezclado) y conteos por tipo', async () => {
@@ -1136,8 +1175,11 @@ describe('Stock — 📊 Reportes', () => {
   });
 
   it('«Más filtros» carga sus catálogos y envía persona/destino/tipo al backend', async () => {
-    fetchTaskEmployeesMock.mockResolvedValue({
-      employees: [{ id: 'e-sint', displayName: 'Persona sintética', colorHex: '#4a7c59' }],
+    fetchParticipantsMock.mockResolvedValue({
+      participants: [
+        { kind: 'ADMIN', id: 'u-viki', displayName: 'Viki sintética', colorHex: null },
+        { kind: 'EMPLOYEE', id: 'e-sint', displayName: 'Persona sintética', colorHex: '#4a7c59' },
+      ],
     });
     api.fetchStockDestinations.mockResolvedValue({ destinations: [DESTINATION] });
     renderStock('/stock/reports');
@@ -1145,13 +1187,23 @@ describe('Stock — 📊 Reportes', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Más filtros' }));
     expect(api.fetchStockDestinations).toHaveBeenCalledWith('active');
-    await user.selectOptions(await screen.findByLabelText('Persona'), 'e-sint');
+    await screen.findByRole('option', { name: '🔐 Viki sintética' });
+    await user.selectOptions(screen.getByLabelText('Persona'), 'EMPLOYEE:e-sint');
     await user.selectOptions(screen.getByLabelText('Tipo de movimiento'), 'CONSUMPTION');
     await waitFor(() =>
       expect(api.fetchStockReportSummary).toHaveBeenLastCalledWith(
         expect.objectContaining({ employeeId: 'e-sint', type: 'CONSUMPTION' }),
       ),
     );
+    // Un administrador se filtra por su usuario, nunca por nombre ni como empleado.
+    await user.selectOptions(screen.getByLabelText('Persona'), 'ADMIN:u-viki');
+    await waitFor(() =>
+      expect(api.fetchStockReportMovements).toHaveBeenLastCalledWith(
+        expect.objectContaining({ participantUserId: 'u-viki' }),
+      ),
+    );
+    const last = api.fetchStockReportMovements.mock.calls.at(-1)?.[0];
+    expect(last).not.toHaveProperty('employeeId');
     // El destino es opcional en cualquier tipo de movimiento.
     await user.selectOptions(screen.getByLabelText('Tipo de movimiento'), 'INCOME');
     expect(screen.getByLabelText('Destino')).toBeInTheDocument();
@@ -1168,15 +1220,23 @@ describe('Stock — 📊 Reportes', () => {
       ...counts,
     });
     summary.employees = [
-      { employee: null, recordedBy: null, total: 4, byType: byType({ OPENING_BALANCE: 4 }) },
       {
         employee: null,
+        participantUser: null,
+        recordedBy: null,
+        total: 4,
+        byType: byType({ OPENING_BALANCE: 4 }),
+      },
+      {
+        employee: null,
+        participantUser: null,
         recordedBy: { displayName: 'Admin sintética Uno' },
         total: 2,
         byType: byType({ INCOME: 2 }),
       },
       {
         employee: null,
+        participantUser: null,
         recordedBy: { displayName: 'Admin sintético Dos' },
         total: 1,
         byType: byType({ CONSUMPTION: 1 }),
@@ -1198,6 +1258,7 @@ describe('Stock — 📊 Reportes', () => {
         active: true,
       },
       employee: null,
+      participantUser: null,
       recordedBy,
       destination: null,
     });

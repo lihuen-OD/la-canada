@@ -405,10 +405,12 @@ describe('historial, anulación y consultas', () => {
     );
     // auth + singleton + página de fechas + total de fechas + recolecciones
     // + sus personas (Prisma resuelve el `select` anidado como una sentencia
-    // aparte, ver ARCHITECTURE §22). Fijo: no depende de cuántos días o
-    // recolecciones trae la página.
-    expect(sql, sql.join(' | ')).toHaveLength(6);
-    expect(sql.filter((statement) => statement.includes('employees'))).toHaveLength(2);
+    // aparte, ver ARCHITECTURE §22) + los nombres visibles de quienes juntaron
+    // (administradores sin ficha) y registraron, en UNA sentencia agrupada.
+    // Fijo: no depende de cuántos días o recolecciones trae la página.
+    expect(sql, sql.join(' | ')).toHaveLength(7);
+    expect(sql.filter((statement) => statement.includes('employees'))).toHaveLength(3);
+    expect(sql.filter((statement) => statement.includes('user_profiles'))).toHaveLength(1);
     const day = result.body.days.find((entry: { date: string }) => entry.date === '2001-01-03');
     expect(day).toMatchObject({ goodEggs: 6, brokenEggs: 2 });
     expect(day.collections).toHaveLength(2);

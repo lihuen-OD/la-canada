@@ -219,9 +219,18 @@ export const createStockMovementBodySchema = z
      * de la sesión y queda en la auditoría.
      */
     employeeId: uuidSchema.nullable().optional(),
+    /**
+     * Solo ADMIN: un administrador activo SIN ficha de empleado como persona
+     * del movimiento (incluido él mismo). Excluyente con `employeeId`; el
+     * servicio valida rol, estado y que no tenga ficha.
+     */
+    participantUserId: uuidSchema.optional(),
     reason: plainText('El motivo', 3, STOCK_REASON_MAX_LENGTH).optional(),
   })
-  .strict();
+  .strict()
+  .refine((body) => !(body.participantUserId && body.employeeId), {
+    message: 'Elegí una sola persona.',
+  });
 
 export const listStockMovementsQuerySchema = z
   .object({
@@ -250,10 +259,21 @@ const stockReportFilterShape = {
   type: z.enum(ALL_MOVEMENT_TYPES, { message: 'Tipo de movimiento inválido.' }).optional(),
   itemId: uuidSchema.optional(),
   employeeId: uuidSchema.optional(),
+  /** Persona = un administrador sin ficha (excluyente con `employeeId`). */
+  participantUserId: uuidSchema.optional(),
   destinationId: uuidSchema.optional(),
 };
 
-export const stockReportSummaryQuerySchema = z.object(stockReportFilterShape).strict();
+const singlePerson = {
+  check: (filters: { employeeId?: string; participantUserId?: string }) =>
+    !(filters.employeeId && filters.participantUserId),
+  message: { message: 'Filtrá por una sola persona.' },
+};
+
+export const stockReportSummaryQuerySchema = z
+  .object(stockReportFilterShape)
+  .strict()
+  .refine(singlePerson.check, singlePerson.message);
 
 export const stockReportMovementsQuerySchema = z
   .object({
@@ -266,4 +286,5 @@ export const stockReportMovementsQuerySchema = z
       .max(50)
       .default(20),
   })
-  .strict();
+  .strict()
+  .refine(singlePerson.check, singlePerson.message);

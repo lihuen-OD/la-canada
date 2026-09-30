@@ -38,6 +38,7 @@ import {
   type RequestMeta,
   type StockActor,
 } from '../../stock/stockService';
+import { createStockMovementBodySchema } from '../../stock/stockSchemas';
 import {
   fakeAnonymousP2002,
   fakeLegacyP2002,
@@ -593,7 +594,12 @@ describe('listStockMovements — autor de los movimientos sin persona asociada',
       personalProfile: { displayName: 'Admin sintético Dos' },
     });
     users.set(USER_ADMIN_NO_NAME, { employee: null, personalProfile: null });
-    users.set(USER_EMPLOYEE, { employee: { displayName: 'Juan Pérez' }, personalProfile: null });
+    users.set(USER_EMPLOYEE, {
+      employee: { displayName: 'Juan Pérez' },
+      personalProfile: null,
+      role: 'EMPLOYEE',
+      employeeId: EMP_JUAN,
+    });
   });
 
   const income = (actor: StockActor, extra: Record<string, unknown> = {}) =>
@@ -629,16 +635,91 @@ describe('listStockMovements — autor de los movimientos sin persona asociada',
     expect(JSON.stringify(first)).not.toContain(USER_ADMIN_A);
   });
 
-  it('la persona asociada se conserva: ni el empleado ni lo registrado a su nombre se reemplazan', async () => {
+  it('la persona asociada se conserva; el autor aparece aparte solo si registró a nombre de otra', async () => {
     const own = await income(employee);
     const onBehalf = await income(adminA, { employeeId: EMP_JUAN });
     const { movements } = await listStockMovements(ITEM_FERTILIZANTE, { page: 1, pageSize: 50 });
-    for (const id of [own.movement.id, onBehalf.movement.id]) {
-      expect(movements.find((row) => row.id === id)).toMatchObject({
-        employee: { id: EMP_JUAN, displayName: 'Juan Pérez' },
-        recordedBy: null,
-      });
+    expect(movements.find((row) => row.id === own.movement.id)).toMatchObject({
+      employee: { id: EMP_JUAN, displayName: 'Juan Pérez' },
+      participantUser: null,
+      recordedBy: null,
+    });
+    expect(movements.find((row) => row.id === onBehalf.movement.id)).toMatchObject({
+      employee: { id: EMP_JUAN, displayName: 'Juan Pérez' },
+      participantUser: null,
+      recordedBy: { displayName: 'Admin sintética Uno' },
+    });
+  });
+
+  it('Benja (ADMIN) registra que Viki (ADMIN sin ficha) consumió: participante y autor por separado', async () => {
+    const created = await createStockMovement(
+      adminA,
+      ITEM_FERTILIZANTE,
+      { type: 'CONSUMPTION', quantity: '1', participantUserId: USER_ADMIN_B } as never,
+      meta,
+      NOW,
+    );
+    expect(created.movement).toMatchObject({
+      employee: null,
+      participantUser: { id: USER_ADMIN_B, displayName: 'Admin sintético Dos' },
+      recordedBy: { displayName: 'Admin sintética Uno' },
+    });
+    const stored = getFakeStockPrisma().movements.find((row) => row.id === created.movement.id)!;
+    expect(stored).toMatchObject({ employeeId: null, participantUserId: USER_ADMIN_B });
+    // El autor sale de la sesión (auditoría), nunca del cuerpo.
+    const audit = getFakeStockPrisma().auditLogs.find(
+      (row) => row.entityId === created.movement.id,
+    )!;
+    expect(audit.actorUserId).toBe(USER_ADMIN_A);
+    expect(audit.newState).toMatchObject({ employeeId: null, participantUserId: USER_ADMIN_B });
+
+    // Otra sesión que consulta ve lo mismo.
+    const { movements } = await listStockMovements(ITEM_FERTILIZANTE, { page: 1, pageSize: 50 });
+    expect(movements.find((row) => row.id === created.movement.id)).toEqual(created.movement);
+  });
+
+  it('un ADMIN puede elegirse a sí mismo: no se repite como autor', async () => {
+    const created = await income(adminA, { participantUserId: USER_ADMIN_A });
+    expect(created.movement).toMatchObject({
+      participantUser: { id: USER_ADMIN_A, displayName: 'Admin sintética Uno' },
+      recordedBy: null,
+    });
+  });
+
+  it('rechaza personas inválidas: no ADMIN, inactivo, con ficha, inexistente, o dos a la vez', async () => {
+    const { users } = getFakeStockPrisma();
+    const SUSPENDED = 'd4d4d4d4-0000-4000-8000-00000000000d';
+    const WITH_EMPLOYEE = 'e5e5e5e5-0000-4000-8000-00000000000e';
+    const MISSING = 'f6f6f6f6-0000-4000-8000-00000000000f';
+    users.set(SUSPENDED, { employee: null, personalProfile: null, status: 'SUSPENDED' });
+    users.set(WITH_EMPLOYEE, {
+      employee: { displayName: 'Juan Pérez' },
+      personalProfile: null,
+      employeeId: EMP_JUAN,
+    });
+    const before = getFakeStockPrisma().movements.length;
+    for (const target of [USER_EMPLOYEE, SUSPENDED, WITH_EMPLOYEE, MISSING]) {
+      await expect(income(adminA, { participantUserId: target })).rejects.toThrow(
+        'La persona elegida no existe o está inactiva.',
+      );
     }
+    expect(getFakeStockPrisma().movements.length).toBe(before);
+    expect(
+      createStockMovementBodySchema.safeParse({
+        type: 'INCOME',
+        quantity: '1',
+        employeeId: EMP_JUAN,
+        participantUserId: USER_ADMIN_B,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('EMPLOYEE conserva sus permisos: no puede elegir a un administrador', async () => {
+    await expect(income(employee, { participantUserId: USER_ADMIN_A })).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
+    const own = await income(employee);
+    expect(own.movement).toMatchObject({ employee: { id: EMP_JUAN }, participantUser: null });
   });
 
   it('sin nombre cargado, el ADMIN se ve «Administrador» (nunca el username)', async () => {

@@ -69,6 +69,8 @@ export function AdminUsersScreen() {
 
   const load = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.admin.users(userId) });
+    // Un administrador creado, renombrado o dado de baja cambia los selectores de participantes.
+    void queryClient.invalidateQueries({ queryKey: queryKeys.participants(userId) });
   }, [queryClient, userId]);
 
   const retry = useCallback(() => {
@@ -209,6 +211,9 @@ export function AdminUsersScreen() {
             // Su nombre también titula su cumpleaños (Eventos, Inicio).
             void queryClient.invalidateQueries({ queryKey: queryKeys.more.events(userId) });
             void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard(userId) });
+            // Y figura como participante o autor en Stock y Gallinero.
+            void queryClient.invalidateQueries({ queryKey: queryKeys.stock.all(userId) });
+            void queryClient.invalidateQueries({ queryKey: queryKeys.chickenCoop.all(userId) });
           }}
           onSessionExpired={() => void logout()}
         />

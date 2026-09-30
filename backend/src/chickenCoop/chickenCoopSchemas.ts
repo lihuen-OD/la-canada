@@ -72,6 +72,11 @@ export const createEggCollectionBodySchema = z
      * el servicio); el actor real siempre sale de la sesión.
      */
     employeeId: uuidSchema.optional(),
+    /**
+     * Solo ADMIN: un administrador activo SIN ficha de empleado juntó los
+     * huevos (incluido él mismo). Excluyente con `employeeId`.
+     */
+    participantUserId: uuidSchema.optional(),
     notes: z
       .string({ message: 'Las observaciones deben ser texto.' })
       .transform(normalizeStockText)
@@ -94,6 +99,9 @@ export const createEggCollectionBodySchema = z
   .strict()
   .refine((body) => body.goodEggsCount + body.brokenEggsCount > 0, {
     message: 'Ingresá al menos un huevo.',
+  })
+  .refine((body) => !(body.employeeId && body.participantUserId), {
+    message: 'Elegí una sola persona.',
   });
 
 /** Configuración inicial real (una sola vez): la cantidad de gallinas la informa el ADMIN. */

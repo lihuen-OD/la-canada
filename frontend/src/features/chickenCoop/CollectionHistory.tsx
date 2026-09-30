@@ -16,6 +16,7 @@ import { ConfirmDialog } from '../admin/ConfirmDialog';
 import { errorMessageOf, isSessionExpired } from './chickenCoopErrors';
 import { eggsText, formatDayHeading, formatRate, layingTone } from './chickenCoopLabels';
 import { useChickenCoopCache } from './useChickenCoopCache';
+import { attributedName, recordedByName } from '../../utils/recordAttribution';
 
 /** Días por página: el historial se pagina por días completos, nunca parte un día. */
 export const HISTORY_PAGE_DAYS = 10;
@@ -110,7 +111,7 @@ export function CollectionHistory({ isAdmin, onSessionExpired }: CollectionHisto
       {toVoid ? (
         <ConfirmDialog
           title="¿Eliminar este registro?"
-          description={`${formatDayHeading(toVoid.day)} — ${toVoid.collection.employee?.displayName ?? 'Sin persona'}: ${eggsText(toVoid.collection.goodEggsCount, toVoid.collection.brokenEggsCount)}. Deja de contar en el gallinero; queda en la auditoría.`}
+          description={`${formatDayHeading(toVoid.day)} — ${attributedName(toVoid.collection) ?? 'Sin persona'}: ${eggsText(toVoid.collection.goodEggsCount, toVoid.collection.brokenEggsCount)}. Deja de contar en el gallinero; queda en la auditoría.`}
           confirmLabel="Eliminar"
           tone="danger"
           onCancel={() => setToVoid(null)}
@@ -180,15 +181,19 @@ function HistoryDay({ day, isAdmin, onVoid }: HistoryDayProps) {
       </div>
       <ul className="coop-history__list">
         {day.collections.map((collection) => {
-          const name = collection.employee?.displayName ?? '?';
+          const name = attributedName(collection) ?? '?';
+          const recorder = recordedByName(collection);
           return (
             <li key={collection.id} className="coop-history__item">
               <div className="coop-history__row">
                 {collection.employee ? (
                   <Avatar name={name} colorHex={collection.employee.colorHex} size="sm" />
+                ) : collection.participantUser ? (
+                  <Avatar name={name} variant="admin" size="sm" />
                 ) : null}
                 <span className="coop-history__text">
                   {name} — {eggsText(collection.goodEggsCount, collection.brokenEggsCount)}
+                  {recorder ? ` · Registró: ${recorder}` : ''}
                 </span>
                 {isAdmin ? (
                   <Button

@@ -264,8 +264,10 @@ describe('Stock — cada movimiento muestra a quien corresponde', () => {
       for (const [id, name] of expected()) {
         expect(shown(rows.find((row) => row.id === id)!)).toBe(name);
       }
-      // Con persona asociada no se agrega autor: la persona conserva su significado.
-      expect(rows.find((row) => row.id === onBehalf)!.recordedBy).toBeNull();
+      // Con persona asociada, la persona conserva su significado; como la cargó
+      // otro usuario, el autor aparece aparte («Registró: …»).
+      expect(rows.find((row) => row.id === onBehalf)!.recordedBy).toEqual({ displayName: NAME_A });
+      expect(rows.find((row) => row.id === own)!.recordedBy).toBeNull();
       const text = JSON.stringify(response.body);
       expect(text).not.toContain(`${RUN}-admin`);
       expect(text).not.toContain(adminA.userId);

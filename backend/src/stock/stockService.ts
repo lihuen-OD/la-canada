@@ -33,7 +33,13 @@ import {
 } from '../lib/businessTime';
 import { runEntityDeletion } from '../lib/deletion';
 import { prisma } from '../lib/prisma';
-import { findCreatorsFromAudit, type UserIdentity } from '../lib/userIdentity';
+import { assertParticipantUserAllowed, requireActiveAdminParticipant } from '../lib/participants';
+import {
+  findCreationActors,
+  findUserIdentities,
+  recorderIfDifferent,
+  type RecordCreator,
+} from '../lib/userIdentity';
 import { resolveActor, type RequestMeta, type TaskActor } from '../tasks/tasksService';
 import { buildStockLevelIdsSql, computeStockLevel, type StockLevel } from './stockLevel';
 import {
@@ -146,6 +152,7 @@ const movementSelect = {
   reason: true,
   createdAt: true,
   employee: { select: employeeSummarySelect },
+  participantUserId: true,
   destination: { select: { id: true, name: true, type: true } },
 } as const;
 
@@ -160,20 +167,30 @@ export const MOVEMENT_AUDIT_ENTITY = 'StockMovement';
 export const MOVEMENT_CREATED_ACTION = 'stock.movement.created';
 
 /**
- * Autor de los movimientos SIN persona asociada (un ADMIN sin empleado que
- * eligió «Administrador»): lo único que la pantalla muestra en su lugar. Con
- * persona no hace falta (la persona se conserva tal cual), y las aperturas
- * del seed no tienen auditoría: quedan sin autor. Una sentencia por lote.
+ * Personas ADMIN y autores del lote en DOS sentencias fijas (auditoría de alta
+ * + nombres visibles de todos los usuarios involucrados), sin consultas por
+ * relación ni por movimiento. El autor se muestra solo cuando no es la
+ * persona del movimiento. Las aperturas del seed no tienen auditoría.
  */
-function findMovementCreators(
-  client: Pick<Prisma.TransactionClient, 'auditLog'>,
+async function resolveMovementPeople(
+  client: Pick<Prisma.TransactionClient, 'auditLog' | '$queryRaw'>,
   rows: readonly MovementRow[],
-): Promise<Map<string, UserIdentity>> {
-  return findCreatorsFromAudit(client, {
+): Promise<MovementPeople> {
+  const actors = await findCreationActors(client, {
     entityType: MOVEMENT_AUDIT_ENTITY,
     action: MOVEMENT_CREATED_ACTION,
-    entityIds: rows.filter((row) => row.employee === null).map((row) => row.id),
+    entityIds: rows.map((row) => row.id),
   });
+  const users = await findUserIdentities(client, [
+    ...rows.map((row) => row.participantUserId),
+    ...actors.values(),
+  ]);
+  return { actors, users };
+}
+
+interface MovementPeople {
+  actors: ReadonlyMap<string, string>;
+  users: ReadonlyMap<string, RecordCreator>;
 }
 
 // ── Serialización ─────────────────────────────────────────────────────────
@@ -196,7 +213,9 @@ function serializeItem(row: ItemRow) {
 
 export type SerializedStockItem = ReturnType<typeof serializeItem>;
 
-function serializeMovement(row: MovementRow, creators: ReadonlyMap<string, UserIdentity>) {
+function serializeMovement(row: MovementRow, people: MovementPeople) {
+  const participant = row.participantUserId ? people.users.get(row.participantUserId) : undefined;
+  const actorId = people.actors.get(row.id);
   return {
     id: row.id,
     type: row.type,
@@ -204,9 +223,17 @@ function serializeMovement(row: MovementRow, creators: ReadonlyMap<string, UserI
     // `@db.Date`: Prisma devuelve medianoche UTC = la fecha de calendario.
     effectiveDate: row.effectiveDate.toISOString().slice(0, 10),
     reason: row.reason,
+    /** Persona del movimiento: un empleado… */
     employee: row.employee,
-    /** Quién lo registró — solo se resuelve cuando no hay persona asociada. */
-    recordedBy: row.employee ? null : (creators.get(row.id) ?? null),
+    /** …o un administrador sin ficha (nunca los dos). */
+    participantUser: participant
+      ? { id: participant.userId, displayName: participant.identity.displayName }
+      : null,
+    /** Quién lo registró, solo si no es la persona del movimiento. */
+    recordedBy: recorderIfDifferent(
+      { employeeId: row.employee?.id ?? null, participantUserId: row.participantUserId },
+      (actorId ? people.users.get(actorId) : undefined) ?? null,
+    ),
     destination: row.destination,
     createdAt: row.createdAt.toISOString(),
   };
@@ -340,9 +367,9 @@ export async function listStockMovements(itemId: string, filters: ListMovementsF
       take: filters.pageSize,
     }),
   ]);
-  const creators = await findMovementCreators(prisma, rows);
+  const people = await resolveMovementPeople(prisma, rows);
   return {
-    movements: rows.map((row) => serializeMovement(row, creators)),
+    movements: rows.map((row) => serializeMovement(row, people)),
     page: filters.page,
     pageSize: filters.pageSize,
     total,
@@ -787,6 +814,8 @@ interface MovementWriteContext {
   itemId: string;
   input: CreateMovementInput;
   employeeId: string | null;
+  /** Administrador sin ficha elegido por un ADMIN como persona del movimiento. */
+  participantUserId: string | null;
   quantity: Prisma.Decimal;
   effectiveDate: Date;
   effectiveDateText: string;
@@ -811,6 +840,7 @@ async function writeMovement(
     itemId,
     input,
     employeeId,
+    participantUserId,
     quantity,
     effectiveDate,
     effectiveDateText,
@@ -831,6 +861,13 @@ async function writeMovement(
     if (!chosen || !chosen.active) {
       throw new ValidationError('La persona elegida no existe o está inactiva.');
     }
+  }
+  if (participantUserId) {
+    await requireActiveAdminParticipant(
+      tx,
+      participantUserId,
+      () => new ValidationError('La persona elegida no existe o está inactiva.'),
+    );
   }
 
   if (input.destinationId) {
@@ -880,6 +917,7 @@ async function writeMovement(
       quantity,
       effectiveDate,
       employeeId,
+      participantUserId,
       destinationId: input.destinationId ?? null,
       reason: input.reason ?? null,
       // `reference` es solo idempotencia del seed; la operación normal queda en null.
@@ -898,6 +936,7 @@ async function writeMovement(
       quantity: input.quantity,
       effectiveDate: effectiveDateText,
       employeeId,
+      participantUserId,
       destinationId: input.destinationId ?? null,
       reason: input.reason ?? null,
       actorRole: actor.role,
@@ -922,6 +961,7 @@ export function computeMovementRequestHash(
   input: CreateMovementInput,
   resolvedEffectiveDate: string,
   resolvedEmployeeId: string | null = null,
+  resolvedParticipantUserId: string | null = null,
 ): string {
   const canonical = JSON.stringify({
     endpoint,
@@ -935,6 +975,11 @@ export function computeMovementRequestHash(
     destinationId: input.destinationId?.toLowerCase() ?? null,
     // Persona del movimiento ya resuelta (elegida por ADMIN o la de la sesión).
     employeeId: resolvedEmployeeId?.toLowerCase() ?? null,
+    // Solo presente cuando se eligió a un administrador: la huella de los
+    // requests sin esta opción queda idéntica a la anterior.
+    ...(resolvedParticipantUserId
+      ? { participantUserId: resolvedParticipantUserId.toLowerCase() }
+      : {}),
     reason: input.reason ?? null,
   });
   return createHash('sha256').update(canonical).digest('hex');
@@ -989,9 +1034,18 @@ export async function createStockMovement(
   if (actor.role !== 'ADMIN' && !actor.employeeId) {
     throw new EmployeeLinkRequiredError();
   }
+  assertParticipantUserAllowed(
+    actor,
+    input,
+    'Solo un administrador puede registrar movimientos a nombre de otra persona.',
+  );
   let employeeId = actor.employeeId;
   let chosenEmployeeId: string | null = null;
-  if (input.employeeId !== undefined) {
+  const participantUserId = input.participantUserId?.toLowerCase() ?? null;
+  if (participantUserId) {
+    // ADMIN eligió a un administrador sin ficha (puede ser él mismo).
+    employeeId = null;
+  } else if (input.employeeId !== undefined) {
     const requested = input.employeeId?.toLowerCase() ?? null;
     if (actor.role !== 'ADMIN') {
       if (requested !== actor.employeeId?.toLowerCase()) {
@@ -1015,6 +1069,7 @@ export async function createStockMovement(
     itemId,
     input,
     employeeId,
+    participantUserId,
     quantity,
     effectiveDate,
     effectiveDateText,
@@ -1033,10 +1088,10 @@ export async function createStockMovement(
       prisma.stockItem.findUnique({ where: { id: itemId }, select: itemSelect }),
     ]);
     if (!movementRow || !itemRow) throw new StockItemNotFoundError();
-    const creators = await findMovementCreators(prisma, [movementRow]);
+    const people = await resolveMovementPeople(prisma, [movementRow]);
     return {
       kind: 'created',
-      movement: serializeMovement(movementRow, creators),
+      movement: serializeMovement(movementRow, people),
       item: serializeItem(itemRow),
     };
   }
@@ -1051,6 +1106,7 @@ export async function createStockMovement(
     input,
     effectiveDateText,
     employeeId,
+    participantUserId,
   );
 
   try {
@@ -1076,9 +1132,9 @@ export async function createStockMovement(
           select: itemSelect,
         });
         if (!movementRow || !itemRow) throw new StockItemNotFoundError();
-        const creators = await findMovementCreators(tx, [movementRow]);
+        const people = await resolveMovementPeople(tx, [movementRow]);
         const body = {
-          movement: serializeMovement(movementRow, creators),
+          movement: serializeMovement(movementRow, people),
           item: serializeItem(itemRow),
         };
         // 6) completa el registro en la MISMA transacción: al confirmar, la

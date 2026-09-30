@@ -8,6 +8,7 @@ import { stockRouter } from './stockRoutes';
 import { chickenCoopRouter } from './chickenCoopRoutes';
 import { dashboardRouter } from './dashboardRoutes';
 import { petsRouter } from './petsRoutes';
+import { participantsRouter } from './participantsRoutes';
 import {
   employeesRouter,
   eventsRouter,
@@ -29,6 +30,8 @@ apiV1Router.use('/stock', stockRouter);
 apiV1Router.use('/chicken-coop', chickenCoopRouter);
 apiV1Router.use('/dashboard', dashboardRouter);
 apiV1Router.use('/pets', petsRouter);
+// Personas elegibles como participante de una actividad (empleados y administradores).
+apiV1Router.use('/participants', participantsRouter);
 // ☰ Más (Etapa 5X): Novedades, Eventos, Clima, Fotos, Configuración y Mi perfil.
 apiV1Router.use('/more', moreRouter);
 apiV1Router.use('/news', newsRouter);

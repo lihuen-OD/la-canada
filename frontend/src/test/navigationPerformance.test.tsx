@@ -77,6 +77,15 @@ function body(path: string): unknown {
       latestNews: [],
     };
   if (path.startsWith('/tasks/employees')) return { employees: [PERSON_A, PERSON_B] };
+  if (path.startsWith('/participants')) {
+    return {
+      participants: [
+        { kind: 'ADMIN', id: ADMIN.id, displayName: 'Administrador', colorHex: null },
+        { kind: 'EMPLOYEE', ...PERSON_A },
+        { kind: 'EMPLOYEE', ...PERSON_B },
+      ],
+    };
+  }
   if (path.startsWith('/tasks/history')) return emptyHistory();
   if (path.startsWith('/tasks')) return listResponse([makeTask()]);
   if (path.startsWith('/performance')) return PERF;
@@ -399,10 +408,11 @@ describe('🐔 Gallinero (Etapa 5G)', () => {
     await screen.findByRole('heading', { level: 1, name: 'Gallinero' });
     await screen.findByRole('list', { name: 'Recolecciones por día' });
     // Primera visita: exactamente 1 resumen + 1 página de historial (el
-    // ADMIN además pide las personas elegibles, catálogo compartido).
+    // ADMIN además pide las personas elegibles — empleados y administradores —,
+    // catálogo compartido con Stock).
     expect(count('/chicken-coop/summary')).toBe(1);
     expect(count('/chicken-coop/collections')).toBe(1);
-    expect(count('/tasks/employees')).toBe(1);
+    expect(count('/participants')).toBe(1);
 
     await user.click(within(mainNav()).getByRole('link', { name: 'Tareas' }));
     await screen.findByRole('list', { name: 'Tareas del período' });

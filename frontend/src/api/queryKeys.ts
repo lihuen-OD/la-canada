@@ -20,6 +20,8 @@ const scope = (userId: string) => ['session', userId] as const;
 
 export const queryKeys = {
   dashboard: (userId: string) => [...scope(userId), 'dashboard'] as const,
+  /** Personas elegibles como participante (empleados + administradores activos). */
+  participants: (userId: string) => [...scope(userId), 'participants'] as const,
   tasks: {
     all: (userId: string) => [...scope(userId), 'tasks'] as const,
     list: (userId: string, status: 'active' | 'all') =>
