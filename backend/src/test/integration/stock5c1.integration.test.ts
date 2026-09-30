@@ -231,7 +231,12 @@ async function createActor(
   return { userId: user.id, token };
 }
 
-async function createItem(suffix: string, current: string, minimum = '1'): Promise<string> {
+async function createItem(
+  suffix: string,
+  current: string,
+  minimum = '1',
+  target: string | null = null,
+): Promise<string> {
   const item = await prisma.stockItem.create({
     data: {
       name: `${RUN}-${suffix}`,
@@ -239,6 +244,7 @@ async function createItem(suffix: string, current: string, minimum = '1'): Promi
       categoryId,
       unit: 'unidades',
       minimumQuantity: new Prisma.Decimal(minimum),
+      targetQuantity: target === null ? null : new Prisma.Decimal(target),
       currentQuantity: new Prisma.Decimal(current),
     },
     select: { id: true },
@@ -593,28 +599,35 @@ describe('Idempotency-Key — rollback real en Postgres', () => {
 
 describe('GET /stock/items?stockLevel — SQL parametrizado real', () => {
   it('critical/low/ok se resuelven en Postgres, con conteo y DTO coherentes', async () => {
-    const critical = await createItem('lvl-critical', '0', '0');
-    const low = await createItem('lvl-low', '2', '3');
-    const ok = await createItem('lvl-ok', '3', '3');
+    const critical = await createItem('lvl-critical', '0', '0', '5');
+    const low = await createItem('lvl-low', '2', '1', '5'); // 2 <= (1 + 5) / 2
+    // Sin objetivo (producto anterior) y por encima del mínimo: normal, sin cuarto estado.
+    const legacy = await createItem('lvl-legacy', '3', '1');
+    const ok = await createItem('lvl-ok', '4', '1', '5');
     const list = (level: string) =>
       request(app)
         .get('/api/v1/stock/items')
         .query({ stockLevel: level, q: `${RUN}-lvl-`, status: 'all' })
         .set(as(admin));
-    for (const [level, id] of [
-      ['critical', critical],
-      ['low', low],
-      ['ok', ok],
+    for (const [level, expected] of [
+      ['critical', [critical]],
+      ['low', [low]],
+      ['ok', [legacy, ok]],
     ] as const) {
       const response = await list(level);
       expect(response.status).toBe(200);
-      expect(response.body.total).toBe(1);
-      expect(response.body.items.map((item: { id: string }) => item.id)).toEqual([id]);
-      expect(response.body.items[0].stockLevel).toBe(level);
-      expect(response.body.items[0]).not.toHaveProperty('barPercent');
+      expect(response.body.total).toBe(expected.length);
+      expect(response.body.items.map((item: { id: string }) => item.id).sort()).toEqual(
+        [...expected].sort(),
+      );
+      for (const item of response.body.items) {
+        expect(item.stockLevel).toBe(level);
+        expect(item).not.toHaveProperty('barPercent');
+      }
     }
-    const invalid = await list('bajo');
-    expect(invalid.status).toBe(400);
+    for (const invalid of ['bajo', 'pending']) {
+      expect((await list(invalid)).status).toBe(400);
+    }
   });
 });
 

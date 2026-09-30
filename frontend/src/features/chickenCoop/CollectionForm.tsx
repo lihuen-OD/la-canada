@@ -1,15 +1,11 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { createEggCollection } from '../../api/chickenCoopApi';
 import type { CreateEggCollectionRequest } from '../../api/chickenCoopTypes';
 import { ApiError } from '../../api/httpClient';
 import { OfflineError } from '../../api/transportErrors';
 import { IdempotencyIntent, intentFingerprint } from '../../api/idempotency';
-import { STALE_TIME } from '../../api/queryClient';
-import { queryKeys } from '../../api/queryKeys';
-import { fetchTaskEmployees } from '../../api/tasksApi';
-import { useSessionScope } from '../../api/useSessionScope';
+import { useParticipants } from '../../api/useParticipants';
 import { useAuth } from '../../auth/useAuth';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
@@ -18,6 +14,13 @@ import { useSubmitGuard } from '../tasks/useSubmitGuard';
 import { errorCodeOf, errorMessageOf, isSessionExpired } from './chickenCoopErrors';
 import { eggsText } from './chickenCoopLabels';
 import { useChickenCoopCache } from './useChickenCoopCache';
+import { attributedName } from '../../utils/recordAttribution';
+import {
+  ownParticipantValue,
+  participantLabel,
+  participantParams,
+  participantValue,
+} from '../../utils/participants';
 
 const MAX_EGGS = 10_000;
 const NOTES_MAX = 300;
@@ -53,7 +56,6 @@ export function CollectionForm({ today, onSessionExpired }: CollectionFormProps)
   const formId = useId();
   const { user } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
-  const { userId, enabled } = useSessionScope();
   const invalidate = useChickenCoopCache();
   const { isSubmitting, run } = useSubmitGuard();
   const intentRef = useRef(new IdempotencyIntent());
@@ -67,24 +69,25 @@ export function CollectionForm({ today, onSessionExpired }: CollectionFormProps)
   const [success, setSuccess] = useState<string | null>(null);
   const [phase, setPhase] = useState<SubmitPhase>('idle');
 
-  // Personas elegibles, solo para ADMIN (catálogo compartido con Tareas/Stock).
-  const employeesQuery = useQuery({
-    queryKey: queryKeys.tasks.employees(userId),
-    queryFn: fetchTaskEmployees,
-    enabled: enabled && isAdmin,
-    staleTime: STALE_TIME.catalog,
-  });
-  const employees = employeesQuery.data?.employees ?? [];
-  const expired = isSessionExpired(employeesQuery.error);
+  // Personas elegibles, solo para ADMIN: empleados y administradores activos
+  // (catálogo compartido con Stock).
+  const participantsQuery = useParticipants(isAdmin);
+  const participants = participantsQuery.data?.participants ?? [];
+  const expired = isSessionExpired(participantsQuery.error);
   useEffect(() => {
     if (expired) onSessionExpired();
   }, [expired, onSessionExpired]);
 
-  // Como el `<select>` del prototipo: arranca en la propia persona si la
-  // tiene, si no en la primera persona activa.
-  const ownEmployeeId = user?.employee?.id;
-  const defaultCollector =
-    employees.find((employee) => employee.id === ownEmployeeId)?.id ?? employees[0]?.id ?? '';
+  // Como el `<select>` del prototipo: arranca en la propia persona (su ficha
+  // o, para un ADMIN sin ficha, él mismo), si no en la primera activa.
+  const ownValue = ownParticipantValue(user);
+  const defaultCollector = participants.find(
+    (participant) => participantValue(participant) === ownValue,
+  )
+    ? ownValue
+    : participants[0]
+      ? participantValue(participants[0])
+      : '';
   const selectedCollector = collectorId ?? defaultCollector;
   const effectiveDate = date ?? today;
   const locked = phase === 'pending';
@@ -118,7 +121,8 @@ export function CollectionForm({ today, onSessionExpired }: CollectionFormProps)
       brokenEggsCount,
       collectionDate: effectiveDate,
     };
-    if (isAdmin) body.employeeId = selectedCollector;
+    // El autor nunca viaja: el backend lo toma de la sesión.
+    if (isAdmin) Object.assign(body, participantParams(selectedCollector));
     if (normalizedNotes) body.notes = normalizedNotes;
     return body;
   }
@@ -145,9 +149,10 @@ export function CollectionForm({ today, onSessionExpired }: CollectionFormProps)
         setGood('');
         setBroken('');
         setNotes('');
-        const { goodEggsCount, brokenEggsCount, employee } = response.collection;
+        const { goodEggsCount, brokenEggsCount } = response.collection;
+        const collector = attributedName(response.collection);
         setSuccess(
-          `Recolección registrada: ${eggsText(goodEggsCount, brokenEggsCount)}${employee ? ` (${employee.displayName})` : ''}.`,
+          `Recolección registrada: ${eggsText(goodEggsCount, brokenEggsCount)}${collector ? ` (${collector})` : ''}.`,
         );
         invalidate();
       } catch (caught) {
@@ -245,27 +250,34 @@ export function CollectionForm({ today, onSessionExpired }: CollectionFormProps)
                   id={`${formId}-collector`}
                   className="field__input"
                   value={selectedCollector}
-                  disabled={disabled || employees.length === 0}
+                  disabled={disabled || participants.length === 0}
                   onChange={(event) => {
                     const next = event.target.value;
                     changeField(() => setCollectorId(next));
                   }}
                 >
-                  {employees.length === 0 ? (
+                  {participants.length === 0 ? (
                     <option value="">
-                      {employeesQuery.isPending ? 'Cargando personas…' : 'Sin personas activas'}
+                      {participantsQuery.isPending ? 'Cargando personas…' : 'Sin personas activas'}
                     </option>
                   ) : null}
-                  {employees.map((employee) => (
-                    <option key={employee.id} value={employee.id}>
-                      {employee.displayName}
+                  {participants.map((participant) => (
+                    <option
+                      key={participantValue(participant)}
+                      value={participantValue(participant)}
+                    >
+                      {participantLabel(participant)}
                     </option>
                   ))}
                 </select>
-                {employeesQuery.isError && !expired ? (
+                {participantsQuery.isError && !expired ? (
                   <p className="field__hint">
                     No pudimos cargar las personas.{' '}
-                    <Button size="sm" variant="ghost" onClick={() => void employeesQuery.refetch()}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void participantsQuery.refetch()}
+                    >
                       Reintentar
                     </Button>
                   </p>

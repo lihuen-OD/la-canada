@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requireJsonContentType } from '../middleware/requireJsonContentType';
 import { requireAuth } from '../middleware/requireAuth';
 import {
+  getPetDueHandler,
   getPetHandler,
   getPetPhotoHandler,
   getPetRecordsHandler,
@@ -11,6 +12,7 @@ import {
   patchPet,
   patchPetTypeStatus,
   patchPetStatus,
+  patchPetRecordNextDue,
   deletePetHandler,
   deletePetTypeHandler,
   postPet,
@@ -34,6 +36,8 @@ petsRouter.get('/types', getPetTypesHandler);
 petsRouter.post('/types', requireJsonContentType, postPetType);
 petsRouter.patch('/types/:id/status', requireJsonContentType, patchPetTypeStatus);
 petsRouter.delete('/types/:id', deletePetTypeHandler);
+// Antes de `/:id`: «due» no es un id de mascota.
+petsRouter.get('/due', getPetDueHandler);
 petsRouter.get('/photos/:fileId', getPetPhotoHandler);
 petsRouter.get('/', getPetsHandler);
 petsRouter.post('/', requireJsonContentType, postPet);
@@ -44,5 +48,6 @@ petsRouter.delete('/:id', deletePetHandler);
 petsRouter.get('/:id/records', getPetRecordsHandler);
 petsRouter.post('/:id/records', requireJsonContentType, postPetRecord);
 petsRouter.post('/:id/records/:recordId/void', requireJsonContentType, postVoidPetRecord);
+petsRouter.patch('/:id/records/:recordId/next-due', requireJsonContentType, patchPetRecordNextDue);
 petsRouter.post('/:id/photo', parsePetPhotoBody, postPetPhoto);
 petsRouter.post('/:id/photo/remove', requireJsonContentType, postRemovePetPhoto);

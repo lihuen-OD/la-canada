@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Prisma } from '../generated/prisma/client';
 import { config } from '../config';
 import { recordAuditLog } from '../auth/auditLog';
+import { resolveVisibleName } from '../auth/authService';
 import {
   ForbiddenError,
   GardenPlanVersionNotFoundError,
@@ -16,6 +17,7 @@ import { toLocalDate } from '../lib/businessTime';
 import { assertIdempotencyKey, canonicalRequestHash, executeIdempotent } from '../lib/idempotency';
 import { getObjectStorage, type ObjectStorageClient } from '../lib/objectStorage';
 import { prisma } from '../lib/prisma';
+import { userIdentitySelect } from '../lib/userIdentity';
 import { detectImageMime, sanitizeFilename } from '../pets/petPhotoService';
 import type { RequestMeta, TaskActor } from '../tasks/tasksService';
 
@@ -62,7 +64,7 @@ const versionSelect = {
   versionNumber: true,
   createdAt: true,
   fileAsset: { select: { sizeBytes: true, mimeType: true } },
-  publishedBy: { select: { username: true, employee: { select: { displayName: true } } } },
+  publishedBy: { select: userIdentitySelect },
 } as const;
 type VersionRow = Prisma.GardenPlanVersionGetPayload<{ select: typeof versionSelect }>;
 
@@ -73,7 +75,9 @@ function serializeVersion(row: VersionRow) {
     createdAt: row.createdAt.toISOString(),
     sizeBytes: row.fileAsset.sizeBytes,
     mimeType: row.fileAsset.mimeType,
-    publishedBy: row.publishedBy.employee?.displayName ?? row.publishedBy.username,
+    // Nombre visible de quien publicó (Employee → Mi perfil → «Administrador»),
+    // nunca su `username` técnico.
+    publishedBy: resolveVisibleName(row.publishedBy),
   };
 }
 

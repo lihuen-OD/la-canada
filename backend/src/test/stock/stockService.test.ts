@@ -38,6 +38,7 @@ import {
   type RequestMeta,
   type StockActor,
 } from '../../stock/stockService';
+import { createStockMovementBodySchema } from '../../stock/stockSchemas';
 import {
   fakeAnonymousP2002,
   fakeLegacyP2002,
@@ -97,7 +98,9 @@ function seed() {
         area: 'HOUSE' as const,
         categoryId: CAT_HOUSE,
         unit: 'litros',
-        minimumQuantity: '3',
+        // Bajo: 1 < 2 <= (1 + 5) / 2.
+        minimumQuantity: '1',
+        targetQuantity: '5',
         currentQuantity: '2',
         active: true,
       },
@@ -107,7 +110,9 @@ function seed() {
         area: 'HOUSE' as const,
         categoryId: CAT_HOUSE,
         unit: 'rollos',
+        // Normal (por encima del objetivo, que no es un máximo), inactivo.
         minimumQuantity: '12',
+        targetQuantity: '20',
         currentQuantity: '24',
         active: false,
       },
@@ -117,7 +122,9 @@ function seed() {
         area: 'GARDEN' as const,
         categoryId: CAT_GARDEN,
         unit: 'kg',
-        minimumQuantity: '10',
+        // Bajo: 2 < 5 <= (2 + 10) / 2.
+        minimumQuantity: '2',
+        targetQuantity: '10',
         currentQuantity: '5',
         active: true,
       },
@@ -573,6 +580,201 @@ describe('listStockMovements (histórico)', () => {
   });
 });
 
+describe('listStockMovements — autor de los movimientos sin persona asociada', () => {
+  const USER_ADMIN_A = 'a1a1a1a1-0000-4000-8000-00000000000a';
+  const USER_ADMIN_B = 'b2b2b2b2-0000-4000-8000-00000000000b';
+  const USER_ADMIN_NO_NAME = 'c3c3c3c3-0000-4000-8000-00000000000c';
+  const adminA: StockActor = { userId: USER_ADMIN_A, role: 'ADMIN', employeeId: null };
+  const adminB: StockActor = { userId: USER_ADMIN_B, role: 'ADMIN', employeeId: null };
+  const adminNoName: StockActor = { userId: USER_ADMIN_NO_NAME, role: 'ADMIN', employeeId: null };
+  const NOW = new Date('2026-09-30T15:00:00.000Z');
+
+  beforeEach(() => {
+    const { users } = getFakeStockPrisma();
+    users.set(USER_ADMIN_A, {
+      employee: null,
+      personalProfile: { displayName: 'Admin sintética Uno' },
+    });
+    users.set(USER_ADMIN_B, {
+      employee: null,
+      personalProfile: { displayName: 'Admin sintético Dos' },
+    });
+    users.set(USER_ADMIN_NO_NAME, { employee: null, personalProfile: null });
+    users.set(USER_EMPLOYEE, {
+      employee: { displayName: 'Juan Pérez' },
+      personalProfile: null,
+      role: 'EMPLOYEE',
+      employeeId: EMP_JUAN,
+    });
+  });
+
+  const income = (actor: StockActor, extra: Record<string, unknown> = {}) =>
+    createStockMovement(
+      actor,
+      ITEM_FERTILIZANTE,
+      { type: 'INCOME', quantity: '3', ...extra } as never,
+      meta,
+      NOW,
+    );
+
+  it('cada movimiento muestra al administrador que lo registró, sin importar quién consulta', async () => {
+    const byA = await income(adminA);
+    const byB = await income(adminB);
+    expect(byA.movement.recordedBy).toEqual({ displayName: 'Admin sintética Uno' });
+    expect(byB.movement.recordedBy).toEqual({ displayName: 'Admin sintético Dos' });
+
+    // El historial no depende de la sesión que lo pide (no recibe actor): la
+    // misma consulta devuelve la misma atribución para cualquier usuario.
+    const first = await listStockMovements(ITEM_FERTILIZANTE, { page: 1, pageSize: 50 });
+    const second = await listStockMovements(ITEM_FERTILIZANTE, { page: 1, pageSize: 50 });
+    expect(second).toEqual(first);
+    const byId = new Map(first.movements.map((row) => [row.id, row]));
+    expect(byId.get(byA.movement.id)).toMatchObject({
+      employee: null,
+      recordedBy: { displayName: 'Admin sintética Uno' },
+    });
+    expect(byId.get(byB.movement.id)).toMatchObject({
+      employee: null,
+      recordedBy: { displayName: 'Admin sintético Dos' },
+    });
+    // Nunca el id de usuario ni el username.
+    expect(JSON.stringify(first)).not.toContain(USER_ADMIN_A);
+  });
+
+  it('la persona asociada se conserva; el autor aparece aparte solo si registró a nombre de otra', async () => {
+    const own = await income(employee);
+    const onBehalf = await income(adminA, { employeeId: EMP_JUAN });
+    const { movements } = await listStockMovements(ITEM_FERTILIZANTE, { page: 1, pageSize: 50 });
+    expect(movements.find((row) => row.id === own.movement.id)).toMatchObject({
+      employee: { id: EMP_JUAN, displayName: 'Juan Pérez' },
+      participantUser: null,
+      recordedBy: null,
+    });
+    expect(movements.find((row) => row.id === onBehalf.movement.id)).toMatchObject({
+      employee: { id: EMP_JUAN, displayName: 'Juan Pérez' },
+      participantUser: null,
+      recordedBy: { displayName: 'Admin sintética Uno' },
+    });
+  });
+
+  it('Benja (ADMIN) registra que Viki (ADMIN sin ficha) consumió: participante y autor por separado', async () => {
+    const created = await createStockMovement(
+      adminA,
+      ITEM_FERTILIZANTE,
+      { type: 'CONSUMPTION', quantity: '1', participantUserId: USER_ADMIN_B } as never,
+      meta,
+      NOW,
+    );
+    expect(created.movement).toMatchObject({
+      employee: null,
+      participantUser: { id: USER_ADMIN_B, displayName: 'Admin sintético Dos' },
+      recordedBy: { displayName: 'Admin sintética Uno' },
+    });
+    const stored = getFakeStockPrisma().movements.find((row) => row.id === created.movement.id)!;
+    expect(stored).toMatchObject({ employeeId: null, participantUserId: USER_ADMIN_B });
+    // El autor sale de la sesión (auditoría), nunca del cuerpo.
+    const audit = getFakeStockPrisma().auditLogs.find(
+      (row) => row.entityId === created.movement.id,
+    )!;
+    expect(audit.actorUserId).toBe(USER_ADMIN_A);
+    expect(audit.newState).toMatchObject({ employeeId: null, participantUserId: USER_ADMIN_B });
+
+    // Otra sesión que consulta ve lo mismo.
+    const { movements } = await listStockMovements(ITEM_FERTILIZANTE, { page: 1, pageSize: 50 });
+    expect(movements.find((row) => row.id === created.movement.id)).toEqual(created.movement);
+  });
+
+  it('un ADMIN puede elegirse a sí mismo: no se repite como autor', async () => {
+    const created = await income(adminA, { participantUserId: USER_ADMIN_A });
+    expect(created.movement).toMatchObject({
+      participantUser: { id: USER_ADMIN_A, displayName: 'Admin sintética Uno' },
+      recordedBy: null,
+    });
+  });
+
+  it('rechaza personas inválidas: no ADMIN, inactivo, con ficha, inexistente, o dos a la vez', async () => {
+    const { users } = getFakeStockPrisma();
+    const SUSPENDED = 'd4d4d4d4-0000-4000-8000-00000000000d';
+    const WITH_EMPLOYEE = 'e5e5e5e5-0000-4000-8000-00000000000e';
+    const MISSING = 'f6f6f6f6-0000-4000-8000-00000000000f';
+    users.set(SUSPENDED, { employee: null, personalProfile: null, status: 'SUSPENDED' });
+    users.set(WITH_EMPLOYEE, {
+      employee: { displayName: 'Juan Pérez' },
+      personalProfile: null,
+      employeeId: EMP_JUAN,
+    });
+    const before = getFakeStockPrisma().movements.length;
+    for (const target of [USER_EMPLOYEE, SUSPENDED, WITH_EMPLOYEE, MISSING]) {
+      await expect(income(adminA, { participantUserId: target })).rejects.toThrow(
+        'La persona elegida no existe o está inactiva.',
+      );
+    }
+    expect(getFakeStockPrisma().movements.length).toBe(before);
+    expect(
+      createStockMovementBodySchema.safeParse({
+        type: 'INCOME',
+        quantity: '1',
+        employeeId: EMP_JUAN,
+        participantUserId: USER_ADMIN_B,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('EMPLOYEE conserva sus permisos: no puede elegir a un administrador', async () => {
+    await expect(income(employee, { participantUserId: USER_ADMIN_A })).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
+    const own = await income(employee);
+    expect(own.movement).toMatchObject({ employee: { id: EMP_JUAN }, participantUser: null });
+  });
+
+  it('sin nombre cargado, el ADMIN se ve «Administrador» (nunca el username)', async () => {
+    const created = await income(adminNoName);
+    expect(created.movement.recordedBy).toEqual({ displayName: 'Administrador' });
+  });
+
+  it('una auditoría posterior de otra acción no reemplaza al autor original', async () => {
+    const byA = await income(adminA);
+    getFakeStockPrisma().auditLogs.push({
+      id: 'later-audit',
+      actorUserId: USER_ADMIN_B,
+      action: 'stock.movement.voided',
+      entityType: 'StockMovement',
+      entityId: byA.movement.id,
+      ipAddress: null,
+      userAgent: null,
+      createdAt: new Date(),
+    });
+    const { movements } = await listStockMovements(ITEM_FERTILIZANTE, { page: 1, pageSize: 50 });
+    expect(movements.find((row) => row.id === byA.movement.id)?.recordedBy).toEqual({
+      displayName: 'Admin sintética Uno',
+    });
+  });
+
+  it('sin evidencia (apertura del seed) o con evidencia ambigua no se inventa un autor', async () => {
+    const byA = await income(adminA);
+    // Dos auditorías de alta para el mismo movimiento: ambigua → sin autor.
+    getFakeStockPrisma().auditLogs.push({
+      id: 'duplicate-creation',
+      actorUserId: USER_ADMIN_B,
+      action: 'stock.movement.created',
+      entityType: 'StockMovement',
+      entityId: byA.movement.id,
+      ipAddress: null,
+      userAgent: null,
+      createdAt: new Date(),
+    });
+    const fertilizer = await listStockMovements(ITEM_FERTILIZANTE, { page: 1, pageSize: 50 });
+    expect(fertilizer.movements.find((row) => row.id === byA.movement.id)?.recordedBy).toBeNull();
+    const detergent = await listStockMovements(ITEM_DETERGENTE, {
+      type: 'OPENING_BALANCE',
+      page: 1,
+      pageSize: 50,
+    });
+    expect(detergent.movements[0]).toMatchObject({ employee: null, recordedBy: null });
+  });
+});
+
 // ── Administración del catálogo ───────────────────────────────────────────
 
 describe('createStockCategory / updateStockCategory', () => {
@@ -624,6 +826,7 @@ describe('createStockItem', () => {
     categoryId: CAT_HOUSE,
     unit: 'unidades',
     minimumQuantity: '4',
+    targetQuantity: '10',
   };
 
   it('un EMPLOYEE no crea productos', async () => {
@@ -633,12 +836,28 @@ describe('createStockItem', () => {
   it('crea con saldo 0 (sin movimiento OPENING_BALANCE) y audita', async () => {
     const { item } = await createStockItem(admin, input, meta);
     expect(item.currentQuantity).toBe('0');
+    expect(item.targetQuantity).toBe('10');
+    // Saldo 0 <= mínimo 4: crítico, con sugerencia hasta el objetivo.
+    expect(item.stockLevel).toBe('critical');
+    expect(item.suggestedPurchaseQuantity).toBe('10');
     expect(item.active).toBe(true);
     expect(item.category).toEqual({ id: CAT_HOUSE, name: 'Limpieza', area: 'HOUSE' });
     const fake = getFakeStockPrisma();
     expect(fake.movements).toHaveLength(2); // solo los del seed
     const log = fake.auditLogs.find((entry) => entry.action === 'stock.item.created');
-    expect(log).toBeDefined();
+    expect(log?.newState).toMatchObject({ minimumQuantity: '4', targetQuantity: '10' });
+  });
+
+  it.each([
+    ['igual', '4'],
+    ['menor', '3.99'],
+  ])('rechaza un objetivo %s al mínimo sin escribir', async (_label, targetQuantity) => {
+    await expect(createStockItem(admin, { ...input, targetQuantity }, meta)).rejects.toThrow(
+      'El stock objetivo debe ser mayor que el stock mínimo.',
+    );
+    expect([...getFakeStockPrisma().items.values()].some((row) => row.name === input.name)).toBe(
+      false,
+    );
   });
 
   it('nombre duplicado en el área → 409', async () => {
@@ -676,8 +895,85 @@ describe('updateStockItem / setStockItemActive', () => {
     expect(result.item.currentQuantity).toBe('2'); // intocado
     const fake = getFakeStockPrisma();
     const log = fake.auditLogs.find((entry) => entry.action === 'stock.item.updated');
-    expect(log?.previousState).toMatchObject({ name: 'Detergente', minimumQuantity: '3' });
+    expect(log?.previousState).toMatchObject({ name: 'Detergente', minimumQuantity: '1' });
     expect(log?.newState).toMatchObject({ name: 'Detergente 2L', minimumQuantity: '4' });
+    // Nuevo mínimo 4 >= saldo 2: pasa a crítico en la misma respuesta.
+    expect(result.item.stockLevel).toBe('critical');
+  });
+
+  it('cambiar el objetivo recalcula nivel y cantidad sugerida (mínimo 20, objetivo 50, actual 19 → 31)', async () => {
+    const fake = getFakeStockPrisma();
+    Object.assign(fake.items.get(ITEM_FERTILIZANTE)!, {
+      minimumQuantity: '20',
+      targetQuantity: '40',
+      currentQuantity: '19',
+    });
+    const before = await getStockItem(ITEM_FERTILIZANTE);
+    expect(before.item).toMatchObject({ stockLevel: 'critical', suggestedPurchaseQuantity: '21' });
+    const { item } = await updateStockItem(
+      admin,
+      ITEM_FERTILIZANTE,
+      { targetQuantity: '50' },
+      meta,
+    );
+    expect(item).toMatchObject({
+      targetQuantity: '50',
+      stockLevel: 'critical',
+      suggestedPurchaseQuantity: '31',
+    });
+    fake.items.get(ITEM_FERTILIZANTE)!.currentQuantity = '35';
+    expect((await getStockItem(ITEM_FERTILIZANTE)).item.stockLevel).toBe('low');
+    fake.items.get(ITEM_FERTILIZANTE)!.currentQuantity = '35.01';
+    expect((await getStockItem(ITEM_FERTILIZANTE)).item.stockLevel).toBe('ok');
+    const log = fake.auditLogs.find((entry) => entry.action === 'stock.item.updated');
+    expect(log?.previousState).toMatchObject({ targetQuantity: '40' });
+    expect(log?.newState).toMatchObject({ targetQuantity: '50' });
+  });
+
+  it('rechaza objetivo igual o menor al mínimo (propio o el mínimo nuevo), sin escribir', async () => {
+    await expect(
+      updateStockItem(admin, ITEM_FERTILIZANTE, { targetQuantity: '2' }, meta),
+    ).rejects.toThrow('El stock objetivo debe ser mayor que el stock mínimo.');
+    await expect(
+      updateStockItem(admin, ITEM_FERTILIZANTE, { minimumQuantity: '10' }, meta),
+    ).rejects.toThrow('El stock objetivo debe ser mayor que el stock mínimo.');
+    expect(getFakeStockPrisma().items.get(ITEM_FERTILIZANTE)).toMatchObject({
+      minimumQuantity: '2',
+      targetQuantity: '10',
+    });
+  });
+
+  it('producto antiguo sin objetivo: estado válido (normal/crítico) y se puede renombrar/desactivar sin completarlo', async () => {
+    const fake = getFakeStockPrisma();
+    Object.assign(fake.items.get(ITEM_DETERGENTE)!, { targetQuantity: null, currentQuantity: '8' });
+    const legacy = await getStockItem(ITEM_DETERGENTE);
+    // Actual 8 > mínimo 1: normal (sin objetivo no hay umbral de bajo ni cuarto estado).
+    expect(legacy.item).toMatchObject({
+      targetQuantity: null,
+      stockLevel: 'ok',
+      suggestedPurchaseQuantity: null,
+    });
+    await updateStockItem(admin, ITEM_DETERGENTE, { name: 'Detergente viejo' }, meta);
+    const off = await setStockItemActive(admin, ITEM_DETERGENTE, false, meta);
+    expect(off.item).toMatchObject({ active: false, targetQuantity: null });
+    // Pero cambiar el mínimo exige completar el objetivo.
+    await expect(
+      updateStockItem(admin, ITEM_DETERGENTE, { minimumQuantity: '2' }, meta),
+    ).rejects.toThrow('Completá el stock objetivo para cambiar el stock mínimo.');
+    // Crítico sin objetivo: sin cantidad inventada.
+    fake.items.get(ITEM_DETERGENTE)!.currentQuantity = '1';
+    expect((await getStockItem(ITEM_DETERGENTE)).item).toMatchObject({
+      stockLevel: 'critical',
+      suggestedPurchaseQuantity: null,
+    });
+    // Completar el objetivo junto con el mínimo sí se acepta.
+    const done = await updateStockItem(
+      admin,
+      ITEM_DETERGENTE,
+      { minimumQuantity: '2', targetQuantity: '6' },
+      meta,
+    );
+    expect(done.item).toMatchObject({ targetQuantity: '6', suggestedPurchaseQuantity: '5' });
   });
 
   it('producto inexistente → 404', async () => {

@@ -12,7 +12,7 @@ import { Modal } from '../../components/ui/Modal';
 import { AlertIcon } from '../../components/ui/icons';
 import { errorMessageOf, isSessionExpired } from './stockErrors';
 import { useSubmitGuard } from '../tasks/useSubmitGuard';
-import { AREA_LABEL } from './stockLabels';
+import { AREA_LABEL, TARGET_HINT } from './stockLabels';
 
 const NAME_MAX = 100;
 const UNIT_MAX = 30;
@@ -57,6 +57,8 @@ export function ItemFormDialog({
   const [categoryId, setCategoryId] = useState(item?.category.id ?? '');
   const [unit, setUnit] = useState(item?.unit ?? '');
   const [minimumQuantity, setMinimumQuantity] = useState(item?.minimumQuantity ?? '0');
+  /** Vacío solo en un producto anterior que todavía no lo tiene («pendiente»). */
+  const [targetQuantity, setTargetQuantity] = useState(item?.targetQuantity ?? '');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { isSubmitting, run } = useSubmitGuard();
 
@@ -73,6 +75,9 @@ export function ItemFormDialog({
     const normalizedName = normalizeText(name);
     const normalizedUnit = normalizeText(unit);
     const normalizedMinimum = minimumQuantity.trim();
+    const normalizedTarget = targetQuantity.trim();
+    const minimumChanged = !isEdit || normalizedMinimum !== item.minimumQuantity;
+    const targetChanged = normalizedTarget !== (item?.targetQuantity ?? '');
 
     if (normalizedName.length < 2) {
       setErrorMessage('El nombre debe tener al menos 2 caracteres.');
@@ -110,6 +115,28 @@ export function ItemFormDialog({
       setErrorMessage('El stock mínimo debe ser un número no negativo con hasta 2 decimales.');
       return;
     }
+    // Un producto anterior sin objetivo puede editar nombre, categoría o
+    // unidad sin completarlo; cambiar el mínimo (o crear) sí lo exige. El
+    // backend vuelve a validarlo con Decimal.
+    if (normalizedTarget === '' && (minimumChanged || targetChanged)) {
+      setErrorMessage(
+        isEdit
+          ? 'Completá el stock objetivo para cambiar el stock mínimo.'
+          : 'El stock objetivo es obligatorio.',
+      );
+      return;
+    }
+    if (normalizedTarget !== '') {
+      if (!MINIMUM_PATTERN.test(normalizedTarget)) {
+        setErrorMessage('El stock objetivo debe ser un número no negativo con hasta 2 decimales.');
+        return;
+      }
+      // Hasta 2 decimales y 8 enteros: la comparación con Number es exacta.
+      if (Number(normalizedTarget) <= Number(normalizedMinimum)) {
+        setErrorMessage('El stock objetivo debe ser mayor que el stock mínimo.');
+        return;
+      }
+    }
 
     void run(async () => {
       setErrorMessage(null);
@@ -121,6 +148,7 @@ export function ItemFormDialog({
             categoryId,
             unit: normalizedUnit,
             minimumQuantity: normalizedMinimum,
+            targetQuantity: normalizedTarget,
           });
           return;
         }
@@ -128,7 +156,8 @@ export function ItemFormDialog({
         if (normalizedName !== item.name) changes.name = normalizedName;
         if (categoryId !== item.category.id) changes.categoryId = categoryId;
         if (normalizedUnit !== item.unit) changes.unit = normalizedUnit;
-        if (normalizedMinimum !== item.minimumQuantity) changes.minimumQuantity = normalizedMinimum;
+        if (minimumChanged) changes.minimumQuantity = normalizedMinimum;
+        if (targetChanged) changes.targetQuantity = normalizedTarget;
         if (Object.keys(changes).length === 0) {
           onCancel();
           return;
@@ -279,7 +308,32 @@ export function ItemFormDialog({
               }}
             />
             <p className="field__hint">
-              Umbral del estado «Bajo». Admite 0 (entonces no se muestra barra de progreso).
+              En este valor o por debajo, el producto queda crítico y entra en Compras. Admite 0.
+            </p>
+          </div>
+
+          <div className="field">
+            <label className="field__label" htmlFor={`${titleId}-target`}>
+              Stock objetivo
+            </label>
+            <input
+              id={`${titleId}-target`}
+              className="field__input"
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
+              value={targetQuantity}
+              // Corto a propósito: en móvil el campo ocupa media fila.
+              placeholder={isEdit && item.targetQuantity === null ? 'Pendiente' : undefined}
+              aria-describedby={`${titleId}-target-hint`}
+              disabled={isSubmitting}
+              onChange={(event) => {
+                setTargetQuantity(event.target.value);
+                setErrorMessage(null);
+              }}
+            />
+            <p className="field__hint" id={`${titleId}-target-hint`}>
+              {TARGET_HINT} Debe ser mayor que el mínimo.
             </p>
           </div>
         </div>

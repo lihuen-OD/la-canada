@@ -33,8 +33,20 @@ import {
 } from '../lib/businessTime';
 import { runEntityDeletion } from '../lib/deletion';
 import { prisma } from '../lib/prisma';
+import { assertParticipantUserAllowed, requireActiveAdminParticipant } from '../lib/participants';
+import {
+  findCreationActors,
+  findUserIdentities,
+  recorderIfDifferent,
+  type RecordCreator,
+} from '../lib/userIdentity';
 import { resolveActor, type RequestMeta, type TaskActor } from '../tasks/tasksService';
-import { buildStockLevelIdsSql, computeStockLevel, type StockLevel } from './stockLevel';
+import {
+  buildStockLevelIdsSql,
+  computeStockLevel,
+  computeSuggestedPurchase,
+  type StockLevel,
+} from './stockLevel';
 import {
   IDEMPOTENCY_KEY_PATTERN,
   type createStockMovementBodySchema,
@@ -130,6 +142,7 @@ const itemSelect = {
   area: true,
   unit: true,
   minimumQuantity: true,
+  targetQuantity: true,
   currentQuantity: true,
   active: true,
   category: { select: { id: true, name: true, area: true } },
@@ -145,10 +158,46 @@ const movementSelect = {
   reason: true,
   createdAt: true,
   employee: { select: employeeSummarySelect },
+  participantUserId: true,
   destination: { select: { id: true, name: true, type: true } },
 } as const;
 
 type MovementRow = Prisma.StockMovementGetPayload<{ select: typeof movementSelect }>;
+
+/**
+ * `StockMovement` no guarda su autor en una columna: la evidencia es la
+ * auditoría `stock.movement.created`, escrita en la MISMA transacción que el
+ * movimiento con el usuario de la sesión. Exportadas para los reportes.
+ */
+export const MOVEMENT_AUDIT_ENTITY = 'StockMovement';
+export const MOVEMENT_CREATED_ACTION = 'stock.movement.created';
+
+/**
+ * Personas ADMIN y autores del lote en DOS sentencias fijas (auditoría de alta
+ * + nombres visibles de todos los usuarios involucrados), sin consultas por
+ * relación ni por movimiento. El autor se muestra solo cuando no es la
+ * persona del movimiento. Las aperturas del seed no tienen auditoría.
+ */
+async function resolveMovementPeople(
+  client: Pick<Prisma.TransactionClient, 'auditLog' | '$queryRaw'>,
+  rows: readonly MovementRow[],
+): Promise<MovementPeople> {
+  const actors = await findCreationActors(client, {
+    entityType: MOVEMENT_AUDIT_ENTITY,
+    action: MOVEMENT_CREATED_ACTION,
+    entityIds: rows.map((row) => row.id),
+  });
+  const users = await findUserIdentities(client, [
+    ...rows.map((row) => row.participantUserId),
+    ...actors.values(),
+  ]);
+  return { actors, users };
+}
+
+interface MovementPeople {
+  actors: ReadonlyMap<string, string>;
+  users: ReadonlyMap<string, RecordCreator>;
+}
 
 // ── Serialización ─────────────────────────────────────────────────────────
 
@@ -159,10 +208,14 @@ function serializeItem(row: ItemRow) {
     area: row.area,
     unit: row.unit,
     minimumQuantity: row.minimumQuantity.toString(),
+    /** `null` = «Stock objetivo pendiente» (producto anterior a la columna). */
+    targetQuantity: row.targetQuantity?.toString() ?? null,
     currentQuantity: row.currentQuantity.toString(),
-    // Nivel calculado por el backend (Etapa 5C.1): el frontend solo lo
-    // renderiza; el `barPercent` de la barra sigue siendo calculado allá.
-    stockLevel: computeStockLevel(row.currentQuantity, row.minimumQuantity),
+    // Nivel y cantidad sugerida calculados por el backend (única fuente de la
+    // regla): el frontend solo los renderiza; la barra visual se calcula allá.
+    stockLevel: computeStockLevel(row.currentQuantity, row.minimumQuantity, row.targetQuantity),
+    /** Compras: objetivo − actual; `null` sin objetivo («Completar stock objetivo»). */
+    suggestedPurchaseQuantity: computeSuggestedPurchase(row.currentQuantity, row.targetQuantity),
     active: row.active,
     category: row.category,
   };
@@ -170,7 +223,9 @@ function serializeItem(row: ItemRow) {
 
 export type SerializedStockItem = ReturnType<typeof serializeItem>;
 
-function serializeMovement(row: MovementRow) {
+function serializeMovement(row: MovementRow, people: MovementPeople) {
+  const participant = row.participantUserId ? people.users.get(row.participantUserId) : undefined;
+  const actorId = people.actors.get(row.id);
   return {
     id: row.id,
     type: row.type,
@@ -178,7 +233,17 @@ function serializeMovement(row: MovementRow) {
     // `@db.Date`: Prisma devuelve medianoche UTC = la fecha de calendario.
     effectiveDate: row.effectiveDate.toISOString().slice(0, 10),
     reason: row.reason,
+    /** Persona del movimiento: un empleado… */
     employee: row.employee,
+    /** …o un administrador sin ficha (nunca los dos). */
+    participantUser: participant
+      ? { id: participant.userId, displayName: participant.identity.displayName }
+      : null,
+    /** Quién lo registró, solo si no es la persona del movimiento. */
+    recordedBy: recorderIfDifferent(
+      { employeeId: row.employee?.id ?? null, participantUserId: row.participantUserId },
+      (actorId ? people.users.get(actorId) : undefined) ?? null,
+    ),
     destination: row.destination,
     createdAt: row.createdAt.toISOString(),
   };
@@ -312,8 +377,9 @@ export async function listStockMovements(itemId: string, filters: ListMovementsF
       take: filters.pageSize,
     }),
   ]);
+  const people = await resolveMovementPeople(prisma, rows);
   return {
-    movements: rows.map(serializeMovement),
+    movements: rows.map((row) => serializeMovement(row, people)),
     page: filters.page,
     pageSize: filters.pageSize,
     total,
@@ -428,6 +494,14 @@ export interface CreateStockItemInput {
   categoryId: string;
   unit: string;
   minimumQuantity: string;
+  targetQuantity: string;
+}
+
+/** El objetivo cargado debe ser mayor que el mínimo (también lo exige un CHECK). */
+function assertTargetAboveMinimum(minimum: Prisma.Decimal, target: Prisma.Decimal): void {
+  if (!target.gt(minimum)) {
+    throw new ValidationError('El stock objetivo debe ser mayor que el stock mínimo.');
+  }
 }
 
 async function requireAssignableCategory(
@@ -458,6 +532,9 @@ export async function createStockItem(
   meta: RequestMeta,
 ) {
   requireAdmin(actor);
+  const minimumQuantity = new Prisma.Decimal(input.minimumQuantity);
+  const targetQuantity = new Prisma.Decimal(input.targetQuantity);
+  assertTargetAboveMinimum(minimumQuantity, targetQuantity);
   try {
     const item = await prisma.$transaction(async (tx) => {
       await requireAssignableCategory(tx, input.categoryId, input.area);
@@ -467,7 +544,8 @@ export async function createStockItem(
           area: input.area,
           categoryId: input.categoryId,
           unit: input.unit,
-          minimumQuantity: new Prisma.Decimal(input.minimumQuantity),
+          minimumQuantity,
+          targetQuantity,
           currentQuantity: new Prisma.Decimal(0),
         },
         select: itemSelect,
@@ -483,6 +561,7 @@ export async function createStockItem(
           categoryId: input.categoryId,
           unit: input.unit,
           minimumQuantity: input.minimumQuantity,
+          targetQuantity: input.targetQuantity,
           currentQuantity: '0',
           active: true,
         },
@@ -504,6 +583,7 @@ export interface UpdateStockItemInput {
   categoryId?: string;
   unit?: string;
   minimumQuantity?: string;
+  targetQuantity?: string;
 }
 
 /**
@@ -522,7 +602,14 @@ export async function updateStockItem(
     await prisma.$transaction(async (tx) => {
       const current = await tx.stockItem.findUnique({
         where: { id: itemId },
-        select: { name: true, area: true, categoryId: true, unit: true, minimumQuantity: true },
+        select: {
+          name: true,
+          area: true,
+          categoryId: true,
+          unit: true,
+          minimumQuantity: true,
+          targetQuantity: true,
+        },
       });
       if (!current) throw new StockItemNotFoundError();
 
@@ -531,6 +618,7 @@ export async function updateStockItem(
         categoryId?: string;
         unit?: string;
         minimumQuantity?: Prisma.Decimal;
+        targetQuantity?: Prisma.Decimal;
       } = {};
       const auditChanges: Record<string, string> = {};
       const auditPrevious: Record<string, string> = {};
@@ -551,6 +639,26 @@ export async function updateStockItem(
         changes.minimumQuantity = new Prisma.Decimal(input.minimumQuantity);
         auditChanges.minimumQuantity = input.minimumQuantity;
         auditPrevious.minimumQuantity = current.minimumQuantity.toString();
+      }
+      if (
+        input.targetQuantity !== undefined &&
+        (current.targetQuantity === null ||
+          !new Prisma.Decimal(input.targetQuantity).equals(current.targetQuantity))
+      ) {
+        changes.targetQuantity = new Prisma.Decimal(input.targetQuantity);
+        auditChanges.targetQuantity = input.targetQuantity;
+        auditPrevious.targetQuantity = current.targetQuantity?.toString() ?? 'null';
+      }
+      // Editar las cantidades de configuración exige un objetivo válido: un
+      // producto anterior sin objetivo puede renombrarse, recategorizarse o
+      // desactivarse, pero no cambiar su mínimo sin completar el objetivo.
+      if (changes.minimumQuantity !== undefined || changes.targetQuantity !== undefined) {
+        const minimum = changes.minimumQuantity ?? current.minimumQuantity;
+        const target = changes.targetQuantity ?? current.targetQuantity;
+        if (target === null) {
+          throw new ValidationError('Completá el stock objetivo para cambiar el stock mínimo.');
+        }
+        assertTargetAboveMinimum(new Prisma.Decimal(minimum), new Prisma.Decimal(target));
       }
       if (input.categoryId !== undefined && input.categoryId !== current.categoryId) {
         const category = await requireAssignableCategory(tx, input.categoryId, current.area);
@@ -758,6 +866,8 @@ interface MovementWriteContext {
   itemId: string;
   input: CreateMovementInput;
   employeeId: string | null;
+  /** Administrador sin ficha elegido por un ADMIN como persona del movimiento. */
+  participantUserId: string | null;
   quantity: Prisma.Decimal;
   effectiveDate: Date;
   effectiveDateText: string;
@@ -782,6 +892,7 @@ async function writeMovement(
     itemId,
     input,
     employeeId,
+    participantUserId,
     quantity,
     effectiveDate,
     effectiveDateText,
@@ -802,6 +913,13 @@ async function writeMovement(
     if (!chosen || !chosen.active) {
       throw new ValidationError('La persona elegida no existe o está inactiva.');
     }
+  }
+  if (participantUserId) {
+    await requireActiveAdminParticipant(
+      tx,
+      participantUserId,
+      () => new ValidationError('La persona elegida no existe o está inactiva.'),
+    );
   }
 
   if (input.destinationId) {
@@ -851,6 +969,7 @@ async function writeMovement(
       quantity,
       effectiveDate,
       employeeId,
+      participantUserId,
       destinationId: input.destinationId ?? null,
       reason: input.reason ?? null,
       // `reference` es solo idempotencia del seed; la operación normal queda en null.
@@ -869,6 +988,7 @@ async function writeMovement(
       quantity: input.quantity,
       effectiveDate: effectiveDateText,
       employeeId,
+      participantUserId,
       destinationId: input.destinationId ?? null,
       reason: input.reason ?? null,
       actorRole: actor.role,
@@ -893,6 +1013,7 @@ export function computeMovementRequestHash(
   input: CreateMovementInput,
   resolvedEffectiveDate: string,
   resolvedEmployeeId: string | null = null,
+  resolvedParticipantUserId: string | null = null,
 ): string {
   const canonical = JSON.stringify({
     endpoint,
@@ -906,6 +1027,11 @@ export function computeMovementRequestHash(
     destinationId: input.destinationId?.toLowerCase() ?? null,
     // Persona del movimiento ya resuelta (elegida por ADMIN o la de la sesión).
     employeeId: resolvedEmployeeId?.toLowerCase() ?? null,
+    // Solo presente cuando se eligió a un administrador: la huella de los
+    // requests sin esta opción queda idéntica a la anterior.
+    ...(resolvedParticipantUserId
+      ? { participantUserId: resolvedParticipantUserId.toLowerCase() }
+      : {}),
     reason: input.reason ?? null,
   });
   return createHash('sha256').update(canonical).digest('hex');
@@ -960,9 +1086,18 @@ export async function createStockMovement(
   if (actor.role !== 'ADMIN' && !actor.employeeId) {
     throw new EmployeeLinkRequiredError();
   }
+  assertParticipantUserAllowed(
+    actor,
+    input,
+    'Solo un administrador puede registrar movimientos a nombre de otra persona.',
+  );
   let employeeId = actor.employeeId;
   let chosenEmployeeId: string | null = null;
-  if (input.employeeId !== undefined) {
+  const participantUserId = input.participantUserId?.toLowerCase() ?? null;
+  if (participantUserId) {
+    // ADMIN eligió a un administrador sin ficha (puede ser él mismo).
+    employeeId = null;
+  } else if (input.employeeId !== undefined) {
     const requested = input.employeeId?.toLowerCase() ?? null;
     if (actor.role !== 'ADMIN') {
       if (requested !== actor.employeeId?.toLowerCase()) {
@@ -986,6 +1121,7 @@ export async function createStockMovement(
     itemId,
     input,
     employeeId,
+    participantUserId,
     quantity,
     effectiveDate,
     effectiveDateText,
@@ -1004,9 +1140,10 @@ export async function createStockMovement(
       prisma.stockItem.findUnique({ where: { id: itemId }, select: itemSelect }),
     ]);
     if (!movementRow || !itemRow) throw new StockItemNotFoundError();
+    const people = await resolveMovementPeople(prisma, [movementRow]);
     return {
       kind: 'created',
-      movement: serializeMovement(movementRow),
+      movement: serializeMovement(movementRow, people),
       item: serializeItem(itemRow),
     };
   }
@@ -1021,6 +1158,7 @@ export async function createStockMovement(
     input,
     effectiveDateText,
     employeeId,
+    participantUserId,
   );
 
   try {
@@ -1046,7 +1184,11 @@ export async function createStockMovement(
           select: itemSelect,
         });
         if (!movementRow || !itemRow) throw new StockItemNotFoundError();
-        const body = { movement: serializeMovement(movementRow), item: serializeItem(itemRow) };
+        const people = await resolveMovementPeople(tx, [movementRow]);
+        const body = {
+          movement: serializeMovement(movementRow, people),
+          item: serializeItem(itemRow),
+        };
         // 6) completa el registro en la MISMA transacción: al confirmar, la
         // respuesta ya está disponible para futuros replays.
         await tx.idempotencyRecord.update({
@@ -1157,6 +1299,7 @@ export async function deleteStockItem(
           categoryId: true,
           unit: true,
           minimumQuantity: true,
+          targetQuantity: true,
           currentQuantity: true,
           active: true,
         },
@@ -1172,6 +1315,7 @@ export async function deleteStockItem(
         previousState: {
           ...item,
           minimumQuantity: item.minimumQuantity.toString(),
+          targetQuantity: item.targetQuantity?.toString() ?? null,
           currentQuantity: item.currentQuantity.toString(),
         },
         ...meta,

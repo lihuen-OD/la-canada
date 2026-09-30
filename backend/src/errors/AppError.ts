@@ -679,3 +679,23 @@ export class PetInactiveError extends AppError {
     });
   }
 }
+
+// ── Mascotas: próximas aplicaciones o controles ───────────────────────────
+
+/** El pendiente a cumplir no existe, es de otra mascota o ya no tiene fecha programada. */
+export class PetDueNotFoundError extends AppError {
+  constructor() {
+    super('La atención programada no existe o ya no está pendiente.', 404, {
+      code: 'PET_DUE_NOT_FOUND',
+    });
+  }
+}
+
+/** Otro registro vigente ya cumplió ese pendiente (doble clic o dos personas a la vez). */
+export class PetDueAlreadyFulfilledError extends AppError {
+  constructor() {
+    super('Esta atención programada ya fue registrada.', 409, {
+      code: 'PET_DUE_ALREADY_FULFILLED',
+    });
+  }
+}

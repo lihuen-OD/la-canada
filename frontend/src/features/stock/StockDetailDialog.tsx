@@ -23,6 +23,7 @@ import {
   formatStockDay,
 } from './stockLabels';
 import { movementSignedPrefix } from './stockStatus';
+import { attributedName, recordedByName } from '../../utils/recordAttribution';
 
 interface StockDetailDialogProps {
   /** Producto con el que se abrió el diálogo (snapshot del listado, recién cargado). */
@@ -122,6 +123,14 @@ export function StockDetailDialog({ item, onCancel, onSessionExpired }: StockDet
             <dt>Stock mínimo</dt>
             <dd>
               {latestItem.minimumQuantity} {latestItem.unit}
+            </dd>
+          </div>
+          <div>
+            <dt>Stock objetivo</dt>
+            <dd>
+              {latestItem.targetQuantity !== null
+                ? `${latestItem.targetQuantity} ${latestItem.unit}`
+                : '—'}
             </dd>
           </div>
           <div>
@@ -227,7 +236,8 @@ function MovementRow({ movement, unit }: { movement: StockMovement; unit: string
         </span>
       </div>
       <p className="stock-move__meta">
-        {movement.employee ? movement.employee.displayName : 'Sin persona registrada'}
+        {attributedName(movement) ?? 'Sin persona registrada'}
+        {recordedByName(movement) ? ` · Registró: ${recordedByName(movement)}` : ''}
         {movement.destination ? ` · Destino: ${movement.destination.name}` : ''}
         {movement.reason ? ` · ${movement.reason}` : ''}
       </p>

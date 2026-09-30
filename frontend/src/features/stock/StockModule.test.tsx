@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../api/httpClient';
+import type { StockMovementType } from '../../api/stockTypes';
 import {
   CATEGORY_A,
   CATEGORY_B,
@@ -14,7 +15,9 @@ import {
   makeCritItem,
   makeItem,
   makeLowItem,
+  makeLegacyItem,
   makeMovement,
+  makeZeroMinItem,
   movementsList,
   reportMovementsList,
 } from '../../test/fixtures/stock';
@@ -40,13 +43,17 @@ const api = vi.hoisted(() => ({
   deleteStockItem: vi.fn(),
   deleteStockDestination: vi.fn(),
 }));
-const { useAuthMock, logoutMock, fetchTaskEmployeesMock } = vi.hoisted(() => ({
-  useAuthMock: vi.fn(),
-  logoutMock: vi.fn(),
-  fetchTaskEmployeesMock: vi.fn(),
-}));
+const { useAuthMock, logoutMock, fetchTaskEmployeesMock, fetchParticipantsMock } = vi.hoisted(
+  () => ({
+    useAuthMock: vi.fn(),
+    logoutMock: vi.fn(),
+    fetchTaskEmployeesMock: vi.fn(),
+    fetchParticipantsMock: vi.fn(),
+  }),
+);
 vi.mock('../../api/stockApi', () => api);
 vi.mock('../../api/tasksApi', () => ({ fetchTaskEmployees: fetchTaskEmployeesMock }));
+vi.mock('../../api/participantsApi', () => ({ fetchParticipants: fetchParticipantsMock }));
 vi.mock('../../auth/useAuth', () => ({ useAuth: useAuthMock }));
 
 import { StockModule } from './StockModule';
@@ -59,6 +66,13 @@ function renderStock(route = '/stock') {
     </Routes>,
     { route },
   );
+}
+
+/** Texto que se ve (sin las etiquetas `.visually-hidden` para lectores de pantalla). */
+function visibleText(element: Element): string {
+  const clone = element.cloneNode(true) as Element;
+  clone.querySelectorAll('.visually-hidden').forEach((node) => node.remove());
+  return (clone.textContent ?? '').replace(/\s+/g, ' ').trim();
 }
 
 const stockNav = () => screen.getByRole('navigation', { name: 'Secciones de Stock' });
@@ -106,6 +120,8 @@ beforeEach(() => {
   logoutMock.mockReset();
   fetchTaskEmployeesMock.mockReset();
   fetchTaskEmployeesMock.mockResolvedValue({ employees: [] });
+  fetchParticipantsMock.mockReset();
+  fetchParticipantsMock.mockResolvedValue({ participants: [] });
   api.fetchStockDestinations.mockResolvedValue({ destinations: [] });
   api.fetchStockReportSummary.mockResolvedValue(emptyReportSummary());
   api.fetchStockReportMovements.mockResolvedValue(reportMovementsList());
@@ -246,38 +262,50 @@ describe('Stock — filtros server-side', () => {
 });
 
 describe('Stock — tarjetas y reglas de estado', () => {
-  it('muestra cantidad, etiqueta textual y barra (o sin barra si mínimo es 0)', async () => {
-    const zeroMin = {
-      ...OK_ITEM,
-      id: '00000000-0000-4000-8000-00000000i099',
-      name: 'Producto sintético sin mínimo',
-      minimumQuantity: '0',
-      currentQuantity: '7',
-    };
-    await renderInventory([OK_ITEM, zeroMin]);
+  it('muestra actual / objetivo, mínimo, etiqueta textual y barra actual/objetivo', async () => {
+    const legacy = makeLegacyItem();
+    await renderInventory([OK_ITEM, legacy]);
 
-    expect(screen.getAllByText('OK').length).toBeGreaterThan(0);
-    const bars = document.querySelectorAll('progress.stock-item__bar');
-    // Solo el item con mínimo > 0 tiene barra.
-    expect(bars).toHaveLength(1);
+    const okRow = screen.getByText(OK_ITEM.name).closest('li') as HTMLElement;
+    expect(visibleText(okRow)).toContain('25 / 30 kg · mín. 10');
+    expect(within(okRow).getByText('OK', { selector: '.badge' })).toBeInTheDocument();
+    const bar = okRow.querySelector('progress.stock-item__bar') as HTMLProgressElement;
+    expect(bar.value).toBe(83); // 25 / 30
+
+    // Producto anterior sin objetivo: la fila de siempre (actual / mínimo y la
+    // barra previa) con un estado válido — nunca un cuarto estado.
+    const legacyRow = screen.getByText(legacy.name).closest('li') as HTMLElement;
+    expect(visibleText(legacyRow)).toContain('12 / 10 kg');
+    expect((legacyRow.querySelector('progress') as HTMLProgressElement).value).toBe(60);
+    expect(within(legacyRow).getByText('OK', { selector: '.badge' })).toBeInTheDocument();
+    expect(legacyRow).not.toHaveTextContent(/pendiente/i);
   });
 
-  it('mínimo 0: sin barra y estado OK (nunca 100% falso)', async () => {
+  it('por encima del objetivo la barra se limita al 100% (no es un máximo); mínimo 0 también tiene barra', async () => {
     api.fetchStockItems.mockResolvedValue(
       itemsList([
-        {
-          ...OK_ITEM,
-          name: 'Producto sintético sin mínimo',
-          minimumQuantity: '0',
-          currentQuantity: '3',
-        },
+        makeItem({ name: 'Producto sintético excedido', currentQuantity: '45' }),
+        makeZeroMinItem(),
       ]),
     );
     api.fetchStockCategories.mockResolvedValue(categoriesResponse());
     renderStock();
-    await screen.findByText('Producto sintético sin mínimo');
-    expect(document.querySelectorAll('progress.stock-item__bar')).toHaveLength(0);
-    expect(screen.getByText('OK', { selector: '.badge' })).toBeInTheDocument();
+    const over = (await screen.findByText('Producto sintético excedido')).closest('li')!;
+    expect((over.querySelector('progress') as HTMLProgressElement).value).toBe(100);
+    expect(visibleText(over)).toContain('45 / 30 kg');
+    const zeroMin = screen.getByText('Producto sintético sin mínimo').closest('li')!;
+    expect((zeroMin.querySelector('progress') as HTMLProgressElement).value).toBe(70);
+  });
+
+  it('crítico sin objetivo: badge «Crítico», sin ningún estado extra', async () => {
+    await renderInventory([
+      makeLegacyItem({ currentQuantity: '4', stockLevel: 'critical' }),
+      OK_ITEM,
+    ]);
+    const row = screen.getByText('Producto sintético sin objetivo').closest('li') as HTMLElement;
+    expect(within(row).getByText('Crítico', { selector: '.badge' })).toBeInTheDocument();
+    expect(row.querySelectorAll('.badge')).toHaveLength(1);
+    expect(row).not.toHaveTextContent(/pendiente/i);
   });
 });
 
@@ -306,7 +334,7 @@ describe('Stock — paginación', () => {
     expect(api.fetchStockItems).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }));
   });
 
-  it('barra ⚠️ bajo mínimo: solo con todas las páginas cargadas y con el nivel del backend', async () => {
+  it('barra ⚠️ de bajos y críticos: solo con todas las páginas cargadas y con el nivel del backend', async () => {
     api.fetchStockItems.mockResolvedValueOnce({
       ...itemsList([OK_ITEM, LOW_ITEM]),
       page: 1,
@@ -317,7 +345,7 @@ describe('Stock — paginación', () => {
     renderStock();
     await screen.findByText(LOW_ITEM.name);
     // Con una página pendiente el conteo sería parcial: no se muestra.
-    expect(screen.queryByText(/bajo mínimo/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/con stock bajo o/)).not.toBeInTheDocument();
 
     api.fetchStockItems.mockResolvedValueOnce({
       ...itemsList([CRIT_ITEM]),
@@ -326,7 +354,9 @@ describe('Stock — paginación', () => {
       total: 3,
     });
     await userEvent.setup().click(screen.getByRole('button', { name: /cargar más/i }));
-    const alert = (await screen.findByText('2 ítems bajo mínimo')).closest('p') as HTMLElement;
+    const alert = (await screen.findByText(/2 ítems con stock bajo o\s+crítico/)).closest(
+      'p',
+    ) as HTMLElement;
     expect(alert).toHaveTextContent(`${LOW_ITEM.name}, ${CRIT_ITEM.name}`);
     expect(alert).not.toHaveTextContent(OK_ITEM.name);
   });
@@ -478,7 +508,9 @@ describe('Stock — diálogos de movimiento', () => {
     const body = api.createStockMovement.mock.calls[0]?.[1];
     expect(body.type).toBe('ADJUSTMENT_INCREASE');
     expect(body.reason).toBe('Conteo sintético');
-    expect(body.employeeId).toBeNull();
+    // Por defecto, la persona es el propio ADMIN (sin ficha): su usuario.
+    expect(body.participantUserId).toBe('u-a');
+    expect(body).not.toHaveProperty('employeeId');
   });
 
   it.each([
@@ -504,7 +536,7 @@ describe('Stock — diálogos de movimiento', () => {
       type,
       quantity: '1.25',
       effectiveDate: '2020-01-02',
-      employeeId: null,
+      participantUserId: 'u-a',
     });
   });
 
@@ -659,6 +691,88 @@ describe('Stock — detalle e historial', () => {
     expect(api.fetchStockItem).not.toHaveBeenCalled();
   });
 
+  it('sin persona asociada muestra al administrador que registró cada movimiento (no a quien mira)', async () => {
+    // Quien mira es otro ADMIN, con su propio nombre: nunca se usa para atribuir.
+    useAuthMock.mockReturnValue({
+      user: {
+        id: 'u-a',
+        role: 'ADMIN',
+        status: 'ACTIVE',
+        displayName: 'Admin que mira',
+        employee: null,
+      },
+      logout: logoutMock,
+      hasRole: (role: string) => role === 'ADMIN',
+    });
+    api.fetchStockItem.mockResolvedValue({ item: OK_ITEM });
+    api.fetchStockItemMovements.mockResolvedValue(
+      movementsList([
+        makeMovement({
+          id: 'm-a',
+          reason: 'Por A',
+          recordedBy: { displayName: 'Admin sintética Uno' },
+        }),
+        makeMovement({
+          id: 'm-b',
+          reason: 'Por B',
+          recordedBy: { displayName: 'Admin sintético Dos' },
+        }),
+        makeMovement({
+          id: 'm-e',
+          reason: 'Por la persona',
+          employee: { id: 'e1', displayName: 'Persona sintética', colorHex: '#4a7c59' },
+          recordedBy: null,
+        }),
+        makeMovement({ id: 'm-o', type: 'OPENING_BALANCE', reason: 'Apertura', recordedBy: null }),
+      ]),
+    );
+    await renderInventory();
+    await userEvent.setup().click(
+      within(screen.getByText(OK_ITEM.name).closest('li') as HTMLElement).getByRole('button', {
+        name: /historial/i,
+      }),
+    );
+    const dialog = await screen.findByRole('dialog');
+    const meta = async (reason: string) =>
+      (await within(dialog).findByText(new RegExp(reason))).closest('p')?.textContent ?? '';
+    expect(await meta('Por A')).toContain('Admin sintética Uno');
+    expect(await meta('Por B')).toContain('Admin sintético Dos');
+    expect(await meta('Por la persona')).toContain('Persona sintética');
+    expect(await meta('Apertura')).toContain('Sin persona registrada');
+    expect(dialog).not.toHaveTextContent('Admin que mira');
+  });
+
+  it('Benja registra que Viki consumió: «Viki · Registró: Benja»; sin «Registró» si es la misma persona', async () => {
+    api.fetchStockItem.mockResolvedValue({ item: OK_ITEM });
+    api.fetchStockItemMovements.mockResolvedValue(
+      movementsList([
+        makeMovement({
+          id: 'm-viki',
+          reason: 'Bolsa de basura',
+          participantUser: { id: 'u-viki', displayName: 'Viki sintética' },
+          recordedBy: { displayName: 'Benja sintético' },
+        }),
+        makeMovement({
+          id: 'm-self',
+          reason: 'Uso propio',
+          participantUser: { id: 'u-benja', displayName: 'Benja sintético' },
+          recordedBy: null,
+        }),
+      ]),
+    );
+    await renderInventory();
+    await userEvent.setup().click(
+      within(screen.getByText(OK_ITEM.name).closest('li') as HTMLElement).getByRole('button', {
+        name: /historial/i,
+      }),
+    );
+    const dialog = await screen.findByRole('dialog');
+    const meta = async (reason: string) =>
+      (await within(dialog).findByText(new RegExp(reason))).closest('p')?.textContent ?? '';
+    expect(await meta('Bolsa de basura')).toMatch(/^Viki sintética · Registró: Benja sintético/);
+    expect(await meta('Uso propio')).toMatch(/^Benja sintético · Uso propio/);
+  });
+
   it('una respuesta anterior no sobrescribe un filtro de historial más nuevo', async () => {
     api.fetchStockItem.mockResolvedValue({ item: OK_ITEM });
     const oldResponse = deferred<ReturnType<typeof movementsList>>();
@@ -808,7 +922,7 @@ describe('Stock — navegación SPA entre subvistas', () => {
       expect(api.fetchStockItems).toHaveBeenCalledWith(expect.objectContaining({ q: 'sint' })),
     );
     api.fetchStockItems.mockImplementation(async (params: { stockLevel?: string }) =>
-      itemsList(params.stockLevel === 'low' ? [LOW_ITEM] : []),
+      itemsList(params.stockLevel === 'critical' ? [CRIT_ITEM] : []),
     );
 
     await user.click(within(stockNav()).getByRole('link', { name: /compras/i }));
@@ -866,7 +980,45 @@ describe('Stock — stockLevel y filtro de nivel server-side', () => {
 });
 
 describe('Stock — 🛒 Compras (vista derivada)', () => {
-  function mockPurchases(critical = [CRIT_ITEM], low = [LOW_ITEM]) {
+  // Ejemplo acordado: mínimo 20, objetivo 50 (punto medio 35).
+  const CRITICAL_19 = makeItem({
+    id: '00000000-0000-4000-8000-00000000i020',
+    name: 'Bolsas de basura sintéticas',
+    unit: 'u',
+    minimumQuantity: '20',
+    targetQuantity: '50',
+    currentQuantity: '19',
+    stockLevel: 'critical',
+    suggestedPurchaseQuantity: '31',
+  });
+  const LOW_30 = makeItem({
+    id: '00000000-0000-4000-8000-00000000i021',
+    name: 'Detergente sintético',
+    unit: 'u',
+    minimumQuantity: '20',
+    targetQuantity: '50',
+    currentQuantity: '30',
+    stockLevel: 'low',
+    suggestedPurchaseQuantity: '20',
+  });
+  // Decimales: objetivo 8, actual 3.25 → 4.75 kg.
+  const DECIMAL = makeItem({
+    id: '00000000-0000-4000-8000-00000000i022',
+    name: 'Fertilizante sintético',
+    minimumQuantity: '3.5',
+    targetQuantity: '8',
+    currentQuantity: '3.25',
+    stockLevel: 'critical',
+    suggestedPurchaseQuantity: '4.75',
+  });
+  // Producto anterior sin objetivo, en crítico: estado válido, sin cantidad inventada.
+  const NO_TARGET = makeLegacyItem({
+    name: 'Producto sintético antiguo',
+    currentQuantity: '2',
+    stockLevel: 'critical',
+  });
+
+  function mockPurchases(critical = [CRITICAL_19, DECIMAL, NO_TARGET], low = [LOW_30]) {
     api.fetchStockCategories.mockResolvedValue(categoriesResponse());
     api.fetchStockItems.mockImplementation(async (params: { stockLevel?: string }) =>
       itemsList(
@@ -878,36 +1030,43 @@ describe('Stock — 🛒 Compras (vista derivada)', () => {
   it('pide críticos y bajos activos al backend, ordenados por nombre, críticos primero', async () => {
     mockPurchases();
     renderStock('/stock/purchases');
-    expect(await screen.findByText('2 productos por reponer')).toBeInTheDocument();
+    expect(await screen.findByText('4 productos por reponer')).toBeInTheDocument();
     expect(itemCalls({ stockLevel: 'critical', status: 'active', sort: 'name' })).toHaveLength(1);
     expect(itemCalls({ stockLevel: 'low', status: 'active', sort: 'name' })).toHaveLength(1);
     const sections = screen.getAllByRole('region');
-    expect(sections[0]).toHaveTextContent('Críticos (1)');
+    expect(sections[0]).toHaveTextContent('Críticos (3)');
     expect(sections[1]).toHaveTextContent('Bajos (1)');
     expect(screen.getByText(/no es una orden de compra/i)).toBeInTheDocument();
   });
 
-  it('cada fila muestra actual, mínimo, unidad, nivel, prioridad y la diferencia de referencia', async () => {
+  it('cada fila: actual / mínimo · objetivo, nivel, prioridad y la cantidad sugerida con su unidad', async () => {
     mockPurchases();
     renderStock('/stock/purchases');
-    const row = (await screen.findByText(LOW_ITEM.name)).closest('li') as HTMLElement;
-    expect(within(row).getByText('Bajo', { selector: '.badge' })).toBeInTheDocument();
-    expect(within(row).getByText('Prioridad media')).toBeInTheDocument();
-    // "3 / 10 kg" del prototipo, con actual y mínimo nombrados para lectores de pantalla.
-    expect(row).toHaveTextContent('Actual: 3 / , mínimo: 10 kg');
-    // máximo(10 − 3, 0) = 7
-    expect(within(row).getByText(/^Falta:/)).toHaveTextContent('Falta: 7 kg');
-    expect(within(row).getByText('Casa', { selector: '.area-tag' })).toBeInTheDocument();
-    const critical = screen.getByText(CRIT_ITEM.name).closest('li') as HTMLElement;
+    const critical = (await screen.findByText(CRITICAL_19.name)).closest('li') as HTMLElement;
+    expect(within(critical).getByText('Crítico', { selector: '.badge' })).toBeInTheDocument();
     expect(within(critical).getByText('Prioridad alta')).toBeInTheDocument();
+    expect(visibleText(critical)).toContain('19 / 20 u · objetivo 50');
+    expect(within(critical).getByText('Comprar: 31 u')).toBeInTheDocument();
+    // Bajo: también sugiere cuánto falta para el objetivo (50 − 30).
+    const low = screen.getByText(LOW_30.name).closest('li') as HTMLElement;
+    expect(within(low).getByText('Bajo', { selector: '.badge' })).toBeInTheDocument();
+    expect(within(low).getByText('Prioridad media')).toBeInTheDocument();
+    expect(within(low).getByText('Comprar: 20 u')).toBeInTheDocument();
+    const decimal = screen.getByText(DECIMAL.name).closest('li') as HTMLElement;
+    expect(within(decimal).getByText('Comprar: 4.75 kg')).toBeInTheDocument();
+    // Sin objetivo: «Completar stock objetivo» SOLO en lugar de la cantidad; el estado no cambia.
+    const legacy = screen.getByText(NO_TARGET.name).closest('li') as HTMLElement;
+    expect(within(legacy).getByText('Crítico', { selector: '.badge' })).toBeInTheDocument();
+    expect(within(legacy).getByText('Completar stock objetivo')).toBeInTheDocument();
+    expect(legacy).not.toHaveTextContent(/Comprar:/);
   });
 
-  it('agrupa por categoría y comparte la lista visible con Web Share', async () => {
+  it('agrupa por categoría y comparte la lista visible con Web Share, con cantidad y unidad', async () => {
     const share = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'share', { configurable: true, value: share });
     mockPurchases();
     renderStock('/stock/purchases');
-    await screen.findByText('2 productos por reponer');
+    await screen.findByText('4 productos por reponer');
     const user = userEvent.setup();
     await user.click(
       within(screen.getByRole('group', { name: 'Agrupar compras' })).getByRole('button', {
@@ -917,13 +1076,24 @@ describe('Stock — 🛒 Compras (vista derivada)', () => {
     expect(screen.getByRole('region', { name: /Casa —/ })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /compartir/i }));
     await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
-    expect(share.mock.calls[0]?.[0].text).toContain(LOW_ITEM.name);
-    expect(share.mock.calls[0]?.[0].text).toContain('actual: 3 kg; mínimo: 10 kg; falta: 7 kg');
+    const text = share.mock.calls[0]?.[0].text as string;
+    expect(text).toContain(
+      '• Bolsas de basura sintéticas — actual: 19 u; mínimo: 20 u; objetivo: 50 u; comprar: 31 u',
+    );
+    expect(text).toContain(
+      '• Detergente sintético — actual: 30 u; mínimo: 20 u; objetivo: 50 u; comprar: 20 u',
+    );
+    expect(text).toContain(
+      '• Fertilizante sintético — actual: 3.25 kg; mínimo: 3.5 kg; objetivo: 8 kg; comprar: 4.75 kg',
+    );
+    expect(text).toContain(
+      '• Producto sintético antiguo — actual: 2 kg; mínimo: 10 kg; Completar stock objetivo',
+    );
     expect(await screen.findByText('Lista compartida.')).toBeInTheDocument();
     Object.defineProperty(navigator, 'share', { configurable: true, value: undefined });
   });
 
-  it('usa el portapapeles cuando Web Share no está disponible', async () => {
+  it('usa el portapapeles cuando Web Share no está disponible, con las mismas cantidades', async () => {
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'share', { configurable: true, value: undefined });
@@ -933,27 +1103,32 @@ describe('Stock — 🛒 Compras (vista derivada)', () => {
     });
     mockPurchases();
     renderStock('/stock/purchases');
-    await screen.findByText('2 productos por reponer');
+    await screen.findByText('4 productos por reponer');
     await user.click(screen.getByRole('button', { name: /compartir/i }));
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText.mock.calls[0]?.[0]).toContain('comprar: 31 u');
+    expect(writeText.mock.calls[0]?.[0]).toContain('comprar: 20 u');
     expect(await screen.findByText('Lista copiada al portapapeles.')).toBeInTheDocument();
   });
 
-  it('filtros: «Críticos» consulta solo ese nivel; área y búsqueda viajan al backend', async () => {
+  it('filtros: «Bajos» y «Críticos» consultan solo ese nivel; área y búsqueda viajan al backend', async () => {
     mockPurchases();
     renderStock('/stock/purchases');
-    await screen.findByText('2 productos por reponer');
+    await screen.findByText('4 productos por reponer');
     const user = userEvent.setup();
-    api.fetchStockItems.mockClear();
+    const levels = () => within(screen.getByRole('group', { name: 'Filtrar por nivel' }));
 
-    await user.click(
-      within(screen.getByRole('group', { name: 'Filtrar por nivel' })).getByRole('button', {
-        name: /críticos/i,
-      }),
-    );
+    await user.click(levels().getByRole('button', { name: /bajos/i }));
     expect(await screen.findByText('1 producto por reponer')).toBeInTheDocument();
-    expect(screen.queryByText(LOW_ITEM.name)).not.toBeInTheDocument();
+    const low = screen.getByText(LOW_30.name).closest('li') as HTMLElement;
+    expect(within(low).getByText('Comprar: 20 u')).toBeInTheDocument();
+    expect(screen.queryByText(CRITICAL_19.name)).not.toBeInTheDocument();
 
+    await user.click(levels().getByRole('button', { name: /críticos/i }));
+    expect(await screen.findByText('3 productos por reponer')).toBeInTheDocument();
+    expect(screen.queryByText(LOW_30.name)).not.toBeInTheDocument();
+
+    api.fetchStockItems.mockClear();
     await user.click(
       within(screen.getByRole('group', { name: 'Filtrar por área' })).getByRole('button', {
         name: /jardín/i,
@@ -971,37 +1146,55 @@ describe('Stock — 🛒 Compras (vista derivada)', () => {
     expect(await screen.findByText('No hay compras pendientes.')).toBeInTheDocument();
   });
 
-  it('registrar una entrada desde Compras invalida la lista y el producto que llegó al mínimo desaparece', async () => {
+  it('registrar una entrada desde Compras invalida la lista y el producto que volvió a normal desaparece', async () => {
     mockPurchases();
     api.createStockMovement.mockResolvedValue({ movement: {}, item: {} });
     renderStock('/stock/purchases');
-    const row = (await screen.findByText(LOW_ITEM.name)).closest('li') as HTMLElement;
+    const row = (await screen.findByText(LOW_30.name)).closest('li') as HTMLElement;
     const user = userEvent.setup();
     await user.click(within(row).getByRole('button', { name: /registrar entrada/i }));
     const dialog = await screen.findByRole('dialog');
-    await user.type(within(dialog).getByLabelText('Cantidad'), '7');
+    await user.type(within(dialog).getByLabelText('Cantidad'), '20');
 
     // A partir de ahora el backend ya no lo devuelve como bajo.
-    mockPurchases([CRIT_ITEM], []);
+    mockPurchases([CRITICAL_19, DECIMAL, NO_TARGET], []);
     await user.click(within(dialog).getByRole('button', { name: /registrar movimiento/i }));
 
     expect(await screen.findByText('Ingreso registrado.')).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByText(LOW_ITEM.name)).not.toBeInTheDocument());
-    expect(screen.getByText(CRIT_ITEM.name)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(LOW_30.name)).not.toBeInTheDocument());
+    expect(screen.getByText(CRITICAL_19.name)).toBeInTheDocument();
+    // La sugerencia no registró nada: el ingreso es el movimiento explícito.
+    expect(api.createStockMovement).toHaveBeenCalledTimes(1);
     expect(api.createStockMovement).toHaveBeenCalledWith(
-      LOW_ITEM.id,
-      expect.objectContaining({ type: 'INCOME', quantity: '7' }),
+      LOW_30.id,
+      expect.objectContaining({ type: 'INCOME', quantity: '20' }),
       expect.stringMatching(/^[A-Za-z0-9_-]{8,64}$/),
     );
   });
 
-  it('ADMIN puede abrir la edición del producto desde Compras', async () => {
+  it('ADMIN completa el objetivo desde Compras: se recalcula la cantidad sugerida', async () => {
     asAdmin();
     mockPurchases();
+    api.updateStockItem.mockResolvedValue({ item: NO_TARGET });
     renderStock('/stock/purchases');
-    const row = (await screen.findByText(LOW_ITEM.name)).closest('li') as HTMLElement;
-    await userEvent.setup().click(within(row).getByRole('button', { name: /editar producto/i }));
-    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    const row = (await screen.findByText(NO_TARGET.name)).closest('li') as HTMLElement;
+    const user = userEvent.setup();
+    await user.click(within(row).getByRole('button', { name: /editar producto/i }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Stock objetivo'), { target: { value: '15' } });
+    // El backend devuelve el producto con su nueva sugerencia (15 − 2).
+    mockPurchases(
+      [
+        CRITICAL_19,
+        DECIMAL,
+        { ...NO_TARGET, targetQuantity: '15', suggestedPurchaseQuantity: '13' },
+      ],
+      [LOW_30],
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar cambios' }));
+    expect(api.updateStockItem).toHaveBeenCalledWith(NO_TARGET.id, { targetQuantity: '15' });
+    const updated = (await screen.findByText('Comprar: 13 kg')).closest('li') as HTMLElement;
+    expect(updated).toHaveTextContent(NO_TARGET.name);
   });
 
   it('error con reintento y sin datos inventados', async () => {
@@ -1033,7 +1226,7 @@ describe('Stock — 📊 Reportes', () => {
     expect(screen.getAllByText('No hubo consumos en el período.')).toHaveLength(2);
     // Los catálogos de los filtros avanzados no se piden hasta abrirlos.
     expect(api.fetchStockDestinations).not.toHaveBeenCalled();
-    expect(fetchTaskEmployeesMock).not.toHaveBeenCalled();
+    expect(fetchParticipantsMock).not.toHaveBeenCalled();
   });
 
   it('cantidades por unidad (nunca un total mezclado) y conteos por tipo', async () => {
@@ -1084,8 +1277,11 @@ describe('Stock — 📊 Reportes', () => {
   });
 
   it('«Más filtros» carga sus catálogos y envía persona/destino/tipo al backend', async () => {
-    fetchTaskEmployeesMock.mockResolvedValue({
-      employees: [{ id: 'e-sint', displayName: 'Persona sintética', colorHex: '#4a7c59' }],
+    fetchParticipantsMock.mockResolvedValue({
+      participants: [
+        { kind: 'ADMIN', id: 'u-viki', displayName: 'Viki sintética', colorHex: null },
+        { kind: 'EMPLOYEE', id: 'e-sint', displayName: 'Persona sintética', colorHex: '#4a7c59' },
+      ],
     });
     api.fetchStockDestinations.mockResolvedValue({ destinations: [DESTINATION] });
     renderStock('/stock/reports');
@@ -1093,16 +1289,103 @@ describe('Stock — 📊 Reportes', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Más filtros' }));
     expect(api.fetchStockDestinations).toHaveBeenCalledWith('active');
-    await user.selectOptions(await screen.findByLabelText('Persona'), 'e-sint');
+    await screen.findByRole('option', { name: '🔐 Viki sintética' });
+    await user.selectOptions(screen.getByLabelText('Persona'), 'EMPLOYEE:e-sint');
     await user.selectOptions(screen.getByLabelText('Tipo de movimiento'), 'CONSUMPTION');
     await waitFor(() =>
       expect(api.fetchStockReportSummary).toHaveBeenLastCalledWith(
         expect.objectContaining({ employeeId: 'e-sint', type: 'CONSUMPTION' }),
       ),
     );
+    // Un administrador se filtra por su usuario, nunca por nombre ni como empleado.
+    await user.selectOptions(screen.getByLabelText('Persona'), 'ADMIN:u-viki');
+    await waitFor(() =>
+      expect(api.fetchStockReportMovements).toHaveBeenLastCalledWith(
+        expect.objectContaining({ participantUserId: 'u-viki' }),
+      ),
+    );
+    const last = api.fetchStockReportMovements.mock.calls.at(-1)?.[0];
+    expect(last).not.toHaveProperty('employeeId');
     // El destino es opcional en cualquier tipo de movimiento.
     await user.selectOptions(screen.getByLabelText('Tipo de movimiento'), 'INCOME');
     expect(screen.getByLabelText('Destino')).toBeInTheDocument();
+  });
+
+  it('movimientos por persona y listado: cada administrador con su nombre; sin evidencia, aparte', async () => {
+    const summary = emptyReportSummary();
+    const byType = (counts: Partial<Record<StockMovementType, number>>) => ({
+      OPENING_BALANCE: 0,
+      INCOME: 0,
+      CONSUMPTION: 0,
+      ADJUSTMENT_INCREASE: 0,
+      ADJUSTMENT_DECREASE: 0,
+      ...counts,
+    });
+    summary.employees = [
+      {
+        employee: null,
+        participantUser: null,
+        recordedBy: null,
+        total: 4,
+        byType: byType({ OPENING_BALANCE: 4 }),
+      },
+      {
+        employee: null,
+        participantUser: null,
+        recordedBy: { displayName: 'Admin sintética Uno' },
+        total: 2,
+        byType: byType({ INCOME: 2 }),
+      },
+      {
+        employee: null,
+        participantUser: null,
+        recordedBy: { displayName: 'Admin sintético Dos' },
+        total: 1,
+        byType: byType({ CONSUMPTION: 1 }),
+      },
+    ];
+    api.fetchStockReportSummary.mockResolvedValue(summary);
+    const movement = (id: string, reason: string, recordedBy: { displayName: string } | null) => ({
+      id,
+      type: 'INCOME' as const,
+      quantity: '3',
+      effectiveDate: '2026-09-24',
+      reason,
+      createdAt: '2026-09-24T12:00:00.000Z',
+      item: {
+        id: 'i1',
+        name: 'Fertilizante sintético',
+        area: 'GARDEN' as const,
+        unit: 'kg',
+        active: true,
+      },
+      employee: null,
+      participantUser: null,
+      recordedBy,
+      destination: null,
+    });
+    api.fetchStockReportMovements.mockResolvedValue(
+      reportMovementsList([
+        movement('r-a', 'Ingreso de A', { displayName: 'Admin sintética Uno' }),
+        movement('r-b', 'Ingreso de B', { displayName: 'Admin sintético Dos' }),
+        movement('r-n', 'Sin evidencia', null),
+      ]),
+    );
+    renderStock('/stock/reports');
+    const people = await screen.findByText('Movimientos por persona');
+    const card = people.closest('section') ?? document.body;
+    expect(within(card as HTMLElement).getByText('Admin sintética Uno')).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByText('Admin sintético Dos')).toBeInTheDocument();
+    expect(within(card as HTMLElement).getAllByText('Sin persona asociada')).toHaveLength(1);
+    expect(
+      within(card as HTMLElement).getByText(/sin información de quién los registró/i),
+    ).toBeInTheDocument();
+
+    const meta = (reason: string) => screen.getByText(new RegExp(reason)).closest('p')?.textContent;
+    await screen.findByText(/Ingreso de A/);
+    expect(meta('Ingreso de A')).toContain('Admin sintética Uno');
+    expect(meta('Ingreso de B')).toContain('Admin sintético Dos');
+    expect(meta('Sin evidencia')).toContain('Sin persona registrada');
   });
 
   it('una validación del backend (rango abusivo) se muestra en lenguaje humano', async () => {

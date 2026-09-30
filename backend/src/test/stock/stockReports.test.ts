@@ -432,6 +432,8 @@ describe('listStockReportMovements — paginación en Postgres, sin N+1', () => 
         createdAt: '2026-09-24T13:00:00.000Z',
         item: { id: ITEM, name: 'Producto sintético A', area: 'HOUSE', unit: 'kg', active: true },
         employee: null,
+        participantUser: null,
+        recordedBy: null,
         destination: { id: DESTINATION, name: 'Destino sintético', type: 'SECTOR' },
       },
     ]);
@@ -446,6 +448,252 @@ describe('listStockReportMovements — paginación en Postgres, sin N+1', () => 
       ),
     ).rejects.toThrow('El período no puede empezar en el futuro.');
     expect(queries).toHaveLength(0);
+  });
+});
+
+describe('reportes — persona (empleado o administrador) y autor', () => {
+  // Sintéticos: «Benja» registra; «Viki» es otra administradora sin ficha.
+  const BENJA = 'aaaaaaaa-0000-4000-8000-00000000000a';
+  const VIKI = 'bbbbbbbb-0000-4000-8000-00000000000b';
+  const EMP_USER_EMPLOYEE = 'e1';
+  const none = { employeeId: null, employeeName: null, employeeColor: null };
+  const noParticipant = { participantUserId: null, participantName: null };
+  const noCreator = { creatorId: null, creatorEmployeeId: null, creatorName: null };
+  const byBenja = { creatorId: BENJA, creatorEmployeeId: null, creatorName: 'Benja sintético' };
+
+  it('persona ADMIN y autor en la misma sentencia (parámetros, sin N+1); filtro por administrador', async () => {
+    await listStockReportMovements(
+      admin,
+      { ...baseFilters, participantUserId: VIKI, page: 1, pageSize: 20 },
+      NOW,
+    );
+    const page = queries.find((query) => kindOf(query.sql) === 'movementsPage')!;
+    expect(queries).toHaveLength(2);
+    expect(page.sql).toContain('LEFT JOIN "users" pu ON pu."id" = m."participant_user_id"');
+    expect(page.sql).toContain('m."participant_user_id" = ');
+    expect(page.sql).toContain('LEFT JOIN LATERAL');
+    expect(page.sql).toContain('HAVING COUNT(*) = 1');
+    expect(page.values).toEqual(
+      expect.arrayContaining([VIKI, 'StockMovement', 'stock.movement.created', 'Administrador']),
+    );
+    expect(page.sql).not.toContain(VIKI);
+    expect(page.sql).not.toContain('username');
+  });
+
+  it('agrupaciones y CSV solo buscan autor cuando el movimiento no tiene persona', async () => {
+    await getStockReportSummary(admin, baseFilters, NOW);
+    const people = queries.find((query) => kindOf(query.sql) === 'employees')!;
+    expect(people.sql).toContain('m."employee_id" IS NULL AND m."participant_user_id" IS NULL');
+  });
+
+  it('personas: un grupo por identidad estable (empleado, administrador participante, autor sin persona)', async () => {
+    const row = (overrides: Record<string, unknown>) => ({
+      id: null,
+      displayName: null,
+      colorHex: null,
+      ...noParticipant,
+      creatorId: null,
+      creatorName: null,
+      type: 'INCOME',
+      count: 1,
+      ...overrides,
+    });
+    respond = (sql) =>
+      kindOf(sql) === 'employees'
+        ? [
+            row({ type: 'OPENING_BALANCE', count: 4 }),
+            // Viki consumió (registró Benja): cuenta para Viki, no para Benja.
+            row({
+              participantUserId: VIKI,
+              participantName: 'Viki sintética',
+              type: 'CONSUMPTION',
+              count: 2,
+            }),
+            row({
+              participantUserId: VIKI,
+              participantName: 'Viki sintética',
+              type: 'INCOME',
+              count: 1,
+            }),
+            // Otro administrador con el MISMO nombre: grupo aparte (id distinto).
+            row({
+              participantUserId: BENJA,
+              participantName: 'Viki sintética',
+              type: 'INCOME',
+              count: 1,
+            }),
+            // Anterior, sin persona: queda con su autor.
+            row({ creatorId: BENJA, creatorName: 'Benja sintético', type: 'INCOME', count: 1 }),
+            row({
+              id: EMP_USER_EMPLOYEE,
+              displayName: 'Persona sintética',
+              colorHex: '#4a7c59',
+              type: 'CONSUMPTION',
+              count: 2,
+            }),
+          ]
+        : [];
+    const summary = await getStockReportSummary(admin, baseFilters, NOW);
+    expect(summary.employees).toEqual([
+      {
+        employee: null,
+        participantUser: null,
+        recordedBy: null,
+        total: 4,
+        byType: expect.objectContaining({ OPENING_BALANCE: 4 }),
+      },
+      {
+        employee: null,
+        participantUser: { id: VIKI, displayName: 'Viki sintética' },
+        recordedBy: null,
+        total: 3,
+        byType: expect.objectContaining({ CONSUMPTION: 2, INCOME: 1 }),
+      },
+      {
+        employee: { id: EMP_USER_EMPLOYEE, displayName: 'Persona sintética', colorHex: '#4a7c59' },
+        participantUser: null,
+        recordedBy: null,
+        total: 2,
+        byType: expect.objectContaining({ CONSUMPTION: 2 }),
+      },
+      {
+        employee: null,
+        participantUser: null,
+        recordedBy: { displayName: 'Benja sintético' },
+        total: 1,
+        byType: expect.objectContaining({ INCOME: 1 }),
+      },
+      {
+        employee: null,
+        participantUser: { id: BENJA, displayName: 'Viki sintética' },
+        recordedBy: null,
+        total: 1,
+        byType: expect.objectContaining({ INCOME: 1 }),
+      },
+    ]);
+  });
+
+  it('listado: persona del movimiento y, aparte, quien registró solo si es otra persona', async () => {
+    const base = {
+      type: 'CONSUMPTION',
+      quantity: '1.00',
+      effectiveDate: new Date('2026-09-24T00:00:00.000Z'),
+      reason: null,
+      createdAt: new Date('2026-09-24T13:00:00.000Z'),
+      itemId: ITEM,
+      itemName: 'Bolsas de basura sintéticas',
+      itemArea: 'HOUSE',
+      itemUnit: 'u',
+      itemActive: true,
+      ...none,
+      ...noParticipant,
+      ...noCreator,
+      destinationId: null,
+      destinationName: null,
+      destinationType: null,
+    };
+    respond = (sql) =>
+      kindOf(sql) === 'movementsPage'
+        ? [
+            // Benja registra que Viki consumió.
+            {
+              ...base,
+              id: 'm1',
+              participantUserId: VIKI,
+              participantName: 'Viki sintética',
+              ...byBenja,
+            },
+            // Benja se elige a sí mismo: no se repite como autor.
+            {
+              ...base,
+              id: 'm2',
+              participantUserId: BENJA,
+              participantName: 'Benja sintético',
+              ...byBenja,
+            },
+            // Benja registra a nombre de un empleado.
+            { ...base, id: 'm3', employeeId: 'e1', employeeName: 'Persona sintética', ...byBenja },
+            // El empleado registra lo suyo.
+            {
+              ...base,
+              id: 'm4',
+              employeeId: 'e1',
+              employeeName: 'Persona sintética',
+              creatorId: 'u-e',
+              creatorEmployeeId: 'e1',
+              creatorName: 'Persona sintética',
+            },
+            // Anterior con «Administrador» (sin persona): el autor, como en 93f49d6.
+            { ...base, id: 'm5', ...byBenja },
+            // Apertura sin evidencia.
+            { ...base, id: 'm6', type: 'OPENING_BALANCE' },
+          ]
+        : [{ total: 6 }];
+    const { movements } = await listStockReportMovements(
+      admin,
+      { ...baseFilters, page: 1, pageSize: 20 },
+      NOW,
+    );
+    expect(
+      movements.map((row) => [
+        row.employee?.displayName ?? row.participantUser?.displayName ?? null,
+        row.recordedBy?.displayName ?? null,
+      ]),
+    ).toEqual([
+      ['Viki sintética', 'Benja sintético'],
+      ['Benja sintético', null],
+      ['Persona sintética', 'Benja sintético'],
+      ['Persona sintética', null],
+      [null, 'Benja sintético'],
+      [null, null],
+    ]);
+    // El autor nunca expone su id; el participante sí (identidad estable para filtros).
+    expect(JSON.stringify(movements.map((row) => row.recordedBy))).not.toContain(BENJA);
+    expect(movements[0]!.participantUser).toEqual({ id: VIKI, displayName: 'Viki sintética' });
+  });
+
+  it('CSV: «Persona» es quien realizó el movimiento (empleado o administrador); sin ella, quien registró', async () => {
+    const row = (overrides: Record<string, unknown>) => ({
+      type: 'CONSUMPTION',
+      quantity: '1.00',
+      effectiveDate: new Date('2026-09-20T00:00:00.000Z'),
+      reason: null,
+      itemName: 'Bolsas de basura sintéticas',
+      itemUnit: 'u',
+      employeeId: null,
+      employeeName: null,
+      participantName: null,
+      creatorName: null,
+      destinationName: null,
+      ...overrides,
+    });
+    respond = () => [
+      row({ participantName: 'Viki sintética' }),
+      row({ employeeId: 'e1', employeeName: 'Persona sintética' }),
+      row({ creatorName: 'Benja sintético' }),
+      row({ type: 'OPENING_BALANCE' }),
+    ];
+    const { content } = await exportStockReportCsv(admin, baseFilters, NOW);
+    const persons = content
+      .slice(1)
+      .split('\n')
+      .slice(1)
+      .map((line) => line.split(',')[4]);
+    expect(persons).toEqual(['"Viki sintética"', '"Persona sintética"', '"Benja sintético"', '""']);
+    expect(queries[0]!.sql).toContain('m."participant_user_id"');
+  });
+
+  it('schemas: rechazan filtrar o registrar con dos personas a la vez', () => {
+    expect(
+      stockReportSummaryQuerySchema.safeParse({
+        ...baseFilters,
+        employeeId: CATEGORY,
+        participantUserId: VIKI,
+      }).success,
+    ).toBe(false);
+    expect(
+      stockReportSummaryQuerySchema.safeParse({ ...baseFilters, participantUserId: VIKI }).success,
+    ).toBe(true);
   });
 });
 

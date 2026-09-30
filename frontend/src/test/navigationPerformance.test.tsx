@@ -10,7 +10,7 @@ import {
   emptyReportSummary,
   itemsList,
   makeItem,
-  makeLowItem,
+  makeCritItem,
   reportMovementsList,
 } from './fixtures/stock';
 import { historyResponse, makeCollection, makeSummary } from './fixtures/chickenCoop';
@@ -20,6 +20,7 @@ import {
   makePet,
   recordsResponse,
   typesResponse,
+  dueResponse,
 } from './fixtures/pets';
 import { eventsResponse, gardenResponse, newsResponse, summaryResponse } from './fixtures/more';
 
@@ -77,6 +78,15 @@ function body(path: string): unknown {
       latestNews: [],
     };
   if (path.startsWith('/tasks/employees')) return { employees: [PERSON_A, PERSON_B] };
+  if (path.startsWith('/participants')) {
+    return {
+      participants: [
+        { kind: 'ADMIN', id: ADMIN.id, displayName: 'Administrador', colorHex: null },
+        { kind: 'EMPLOYEE', ...PERSON_A },
+        { kind: 'EMPLOYEE', ...PERSON_B },
+      ],
+    };
+  }
   if (path.startsWith('/tasks/history')) return emptyHistory();
   if (path.startsWith('/tasks')) return listResponse([makeTask()]);
   if (path.startsWith('/performance')) return PERF;
@@ -85,8 +95,8 @@ function body(path: string): unknown {
   if (path.startsWith('/stock/reports/summary')) return emptyReportSummary();
   if (path.startsWith('/stock/reports/movements')) return reportMovementsList();
   if (/^\/stock\/items\/[^/?]+\/movements/.test(path)) return { movement: {}, item: makeItem() };
-  if (path.startsWith('/stock/items') && path.includes('stockLevel=low')) {
-    return itemsList([makeLowItem()]);
+  if (path.startsWith('/stock/items') && path.includes('stockLevel=critical')) {
+    return itemsList([makeCritItem()]);
   }
   if (path.startsWith('/stock/items') && path.includes('stockLevel=')) return itemsList([]);
   if (path.startsWith('/stock/items')) return itemsList([makeItem()]);
@@ -95,6 +105,7 @@ function body(path: string): unknown {
     return path.includes('?') ? historyResponse() : { collection: makeCollection() };
   }
   if (path.startsWith('/pets/types')) return typesResponse();
+  if (path.startsWith('/pets/due')) return dueResponse();
   if (/^\/pets\/[^/?]+\/records/.test(path)) return recordsResponse();
   if (/^\/pets\/[^/?]+$/.test(path)) return detailResponse();
   if (path.startsWith('/pets')) return petsListResponse();
@@ -330,6 +341,7 @@ describe('Stock — subvistas SPA (Etapa 5C.2)', () => {
 
     await user.click(within(stockNav()).getByRole('link', { name: 'Compras' }));
     await screen.findByText('1 producto por reponer');
+    // Compras: una consulta por nivel (críticos y bajos), sin duplicados.
     const purchases = gets().filter((call) => call.includes('stockLevel='));
     expect(purchases).toHaveLength(2);
     expect(new Set(purchases).size).toBe(2);
@@ -399,10 +411,11 @@ describe('🐔 Gallinero (Etapa 5G)', () => {
     await screen.findByRole('heading', { level: 1, name: 'Gallinero' });
     await screen.findByRole('list', { name: 'Recolecciones por día' });
     // Primera visita: exactamente 1 resumen + 1 página de historial (el
-    // ADMIN además pide las personas elegibles, catálogo compartido).
+    // ADMIN además pide las personas elegibles — empleados y administradores —,
+    // catálogo compartido con Stock).
     expect(count('/chicken-coop/summary')).toBe(1);
     expect(count('/chicken-coop/collections')).toBe(1);
-    expect(count('/tasks/employees')).toBe(1);
+    expect(count('/participants')).toBe(1);
 
     await user.click(within(mainNav()).getByRole('link', { name: 'Tareas' }));
     await screen.findByRole('list', { name: 'Tareas del período' });
@@ -462,6 +475,7 @@ describe('🐾 Mascotas (Etapa 5M)', () => {
     await user.click(card);
     await screen.findByRole('list', { name: 'Registros clínicos' });
     expect(count(`/pets/${makePet().id}`)).toBe(2); // ficha + historial, una vez cada uno
+    expect(count('/pets/due')).toBe(1); // «Próximas atenciones» de la ficha
     // "Mascotas" sigue marcado como destino activo dentro de la ficha.
     expect(within(mainNav()).getByRole('link', { name: 'Mascotas' })).toHaveAttribute(
       'aria-current',

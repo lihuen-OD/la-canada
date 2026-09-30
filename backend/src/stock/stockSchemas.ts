@@ -89,6 +89,19 @@ export const stockMinimumQuantityTextSchema = z
     'El stock mínimo debe ser un número no negativo con hasta 2 decimales.',
   );
 
+/**
+ * Stock objetivo (cantidad a la que se busca llegar al reponer): misma
+ * representación decimal y límite que el mínimo. Que sea MAYOR que el mínimo
+ * lo valida el servicio (en una edición depende del mínimo guardado) y, como
+ * defensa en profundidad, un CHECK de la base.
+ */
+export const stockTargetQuantityTextSchema = z
+  .string({ message: 'El stock objetivo es obligatorio.' })
+  .regex(
+    /^(?:0(?:\.\d{1,2})?|[1-9]\d{0,7}(?:\.\d{1,2})?)$/,
+    'El stock objetivo debe ser un número no negativo con hasta 2 decimales.',
+  );
+
 const dateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha debe tener formato YYYY-MM-DD.');
@@ -181,6 +194,8 @@ export const createStockItemBodySchema = z
     categoryId: uuidSchema,
     unit: plainText('La unidad', 1, STOCK_UNIT_MAX_LENGTH),
     minimumQuantity: stockMinimumQuantityTextSchema,
+    /** Obligatorio en productos nuevos (mayor que el mínimo). */
+    targetQuantity: stockTargetQuantityTextSchema,
   })
   .strict();
 
@@ -195,6 +210,12 @@ export const updateStockItemBodySchema = z
     categoryId: uuidSchema.optional(),
     unit: plainText('La unidad', 1, STOCK_UNIT_MAX_LENGTH).optional(),
     minimumQuantity: stockMinimumQuantityTextSchema.optional(),
+    /**
+     * Completa o cambia el objetivo (nunca lo borra: no es nullable). Si la
+     * edición toca el mínimo o el objetivo, el servicio exige que el objetivo
+     * resultante exista y sea mayor que el mínimo.
+     */
+    targetQuantity: stockTargetQuantityTextSchema.optional(),
   })
   .strict()
   .refine((body) => Object.values(body).some((value) => value !== undefined), {
@@ -219,9 +240,18 @@ export const createStockMovementBodySchema = z
      * de la sesión y queda en la auditoría.
      */
     employeeId: uuidSchema.nullable().optional(),
+    /**
+     * Solo ADMIN: un administrador activo SIN ficha de empleado como persona
+     * del movimiento (incluido él mismo). Excluyente con `employeeId`; el
+     * servicio valida rol, estado y que no tenga ficha.
+     */
+    participantUserId: uuidSchema.optional(),
     reason: plainText('El motivo', 3, STOCK_REASON_MAX_LENGTH).optional(),
   })
-  .strict();
+  .strict()
+  .refine((body) => !(body.participantUserId && body.employeeId), {
+    message: 'Elegí una sola persona.',
+  });
 
 export const listStockMovementsQuerySchema = z
   .object({
@@ -250,10 +280,21 @@ const stockReportFilterShape = {
   type: z.enum(ALL_MOVEMENT_TYPES, { message: 'Tipo de movimiento inválido.' }).optional(),
   itemId: uuidSchema.optional(),
   employeeId: uuidSchema.optional(),
+  /** Persona = un administrador sin ficha (excluyente con `employeeId`). */
+  participantUserId: uuidSchema.optional(),
   destinationId: uuidSchema.optional(),
 };
 
-export const stockReportSummaryQuerySchema = z.object(stockReportFilterShape).strict();
+const singlePerson = {
+  check: (filters: { employeeId?: string; participantUserId?: string }) =>
+    !(filters.employeeId && filters.participantUserId),
+  message: { message: 'Filtrá por una sola persona.' },
+};
+
+export const stockReportSummaryQuerySchema = z
+  .object(stockReportFilterShape)
+  .strict()
+  .refine(singlePerson.check, singlePerson.message);
 
 export const stockReportMovementsQuerySchema = z
   .object({
@@ -266,4 +307,5 @@ export const stockReportMovementsQuerySchema = z
       .max(50)
       .default(20),
   })
-  .strict();
+  .strict()
+  .refine(singlePerson.check, singlePerson.message);

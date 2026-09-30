@@ -27,12 +27,12 @@ import { useDebouncedSearch, useSessionExpiry } from './stockHooks';
 import {
   AREA_EMOJI,
   AREA_LABEL,
+  COMPLETE_TARGET_TEXT,
   LEVEL_LABEL,
   LEVEL_PRIORITY,
   LEVEL_TONE,
   MOVEMENT_SUCCESS_TEXT,
 } from './stockLabels';
-import { purchaseShortfall } from './stockStatus';
 import { useStockCache } from './useStockCache';
 import { usePurchaseFilters, type AreaFilter, type PurchaseLevelFilter } from './stockViewState';
 
@@ -72,9 +72,12 @@ const SECTION_EMOJI: Record<PurchaseLevel, string> = {
  * decisión 5C.1): productos activos con `stockLevel` crítico o bajo según el
  * backend. Sin tabla, estado "comprado" ni alertas persistidas. Una consulta
  * paginada por nivel (`GET /stock/items?stockLevel=…&sort=name`), así el
- * orden es críticos → bajos → nombre sin ordenar nada en el navegador. Las
- * claves pertenecen a la familia `stock.items`: registrar un ingreso
- * invalida la lista y un producto que alcanzó su mínimo desaparece solo.
+ * orden es críticos → bajos → nombre sin ordenar nada en el navegador. La
+ * cantidad sugerida (objetivo − actual) es `item.suggestedPurchaseQuantity`
+ * del backend: una sugerencia que no registra compras ni mueve stock; sin
+ * objetivo, «Completar stock objetivo». Las claves pertenecen a la familia
+ * `stock.items`: registrar un ingreso o cambiar mínimo/objetivo invalida la
+ * lista y un producto que volvió a normal desaparece solo.
  */
 export function PurchasesView() {
   const { user } = useAuth();
@@ -174,8 +177,8 @@ export function PurchasesView() {
 
       <div className="stock-purchases__toolbar">
         <p className="stock-purchases__explain">
-          Ítems activos con stock bajo o crítico según su mínimo. «Falta» es solo una referencia
-          para llegar al mínimo: no es una orden de compra ni modifica el stock.
+          Ítems activos con stock bajo o crítico. «Comprar» sugiere cuánto falta para llegar al
+          stock objetivo: no es una orden de compra ni modifica el stock.
         </p>
         <Button size="sm" variant="ghost" disabled={!loaded} onClick={() => void sharePurchases()}>
           <span aria-hidden="true">📤 </span>Compartir
@@ -394,13 +397,25 @@ function purchaseShareText(items: StockItem[], grouping: PurchaseGrouping): stri
     if (group.items.length === 0) continue;
     lines.push('', group.title);
     for (const item of group.items) {
-      const missing = purchaseShortfall(item.currentQuantity, item.minimumQuantity) ?? '0';
+      const target =
+        item.targetQuantity !== null ? `; objetivo: ${item.targetQuantity} ${item.unit}` : '';
       lines.push(
-        `• ${item.name} — actual: ${item.currentQuantity} ${item.unit}; mínimo: ${item.minimumQuantity} ${item.unit}; falta: ${missing} ${item.unit}`,
+        `• ${item.name} — actual: ${item.currentQuantity} ${item.unit}; mínimo: ${item.minimumQuantity} ${item.unit}${target}; ${purchaseText(item)}`,
       );
     }
   }
   return lines.join('\n');
+}
+
+/**
+ * «comprar: 31 kg» — la cantidad sugerida del backend (objetivo − actual) con
+ * su unidad, o «Completar stock objetivo» si el producto todavía no lo tiene:
+ * nunca se inventa una cantidad.
+ */
+function purchaseText(item: StockItem): string {
+  return item.suggestedPurchaseQuantity !== null
+    ? `comprar: ${item.suggestedPurchaseQuantity} ${item.unit}`
+    : COMPLETE_TARGET_TEXT;
 }
 
 /** Una consulta paginada de productos activos en `level`, ordenada por nombre. */
@@ -456,7 +471,7 @@ function PurchaseRow({ item, isAdmin, onIncome, onDetail, onEdit }: PurchaseRowP
   // El backend es la autoridad del nivel; una fila `ok` solo podría llegar
   // por una revalidación en curso y se muestra igual, sin prioridad.
   const level = item.stockLevel;
-  const shortfall = purchaseShortfall(item.currentQuantity, item.minimumQuantity);
+  const hasTarget = item.targetQuantity !== null;
   return (
     <li className="stock-purchase">
       <div className="stock-purchase__info">
@@ -476,9 +491,17 @@ function PurchaseRow({ item, isAdmin, onIncome, onDetail, onEdit }: PurchaseRowP
             <span aria-hidden="true"> / </span>
             <span className="visually-hidden">, mínimo: </span>
             {item.minimumQuantity} {item.unit}
+            {hasTarget ? (
+              <>
+                <span aria-hidden="true"> · </span>
+                <span className="visually-hidden">, </span>objetivo {item.targetQuantity}
+              </>
+            ) : null}
           </span>
           <span className="stock-purchase__shortfall">
-            Falta: {shortfall !== null ? `${shortfall} ${item.unit}` : '—'}
+            {item.suggestedPurchaseQuantity !== null
+              ? `Comprar: ${item.suggestedPurchaseQuantity} ${item.unit}`
+              : COMPLETE_TARGET_TEXT}
           </span>
         </p>
       </div>

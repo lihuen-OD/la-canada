@@ -61,7 +61,7 @@ const version = (overrides: Record<string, unknown> = {}) => ({
   versionNumber: 3,
   createdAt: NOW,
   fileAsset: { sizeBytes: 1024, mimeType: 'image/jpeg' },
-  publishedBy: { username: 'pablo', employee: { displayName: 'Pablo' } },
+  publishedBy: { employee: { displayName: 'Pablo' }, personalProfile: null },
   ...overrides,
 });
 
@@ -82,6 +82,26 @@ beforeEach(() => {
 afterEach(() => setObjectStorageForTests(undefined));
 
 describe('🌳 Jardín — ver el plano y el historial', () => {
+  it('quien publicó se ve con su nombre visible: un ADMIN sin empleado usa Mi perfil, nunca el username', async () => {
+    db.gardenPlanVersion.count.mockResolvedValue(3);
+    db.gardenPlanVersion.findMany.mockResolvedValue([
+      version({
+        publishedBy: { employee: null, personalProfile: { displayName: 'Admin sintética Uno' } },
+      }),
+      version({
+        versionNumber: 2,
+        publishedBy: { employee: null, personalProfile: { displayName: 'Admin sintético Dos' } },
+      }),
+      version({ versionNumber: 1, publishedBy: { employee: null, personalProfile: null } }),
+    ]);
+    const page = await listGardenPlanVersions({ page: 1, pageSize: 3 });
+    expect(page.versions.map((row) => row.publishedBy)).toEqual([
+      'Admin sintética Uno',
+      'Admin sintético Dos',
+      'Administrador',
+    ]);
+  });
+
   it('pagina de la más reciente a la más antigua y expone la vigente en la primera página', async () => {
     db.gardenPlanVersion.count.mockResolvedValue(3);
     db.gardenPlanVersion.findMany.mockResolvedValue([version(), version({ versionNumber: 2 })]);
@@ -89,6 +109,10 @@ describe('🌳 Jardín — ver el plano y el historial', () => {
     expect(page1.current).toMatchObject({ id: ID, versionNumber: 3, publishedBy: 'Pablo' });
     expect(page1.versions).toHaveLength(2);
     expect(page1.totalPages).toBe(2);
+    // El `select` nunca pide el username técnico de quien publicó.
+    expect(JSON.stringify(db.gardenPlanVersion.findMany.mock.calls[0]?.[0])).not.toContain(
+      'username',
+    );
     expect(db.gardenPlanVersion.findMany.mock.calls[0]?.[0]).toMatchObject({
       orderBy: { versionNumber: 'desc' },
       skip: 0,

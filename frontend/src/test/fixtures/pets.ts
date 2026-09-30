@@ -6,6 +6,8 @@ import type {
   PetType,
   PetTypesResponse,
   PetsListResponse,
+  PetDueItem,
+  PetDueResponse,
 } from '../../api/petTypes';
 
 /**
@@ -117,4 +119,35 @@ export function makeRecord(overrides: Partial<PetRecord> = {}): PetRecord {
 
 export function recordsResponse(records: PetRecord[] = [makeRecord()]): PetRecordsResponse {
   return { records, page: 1, pageSize: 20, total: records.length, totalPages: 1 };
+}
+
+export function makeDueItem(overrides: Partial<PetDueItem> = {}): PetDueItem {
+  return {
+    record: {
+      id: '00000000-0000-4000-8000-0000000d0a01',
+      type: 'VACCINE',
+      recordDate: '2025-09-20',
+      description: 'Vacuna sintética',
+    },
+    pet: { id: makePet().id, name: makePet().name, typeName: 'Perro', icon: '🐕' },
+    nextDue: {
+      date: '2026-10-07',
+      status: 'UPCOMING',
+      daysUntil: 12,
+      fulfilledBy: null,
+    },
+    ...overrides,
+  };
+}
+
+export function dueResponse(items: PetDueItem[] = []): PetDueResponse {
+  return {
+    items,
+    today: '2026-09-25',
+    refreshAt: '2026-09-26T03:00:00.000Z',
+    page: 1,
+    pageSize: 20,
+    total: items.length,
+    totalPages: 1,
+  };
 }

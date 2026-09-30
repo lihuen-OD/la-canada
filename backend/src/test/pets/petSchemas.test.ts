@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   createPetBodySchema,
   createPetRecordBodySchema,
+  listPetDueQuerySchema,
+  updatePetRecordNextDueBodySchema,
   createPetTypeBodySchema,
   listPetsQuerySchema,
   updatePetBodySchema,
@@ -80,5 +82,47 @@ describe('ficha y tipos', () => {
     expect(ok(listPetsQuerySchema, { status: 'inactive' })).toBe(true);
     expect(ok(listPetsQuerySchema, { status: 'deleted' })).toBe(false);
     expect(ok(listPetsQuerySchema, { pageSize: '51' })).toBe(false);
+  });
+});
+
+describe('próxima aplicación o control y Vencimientos', () => {
+  const base = { type: 'VACCINE', recordDate: '2026-09-25' };
+
+  it('la fecha programada y el pendiente a cumplir son opcionales', () => {
+    expect(createPetRecordBodySchema.safeParse(base).success).toBe(true);
+    expect(
+      createPetRecordBodySchema.safeParse({
+        ...base,
+        nextDueDate: '2027-09-25',
+        fulfillsRecordId: '33333333-3333-4333-8333-333333333333',
+      }).success,
+    ).toBe(true);
+    expect(
+      createPetRecordBodySchema.safeParse({ ...base, nextDueDate: '25/09/2027' }).success,
+    ).toBe(false);
+  });
+
+  it('⚖️ Peso no lleva próxima fecha', () => {
+    expect(
+      createPetRecordBodySchema.safeParse({
+        type: 'WEIGHT',
+        recordDate: '2026-09-25',
+        weightKg: '12.5',
+        nextDueDate: '2026-12-01',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('la corrección acepta solo la fecha; Vencimientos filtra por estados conocidos', () => {
+    expect(updatePetRecordNextDueBodySchema.safeParse({ nextDueDate: '2026-12-01' }).success).toBe(
+      true,
+    );
+    expect(
+      updatePetRecordNextDueBodySchema.safeParse({ nextDueDate: '2026-12-01', type: 'VACCINE' })
+        .success,
+    ).toBe(false);
+    expect(listPetDueQuerySchema.parse({})).toMatchObject({ page: 1, pageSize: 20 });
+    expect(listPetDueQuerySchema.safeParse({ status: 'OVERDUE' }).success).toBe(true);
+    expect(listPetDueQuerySchema.safeParse({ status: 'vencida' }).success).toBe(false);
   });
 });

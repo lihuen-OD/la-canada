@@ -13,6 +13,8 @@ import { Avatar } from '../../components/ui/Avatar';
 import { Card } from '../../components/ui/Card';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { ErrorState } from '../../components/ui/StateMessage';
+import { COMPLETE_TARGET_TEXT, LEVEL_LABEL } from '../stock/stockLabels';
+import { stockBarPercent } from '../stock/stockStatus';
 import { formatDateRange, formatPercentage } from '../../utils/dateFormat';
 
 const EVENT_ICON: Record<string, string> = {
@@ -22,11 +24,6 @@ const EVENT_ICON: Record<string, string> = {
   OTHER: '📌',
 };
 const areaLabel = (area: 'HOUSE' | 'GARDEN') => (area === 'HOUSE' ? 'Casa' : 'Jardín');
-const stockLabel = (level: 'low' | 'critical') => (level === 'critical' ? 'Crítico' : 'Bajo');
-const stockPercent = (current: string, minimum: string) => {
-  const min = Number(minimum);
-  return min <= 0 ? 100 : Math.min(100, Math.round((Number(current) / (min * 2)) * 100));
-};
 
 function newsAge(value: string): string {
   const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 1000));
@@ -95,7 +92,7 @@ function DashboardContent({ data, refreshing }: { data: DashboardResponse; refre
           to="/stock/purchases"
           tone={kpis.stockAlerts ? 'warning' : 'positive'}
           value={kpis.stockAlerts}
-          label="Alertas de stock"
+          label="Stock crítico"
         />
         <KpiLink to="/chicken-coop" tone="info" value={kpis.goodEggsToday} label="🥚 Huevos hoy" />
       </nav>
@@ -125,37 +122,52 @@ function DashboardContent({ data, refreshing }: { data: DashboardResponse; refre
           <PerformanceCard performance={data.performance} />
         </div>
         <div className="home-dashboard__column">
-          <DashboardCard title="⚠️ Stock bajo" to="/stock/purchases" linkLabel="Ver stock">
+          {/* Solo críticos (en el mínimo o por debajo), igual que Compras: los bajos quedan en Stock. */}
+          <DashboardCard title="⚠️ Stock crítico" to="/stock/purchases" linkLabel="Ver compras">
             {data.stockAlerts.length ? (
               <ul className="home-list">
-                {data.stockAlerts.map((item) => (
-                  <li className="home-stock" key={item.id}>
-                    <span className="home-stock__body">
-                      <strong>
-                        {item.name} <small>({areaLabel(item.area)})</small>
-                      </strong>
-                      <span className="home-stock__row">
-                        <span className="home-stock__bar" aria-hidden="true">
-                          <span
-                            className={`is-${item.stockLevel}`}
-                            style={{
-                              width: `${stockPercent(item.currentQuantity, item.minimumQuantity)}%`,
-                            }}
-                          />
+                {data.stockAlerts.map((item) => {
+                  const percent = stockBarPercent(
+                    item.currentQuantity,
+                    item.minimumQuantity,
+                    item.targetQuantity,
+                  );
+                  return (
+                    <li className="home-stock" key={item.id}>
+                      <span className="home-stock__body">
+                        <strong>
+                          {item.name} <small>({areaLabel(item.area)})</small>
+                        </strong>
+                        <span className="home-stock__row">
+                          {percent !== null ? (
+                            <span className="home-stock__bar" aria-hidden="true">
+                              <span
+                                className={`is-${item.stockLevel}`}
+                                style={{ width: `${percent}%` }}
+                              />
+                            </span>
+                          ) : null}
+                          <small>
+                            {item.currentQuantity}
+                            {item.targetQuantity !== null ? `/${item.targetQuantity}` : ''}{' '}
+                            {item.unit} · mín. {item.minimumQuantity}
+                          </small>
                         </span>
                         <small>
-                          {item.currentQuantity}/{item.minimumQuantity} {item.unit}
+                          {item.suggestedPurchaseQuantity !== null
+                            ? `Comprar: ${item.suggestedPurchaseQuantity} ${item.unit}`
+                            : COMPLETE_TARGET_TEXT}
                         </small>
                       </span>
-                    </span>
-                    <span className={`home-stock__badge is-${item.stockLevel}`}>
-                      {stockLabel(item.stockLevel)}
-                    </span>
-                  </li>
-                ))}
+                      <span className={`home-stock__badge is-${item.stockLevel}`}>
+                        {LEVEL_LABEL[item.stockLevel]}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
-              <EmptyText>Todo el stock en orden ✅</EmptyText>
+              <EmptyText>Ningún producto en stock crítico ✅</EmptyText>
             )}
           </DashboardCard>
           <DashboardCard title="📅 Próximos eventos" to="/more/events" linkLabel="Ver todos">

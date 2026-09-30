@@ -7,17 +7,24 @@ import { DESTINATION, makeItem } from '../../test/fixtures/stock';
 import { MovementDialog } from './MovementDialog';
 
 // El diálogo lee el alcance de caché de la sesión (Etapa 5P): usuario sintético.
-vi.mock('../../auth/useAuth', () => ({
-  useAuth: () => ({ user: { id: 'u-test', role: 'EMPLOYEE', status: 'ACTIVE', employee: null } }),
+const session = vi.hoisted(() => ({
+  user: {
+    id: 'u-test',
+    role: 'EMPLOYEE' as 'EMPLOYEE' | 'ADMIN',
+    status: 'ACTIVE',
+    displayName: null as string | null,
+    employee: null as { id: string; displayName: string; colorHex: string } | null,
+  },
 }));
+vi.mock('../../auth/useAuth', () => ({ useAuth: () => ({ user: session.user }) }));
 
 const api = vi.hoisted(() => ({
   fetchStockDestinations: vi.fn(),
   createStockMovement: vi.fn(),
 }));
 vi.mock('../../api/stockApi', () => api);
-const employeesApi = vi.hoisted(() => ({ fetchTaskEmployees: vi.fn() }));
-vi.mock('../../api/tasksApi', () => employeesApi);
+const participantsApi = vi.hoisted(() => ({ fetchParticipants: vi.fn() }));
+vi.mock('../../api/participantsApi', () => participantsApi);
 
 const item = makeItem();
 /** Formato que acepta el backend para `Idempotency-Key`. */
@@ -58,8 +65,15 @@ beforeEach(() => {
   api.createStockMovement.mockReset();
   api.fetchStockDestinations.mockResolvedValue({ destinations: [] });
   api.createStockMovement.mockResolvedValue({ movement: {}, item });
-  employeesApi.fetchTaskEmployees.mockReset();
-  employeesApi.fetchTaskEmployees.mockResolvedValue({ employees: [] });
+  participantsApi.fetchParticipants.mockReset();
+  participantsApi.fetchParticipants.mockResolvedValue({ participants: [] });
+  session.user = {
+    ...session.user,
+    id: 'u-test',
+    role: 'EMPLOYEE',
+    displayName: null,
+    employee: null,
+  };
 });
 
 afterEach(() => {
@@ -98,14 +112,72 @@ describe('MovementDialog — decimal estricto y contrato del body', () => {
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
   });
 
-  it('la fecha aparece para ambos roles y ADMIN puede elegir Administrador', async () => {
+  it('la fecha aparece para ambos roles y ADMIN arranca eligiéndose a sí mismo', async () => {
+    session.user = { ...session.user, role: 'ADMIN', displayName: 'Benja sintético' };
     const { unmount } = renderDialog({ role: 'ADMIN', mode: 'movement', initialType: 'INCOME' });
     expect(screen.getByLabelText(/fecha/i)).toBeInTheDocument();
-    expect(await screen.findByRole('combobox', { name: /quién/i })).toHaveValue('');
+    expect(await screen.findByRole('combobox', { name: /quién/i })).toHaveValue('ADMIN:u-test');
+    expect(screen.getByRole('option', { name: '🔐 Benja sintético' })).toBeInTheDocument();
     unmount();
+    session.user = { ...session.user, role: 'EMPLOYEE', displayName: null };
     renderDialog({ role: 'EMPLOYEE', mode: 'movement' });
     expect(screen.getByLabelText(/fecha/i)).toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: /quién/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('MovementDialog — persona: empleados y administradores (ADMIN)', () => {
+  // Sintéticos: Benja (ADMIN de la sesión, sin ficha), Viki (otra ADMIN sin ficha) y un empleado.
+  const participants = [
+    { kind: 'ADMIN', id: 'u-test', displayName: 'Benja sintético', colorHex: null },
+    { kind: 'ADMIN', id: 'u-viki', displayName: 'Viki sintética', colorHex: null },
+    { kind: 'EMPLOYEE', id: 'e-1', displayName: 'Persona sintética', colorHex: '#4a7c59' },
+  ];
+
+  beforeEach(() => {
+    session.user = { ...session.user, role: 'ADMIN', displayName: 'Benja sintético' };
+    participantsApi.fetchParticipants.mockResolvedValue({ participants });
+  });
+
+  it.each([
+    ['otra administradora', 'ADMIN:u-viki', { participantUserId: 'u-viki' }],
+    ['sí mismo', 'ADMIN:u-test', { participantUserId: 'u-test' }],
+    ['un empleado', 'EMPLOYEE:e-1', { employeeId: 'e-1' }],
+  ])('ADMIN elige %s: se envía solo esa identidad, nunca el autor', async (_label, value, sent) => {
+    renderDialog({ role: 'ADMIN', mode: 'movement', initialType: 'CONSUMPTION' });
+    const user = userEvent.setup();
+    const select = await screen.findByRole('combobox', { name: /quién consumió/i });
+    await screen.findByRole('option', { name: '🔐 Viki sintética' });
+    // Cada persona una sola vez, administradores con 🔐.
+    expect(
+      Array.from((select as HTMLSelectElement).options).map((option) => option.textContent),
+    ).toEqual(['🔐 Benja sintético', '🔐 Viki sintética', 'Persona sintética']);
+    await user.selectOptions(select, value);
+    await user.type(screen.getByLabelText('Cantidad'), '1');
+    await user.click(submitButton());
+    const body = api.createStockMovement.mock.calls[0]?.[1];
+    expect(body).toMatchObject(sent);
+    for (const field of ['employeeId', 'participantUserId'].filter((key) => !(key in sent))) {
+      expect(body).not.toHaveProperty(field);
+    }
+    expect(JSON.stringify(body)).not.toMatch(/recordedBy|actor/i);
+  });
+
+  it('EMPLOYEE no ve el selector ni envía persona', async () => {
+    session.user = {
+      ...session.user,
+      role: 'EMPLOYEE',
+      employee: { id: 'e-1', displayName: 'Persona sintética', colorHex: '#4a7c59' },
+    };
+    renderDialog({ role: 'EMPLOYEE', mode: 'movement', initialType: 'CONSUMPTION' });
+    expect(screen.queryByRole('combobox', { name: /quién/i })).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Cantidad'), '1');
+    await user.click(submitButton());
+    const body = api.createStockMovement.mock.calls[0]?.[1];
+    expect(body).not.toHaveProperty('employeeId');
+    expect(body).not.toHaveProperty('participantUserId');
+    expect(participantsApi.fetchParticipants).not.toHaveBeenCalled();
   });
 });
 

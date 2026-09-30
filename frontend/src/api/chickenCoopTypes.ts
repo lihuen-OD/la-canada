@@ -1,5 +1,7 @@
 /** Contrato de `/api/v1/chicken-coop` (Etapa 5G) — ver backend/src/chickenCoop. */
 
+import type { ParticipantUser, RecordedBy } from './types';
+
 export type ChickenCoopPeriodDays = 7 | 30 | 90 | 365;
 
 export interface ChickenCoopState {
@@ -47,7 +49,12 @@ export interface EggCollection {
   goodEggsCount: number;
   brokenEggsCount: number;
   notes: string | null;
+  /** Quién juntó: un empleado… */
   employee: EggCollector | null;
+  /** …o un administrador sin ficha (nunca los dos). */
+  participantUser?: ParticipantUser | null;
+  /** Quién lo registró, solo si no es quien juntó. */
+  recordedBy?: RecordedBy | null;
   createdAt: string;
 }
 
@@ -74,6 +81,8 @@ export interface CreateEggCollectionRequest {
   collectionDate?: string;
   /** Solo ADMIN; un EMPLOYEE nunca lo envía (el backend usa su sesión). */
   employeeId?: string;
+  /** Solo ADMIN: un administrador activo sin ficha juntó (excluyente con `employeeId`). */
+  participantUserId?: string;
   notes?: string;
 }
 

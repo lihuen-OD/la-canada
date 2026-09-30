@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Prisma } from '../../generated/prisma/client';
 
 /**
  * Reglas de 🐾 Mascotas con un Prisma simulado mínimo: permisos por rol,
@@ -29,6 +30,7 @@ const db = vi.hoisted(() => {
     animalMedicalRecord: {
       create: fn(),
       findUnique: fn(),
+      findUniqueOrThrow: fn(),
       updateMany: fn(),
       groupBy: fn(),
       findMany: fn(),
@@ -46,7 +48,9 @@ import { setObjectStorageForTests, type ObjectStorageClient } from '../../lib/ob
 import {
   createPet,
   createPetRecord,
+  updatePetRecordNextDue,
   createPetType,
+  listPetRecords,
   listPets,
   setPetActive,
   setPetTypeActive,
@@ -189,6 +193,9 @@ describe('registros clínicos', () => {
         value: data.value,
         createdAt: NOW,
         employee: null,
+        nextDueDate: data.nextDueDate ?? null,
+        fulfills: null,
+        fulfillments: [],
       }),
     );
   });
@@ -221,6 +228,48 @@ describe('registros clínicos', () => {
     expect(data.employeeId).toBeNull();
     expect(data.recordedByUserId).toBe('user-a');
     expect(data.value.toString()).toBe('12.5');
+  });
+
+  it('historial: sin persona, quien lo registró (cada ADMIN el suyo); con persona, la persona', async () => {
+    const row = (id: string, employee: unknown, recordedBy: unknown) => ({
+      id,
+      type: 'VACCINE',
+      recordDate: new Date('2026-09-20T00:00:00.000Z'),
+      description: null,
+      value: null,
+      createdAt: NOW,
+      employee,
+      recordedBy,
+      nextDueDate: null,
+      fulfills: null,
+      fulfillments: [],
+    });
+    db.animal.findUnique.mockResolvedValue({ id: PET_ID });
+    db.animalMedicalRecord.count.mockResolvedValue(4);
+    db.animalMedicalRecord.findMany.mockResolvedValue([
+      row('r1', null, { employee: null, personalProfile: { displayName: 'Admin sintética Uno' } }),
+      row('r2', null, { employee: null, personalProfile: { displayName: 'Admin sintético Dos' } }),
+      row(
+        'r3',
+        { id: 'emp-1', displayName: 'Persona sintética', colorHex: '#4a7c59' },
+        { employee: null, personalProfile: { displayName: 'Admin sintética Uno' } },
+      ),
+      row('r4', null, null),
+    ]);
+    const { records } = await listPetRecords(ADMIN, PET_ID, { page: 1, pageSize: 20 });
+    expect(
+      records.map((record) => [record.employee?.displayName ?? null, record.recordedBy]),
+    ).toEqual([
+      [null, { displayName: 'Admin sintética Uno' }],
+      [null, { displayName: 'Admin sintético Dos' }],
+      ['Persona sintética', null],
+      [null, null],
+    ]);
+    // El autor sale de `recordedByUserId` (el alta), nunca de `voidedBy` ni del username.
+    const select = db.animalMedicalRecord.findMany.mock.calls[0]?.[0].select;
+    expect(select).toHaveProperty('recordedBy');
+    expect(select).not.toHaveProperty('voidedBy');
+    expect(JSON.stringify(select)).not.toContain('username');
   });
 
   it('EMPLOYEE sin empleado vinculado → 409; mascota inexistente → 404', async () => {
@@ -438,5 +487,226 @@ describe('estado de la mascota (desactivar / reactivar)', () => {
       ),
     ).rejects.toMatchObject({ code: 'PET_INACTIVE' });
     expect(db.fileAsset.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('próxima aplicación o control', () => {
+  const RECORD_ID = '33333333-3333-4333-8333-333333333333';
+  const created = () => db.animalMedicalRecord.create.mock.calls[0]?.[0].data;
+
+  beforeEach(() => {
+    db.$transaction.mockImplementation((run: (tx: typeof db) => unknown) => run(db));
+    db.auditLog.create.mockResolvedValue({});
+    db.animal.findUnique.mockResolvedValue({ active: true });
+    db.animalMedicalRecord.create.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => ({
+        id: 'rec-new',
+        type: data.type,
+        recordDate: data.recordDate,
+        description: null,
+        value: null,
+        createdAt: NOW,
+        employee: null,
+        recordedBy: null,
+        nextDueDate: data.nextDueDate ?? null,
+        fulfills: null,
+        fulfillments: [],
+      }),
+    );
+  });
+
+  it('guarda la fecha programada y calcula su estado con BUSINESS_TIME_ZONE', async () => {
+    const result = await createPetRecord(
+      EMPLOYEE,
+      PET_ID,
+      { type: 'VACCINE', recordDate: '2026-09-25', nextDueDate: '2026-10-07' },
+      META,
+      NOW,
+    );
+    expect(created().nextDueDate).toEqual(new Date('2026-10-07T00:00:00.000Z'));
+    expect(result.kind === 'created' && result.body.record.nextDue).toMatchObject({
+      date: '2026-10-07',
+      status: 'UPCOMING',
+      daysUntil: 12, // hoy es 25/09 en Buenos Aires (02:30 UTC del 26)
+    });
+  });
+
+  it('atención histórica: una próxima fecha ya pasada se acepta y queda VENCIDA', async () => {
+    const result = await createPetRecord(
+      ADMIN,
+      PET_ID,
+      { type: 'DEWORMING', recordDate: '2026-06-01', nextDueDate: '2026-09-22' },
+      META,
+      NOW,
+    );
+    expect(result.kind === 'created' && result.body.record.nextDue).toMatchObject({
+      status: 'OVERDUE',
+      daysUntil: -3,
+    });
+  });
+
+  it('sin fecha programada: nada pendiente (registros anteriores incluidos)', async () => {
+    const result = await createPetRecord(
+      EMPLOYEE,
+      PET_ID,
+      { type: 'CHECKUP', recordDate: '2026-09-25' },
+      META,
+      NOW,
+    );
+    expect(created().nextDueDate).toBeNull();
+    expect(result.kind === 'created' && result.body.record.nextDue).toBeNull();
+  });
+
+  it.each(['2026-09-25', '2026-09-24'])(
+    'la próxima fecha debe ser posterior a la atención (rechaza %s)',
+    async (nextDueDate) => {
+      await expect(
+        createPetRecord(
+          EMPLOYEE,
+          PET_ID,
+          { type: 'VACCINE', recordDate: '2026-09-25', nextDueDate },
+          META,
+          NOW,
+        ),
+      ).rejects.toMatchObject({ statusCode: 400 });
+      expect(db.animalMedicalRecord.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it('cumple SOLO el pendiente elegido, en la misma transacción y con auditoría', async () => {
+    db.animalMedicalRecord.findUnique.mockResolvedValue({
+      animalId: PET_ID,
+      type: 'VACCINE',
+      voidedAt: null,
+      nextDueDate: new Date('2026-09-20T00:00:00.000Z'),
+      fulfillments: [],
+    });
+    await createPetRecord(
+      EMPLOYEE,
+      PET_ID,
+      {
+        type: 'VACCINE',
+        recordDate: '2026-09-25',
+        nextDueDate: '2027-09-25',
+        fulfillsRecordId: RECORD_ID,
+      },
+      META,
+      NOW,
+    );
+    expect(created()).toMatchObject({ fulfillsRecordId: RECORD_ID, recordedByUserId: 'user-e' });
+    const actions = db.auditLog.create.mock.calls.map((call) => call[0].data.action);
+    expect(actions).toEqual(['pet.record_created', 'pet.record_due_fulfilled']);
+    expect(db.auditLog.create.mock.calls[1]?.[0].data).toMatchObject({
+      entityId: RECORD_ID,
+      actorUserId: 'user-e',
+    });
+  });
+
+  it.each([
+    ['de otra mascota', { animalId: 'otra', type: 'VACCINE', voidedAt: null }, 'PET_DUE_NOT_FOUND'],
+    ['anulado', { animalId: PET_ID, type: 'VACCINE', voidedAt: NOW }, 'PET_DUE_NOT_FOUND'],
+    [
+      'sin fecha programada',
+      { animalId: PET_ID, type: 'VACCINE', voidedAt: null, nextDueDate: null },
+      'PET_DUE_NOT_FOUND',
+    ],
+    [
+      'ya cumplido',
+      { animalId: PET_ID, type: 'VACCINE', voidedAt: null, fulfillments: [{ id: 'x' }] },
+      'PET_DUE_ALREADY_FULFILLED',
+    ],
+    ['de otro tipo', { animalId: PET_ID, type: 'DEWORMING', voidedAt: null }, 'VALIDATION_ERROR'],
+  ])('no cumple un pendiente %s y no escribe', async (_label, target, code) => {
+    db.animalMedicalRecord.findUnique.mockResolvedValue({
+      nextDueDate: new Date('2026-09-20T00:00:00.000Z'),
+      fulfillments: [],
+      ...target,
+    });
+    await expect(
+      createPetRecord(
+        EMPLOYEE,
+        PET_ID,
+        { type: 'VACCINE', recordDate: '2026-09-25', fulfillsRecordId: RECORD_ID },
+        META,
+        NOW,
+      ),
+    ).rejects.toMatchObject({ code });
+    expect(db.animalMedicalRecord.create).not.toHaveBeenCalled();
+  });
+
+  it('una colisión en el índice único parcial (dos solicitudes a la vez) es un 409 claro', async () => {
+    db.animalMedicalRecord.findUnique.mockResolvedValue({
+      animalId: PET_ID,
+      type: 'VACCINE',
+      voidedAt: null,
+      nextDueDate: new Date('2026-09-20T00:00:00.000Z'),
+      fulfillments: [],
+    });
+    db.animalMedicalRecord.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: { target: 'animal_medical_records_active_fulfillment_key' },
+      }),
+    );
+    await expect(
+      createPetRecord(
+        EMPLOYEE,
+        PET_ID,
+        { type: 'VACCINE', recordDate: '2026-09-25', fulfillsRecordId: RECORD_ID },
+        META,
+        NOW,
+      ),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'PET_DUE_ALREADY_FULFILLED' });
+  });
+
+  it('corregir la próxima fecha es solo de ADMIN, acotado y auditado', async () => {
+    await expect(
+      updatePetRecordNextDue(EMPLOYEE, PET_ID, RECORD_ID, { nextDueDate: '2026-12-01' }, META, NOW),
+    ).rejects.toMatchObject({ statusCode: 403 });
+    db.animalMedicalRecord.findUnique.mockResolvedValue({
+      animalId: PET_ID,
+      type: 'VACCINE',
+      recordDate: new Date('2026-09-01T00:00:00.000Z'),
+      nextDueDate: null,
+      voidedAt: null,
+    });
+    db.animalMedicalRecord.updateMany.mockResolvedValue({ count: 1 });
+    db.animalMedicalRecord.findUniqueOrThrow.mockResolvedValue({
+      id: RECORD_ID,
+      type: 'VACCINE',
+      recordDate: new Date('2026-09-01T00:00:00.000Z'),
+      description: null,
+      value: null,
+      createdAt: NOW,
+      employee: null,
+      recordedBy: null,
+      nextDueDate: new Date('2026-12-01T00:00:00.000Z'),
+      fulfills: null,
+      fulfillments: [],
+    });
+    const { record } = await updatePetRecordNextDue(
+      ADMIN,
+      PET_ID,
+      RECORD_ID,
+      { nextDueDate: '2026-12-01' },
+      META,
+      NOW,
+    );
+    // Solo cambia la próxima fecha.
+    expect(db.animalMedicalRecord.updateMany.mock.calls[0]?.[0]).toEqual({
+      where: { id: RECORD_ID, voidedAt: null },
+      data: { nextDueDate: new Date('2026-12-01T00:00:00.000Z') },
+    });
+    expect(db.auditLog.create.mock.calls[0]?.[0].data).toMatchObject({
+      action: 'pet.record_next_due_updated',
+      previousState: { nextDueDate: null },
+      newState: { nextDueDate: '2026-12-01' },
+    });
+    expect(record.nextDue).toMatchObject({ status: 'SCHEDULED' });
+    // Anterior a la atención → 400.
+    await expect(
+      updatePetRecordNextDue(ADMIN, PET_ID, RECORD_ID, { nextDueDate: '2026-09-01' }, META, NOW),
+    ).rejects.toMatchObject({ statusCode: 400 });
   });
 });

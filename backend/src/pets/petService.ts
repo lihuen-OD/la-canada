@@ -5,6 +5,8 @@ import { recordAuditLog } from '../auth/auditLog';
 import {
   EmployeeLinkRequiredError,
   ForbiddenError,
+  PetDueAlreadyFulfilledError,
+  PetDueNotFoundError,
   PetMedicalRecordAlreadyVoidedError,
   PetMedicalRecordNotFoundError,
   AnimalInUseError,
@@ -18,9 +20,11 @@ import {
   ValidationError,
 } from '../errors/AppError';
 import {
+  addDays,
   compareLocalDates,
   formatLocalDate,
   parseLocalDate,
+  startOfLocalDay,
   toLocalDate,
   type LocalDate,
 } from '../lib/businessTime';
@@ -28,6 +32,7 @@ import { canonicalRequestHash, executeIdempotent } from '../lib/idempotency';
 import { getObjectStorage } from '../lib/objectStorage';
 import { runEntityDeletion } from '../lib/deletion';
 import { prisma } from '../lib/prisma';
+import { toUserIdentity, userIdentitySelect } from '../lib/userIdentity';
 import { resolveActor, type RequestMeta, type TaskActor } from '../tasks/tasksService';
 import {
   BUILTIN_PET_TYPE_NAMES,
@@ -36,6 +41,16 @@ import {
   type MedicalRecordTypeName,
 } from './petCatalog';
 import { computePetAge, daysToNextBirthday } from './petDates';
+import {
+  alertWindowEnd,
+  computeDueStatus,
+  daysUntil,
+  dueDateOf,
+  dueStatusWhere,
+  isAlertStatus,
+  OPEN_DUE_WHERE,
+  type DueStatus,
+} from './petDue';
 import type {
   createPetBodySchema,
   createPetRecordBodySchema,
@@ -77,6 +92,14 @@ const isBuiltinType = (name: string) => BUILTIN.has(name.toLocaleLowerCase('es-A
 const dateText = (value: Date): string => value.toISOString().slice(0, 10);
 const toDbDate = (date: LocalDate): Date => new Date(Date.UTC(date.year, date.month - 1, date.day));
 const businessToday = (now: Date) => toLocalDate(now, config.businessTimeZone);
+
+/**
+ * Instante en que empieza el próximo día de `BUSINESS_TIME_ZONE`: el cliente
+ * revalida los estados de vencimiento a esa hora (o al volver a la pestaña
+ * después), sin sondeo y sin depender de la zona del navegador.
+ */
+const nextDayStartsAt = (now: Date) =>
+  startOfLocalDay(addDays(businessToday(now), 1), config.businessTimeZone).toISOString();
 
 /** Hoy o una fecha pasada de `BUSINESS_TIME_ZONE`, nunca futura. */
 function resolvePastDate(text: string, now: Date, label: string): LocalDate {
@@ -158,6 +181,13 @@ function serializePet(row: PetRow, today: LocalDate) {
 
 export type SerializedPet = ReturnType<typeof serializePet>;
 
+/** El cumplimiento vigente de un pendiente (a lo sumo uno: índice único parcial). */
+const activeFulfillmentSelect = {
+  where: { voidedAt: null },
+  select: { id: true, recordDate: true },
+  take: 1,
+} as const;
+
 const recordSelect = {
   id: true,
   type: true,
@@ -165,11 +195,37 @@ const recordSelect = {
   description: true,
   value: true,
   createdAt: true,
+  nextDueDate: true,
   employee: { select: { id: true, displayName: true, colorHex: true } },
+  recordedBy: { select: userIdentitySelect },
+  fulfills: { select: { id: true, type: true, recordDate: true } },
+  fulfillments: activeFulfillmentSelect,
 } as const;
 type RecordRow = Prisma.AnimalMedicalRecordGetPayload<{ select: typeof recordSelect }>;
 
-function serializeRecord(row: RecordRow) {
+/**
+ * Próxima aplicación o control con su estado del día (backend, una sola
+ * definición: `petDue.ts`). `null` sin fecha programada (registros anteriores
+ * incluidos: nunca «vencidos»).
+ */
+function serializeNextDue(
+  nextDueDate: Date | null,
+  fulfillment: { id: string; recordDate: Date } | undefined,
+  today: LocalDate,
+) {
+  if (!nextDueDate) return null;
+  const due = dueDateOf(nextDueDate);
+  return {
+    date: dateText(nextDueDate),
+    status: computeDueStatus(due, today, fulfillment !== undefined),
+    daysUntil: daysUntil(due, today),
+    fulfilledBy: fulfillment
+      ? { id: fulfillment.id, recordDate: dateText(fulfillment.recordDate) }
+      : null,
+  };
+}
+
+function serializeRecord(row: RecordRow, today: LocalDate) {
   return {
     id: row.id,
     type: row.type,
@@ -177,6 +233,18 @@ function serializeRecord(row: RecordRow) {
     description: row.description,
     weightKg: row.value?.toString() ?? null,
     employee: row.employee,
+    // Sin persona (un ADMIN sin empleado), quien lo registró: `recordedByUserId`
+    // es la sesión del alta (nunca quien lo anuló, que va en `voidedByUserId`).
+    recordedBy: row.employee ? null : toUserIdentity(row.recordedBy),
+    nextDue: serializeNextDue(row.nextDueDate, row.fulfillments[0], today),
+    /** El pendiente que esta atención cumplió (antecedente explícito). */
+    fulfills: row.fulfills
+      ? {
+          id: row.fulfills.id,
+          type: row.fulfills.type,
+          recordDate: dateText(row.fulfills.recordDate),
+        }
+      : null,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -362,14 +430,53 @@ export async function listPets(
     }),
   ]);
   const today = businessToday(now);
+  const dueSummaries = await loadDueSummaries(
+    rows.map((row) => row.id),
+    today,
+  );
   return {
-    pets: rows.map((row) => serializePet(row, today)),
+    pets: rows.map((row) => ({
+      ...serializePet(row, today),
+      dueSummary: dueSummaries.get(row.id) ?? { overdue: 0, dueToday: 0, upcoming: 0 },
+    })),
     page: filters.page,
     pageSize: filters.pageSize,
     total,
     totalPages: Math.max(1, Math.ceil(total / filters.pageSize)),
     photoStorage: photoStorageStatus(),
+    today: formatLocalDate(today),
+    refreshAt: nextDayStartsAt(now),
   };
+}
+
+/**
+ * Indicadores discretos del listado (vencidas, de hoy y próximas ≤ 30 días)
+ * para TODA la página en una sola sentencia: los pendientes abiertos de esas
+ * mascotas con fecha hasta el fin de la ventana (índice
+ * `animal_medical_records_animal_id_next_due_date_idx`). Nunca una consulta
+ * por animal.
+ */
+async function loadDueSummaries(petIds: string[], today: LocalDate) {
+  const summaries = new Map<string, { overdue: number; dueToday: number; upcoming: number }>();
+  if (petIds.length === 0) return summaries;
+  const rows = await prisma.animalMedicalRecord.findMany({
+    where: {
+      ...OPEN_DUE_WHERE,
+      animalId: { in: petIds },
+      nextDueDate: { not: null, lte: alertWindowEnd(today) },
+    },
+    select: { animalId: true, nextDueDate: true },
+  });
+  for (const row of rows) {
+    const status = computeDueStatus(dueDateOf(row.nextDueDate!), today, false);
+    if (!isAlertStatus(status)) continue;
+    const entry = summaries.get(row.animalId) ?? { overdue: 0, dueToday: 0, upcoming: 0 };
+    if (status === 'OVERDUE') entry.overdue += 1;
+    else if (status === 'DUE_TODAY') entry.dueToday += 1;
+    else entry.upcoming += 1;
+    summaries.set(row.animalId, entry);
+  }
+  return summaries;
 }
 
 /** Ficha + KPIs del prototipo (vacunas, último peso, desparasitaciones, próximo cumple). */
@@ -577,6 +684,7 @@ export async function listPetRecords(
   _actor: PetActor,
   petId: string,
   filters: { type?: MedicalRecordTypeName; page: number; pageSize: number },
+  now = new Date(),
 ) {
   const where: Prisma.AnimalMedicalRecordWhereInput = {
     animalId: petId,
@@ -595,8 +703,11 @@ export async function listPetRecords(
     }),
   ]);
   if (!pet) throw new PetNotFoundError();
+  const today = businessToday(now);
   return {
-    records: rows.map(serializeRecord),
+    records: rows.map((row) => serializeRecord(row, today)),
+    today: formatLocalDate(today),
+    refreshAt: nextDayStartsAt(now),
     page: filters.page,
     pageSize: filters.pageSize,
     total,
@@ -608,10 +719,68 @@ export type CreatePetRecordResult =
   | { kind: 'created'; body: { record: SerializedPetRecord } }
   | { kind: 'replay'; status: number; body: Prisma.JsonValue };
 
+const ACTIVE_FULFILLMENT_INDEX = 'animal_medical_records_active_fulfillment_key';
+
+/** P2002 sobre el índice único parcial de cumplimiento (otro registro vigente ya lo cumplió). */
+function isActiveFulfillmentConflict(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
+    return false;
+  }
+  const meta = JSON.stringify(error.meta ?? {});
+  return meta.includes(ACTIVE_FULFILLMENT_INDEX) || meta.includes('fulfills_record_id');
+}
+
+/** La próxima fecha es posterior a la atención (puede estar vencida: atención histórica). */
+function resolveNextDue(text: string | undefined, recordDate: LocalDate): LocalDate | null {
+  if (text === undefined) return null;
+  const local = parseLocalDate(text);
+  if (!local) throw new ValidationError('La fecha de próxima aplicación o control no es válida.');
+  if (compareLocalDates(local, recordDate) <= 0) {
+    throw new ValidationError(
+      'La fecha de próxima aplicación o control debe ser posterior a la de la atención.',
+    );
+  }
+  return local;
+}
+
+/**
+ * Dentro de la transacción: el pendiente elegido es de ESTA mascota, del
+ * mismo tipo, sigue vigente, tiene fecha programada y nadie lo cumplió. Es
+ * explícito: nunca se deduce por tipo, texto o fecha. El índice único parcial
+ * es la defensa final ante dos solicitudes simultáneas.
+ */
+async function requireOpenDue(
+  tx: Prisma.TransactionClient,
+  petId: string,
+  recordId: string,
+  type: MedicalRecordTypeName,
+) {
+  const target = await tx.animalMedicalRecord.findUnique({
+    where: { id: recordId },
+    select: {
+      animalId: true,
+      type: true,
+      voidedAt: true,
+      nextDueDate: true,
+      fulfillments: activeFulfillmentSelect,
+    },
+  });
+  if (!target || target.animalId !== petId || target.voidedAt || !target.nextDueDate) {
+    throw new PetDueNotFoundError();
+  }
+  if (target.fulfillments.length > 0) throw new PetDueAlreadyFulfilledError();
+  if (target.type !== type) {
+    throw new ValidationError('La atención debe ser del mismo tipo que la programada.');
+  }
+}
+
 /**
  * "Guardar registro" (todo usuario autenticado). Persona = la de la sesión
  * (un EMPLOYEE necesita su empleado activo; un ADMIN sin empleado queda sin
- * persona, como el prototipo). Acepta `Idempotency-Key`.
+ * persona, como el prototipo). Acepta `Idempotency-Key`. Con
+ * `fulfillsRecordId` («Registrar aplicación / control»), la nueva atención y
+ * el cumplimiento del pendiente elegido ocurren en la MISMA transacción; si
+ * trae su propia próxima fecha, genera un pendiente nuevo.
  */
 export async function createPetRecord(
   actor: PetActor,
@@ -624,6 +793,8 @@ export async function createPetRecord(
   if (actor.role !== 'ADMIN' && !actor.employeeId) throw new EmployeeLinkRequiredError();
   const date = resolvePastDate(input.recordDate, now, 'La fecha');
   const recordDate = formatLocalDate(date);
+  const nextDue = resolveNextDue(input.nextDueDate, date);
+  const fulfillsRecordId = input.fulfillsRecordId?.toLowerCase() ?? null;
   const weight =
     input.type === 'WEIGHT' && input.weightKg ? new Prisma.Decimal(input.weightKg) : null;
 
@@ -631,6 +802,7 @@ export async function createPetRecord(
     const pet = await tx.animal.findUnique({ where: { id: petId }, select: { active: true } });
     if (!pet) throw new PetNotFoundError();
     if (!pet.active) throw new PetInactiveError();
+    if (fulfillsRecordId) await requireOpenDue(tx, petId, fulfillsRecordId, input.type);
     const row = await tx.animalMedicalRecord.create({
       data: {
         animalId: petId,
@@ -638,6 +810,8 @@ export async function createPetRecord(
         recordDate: toDbDate(date),
         description: input.description ?? null,
         value: weight,
+        nextDueDate: nextDue ? toDbDate(nextDue) : null,
+        fulfillsRecordId,
         employeeId: actor.employeeId,
         recordedByUserId: actor.userId,
       },
@@ -654,31 +828,173 @@ export async function createPetRecord(
         recordDate,
         weightKg: weight?.toString() ?? null,
         employeeId: actor.employeeId,
+        nextDueDate: nextDue ? formatLocalDate(nextDue) : null,
+        fulfillsRecordId,
       },
       ipAddress: meta.ipAddress,
       userAgent: meta.userAgent,
     });
-    return { record: serializeRecord(row) };
+    if (fulfillsRecordId) {
+      await recordAuditLog(tx, {
+        actorUserId: actor.userId,
+        action: 'pet.record_due_fulfilled',
+        entityType: 'AnimalMedicalRecord',
+        entityId: fulfillsRecordId,
+        newState: { fulfilledByRecordId: row.id, recordDate },
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      });
+    }
+    return { record: serializeRecord(row, businessToday(now)) };
   };
 
-  if (idempotencyKey === undefined) {
-    return { kind: 'created', body: await prisma.$transaction(write) };
-  }
-  const endpoint = CREATE_RECORD_ENDPOINT(petId);
-  return executeIdempotent({
-    actorUserId: actor.userId,
-    endpoint,
-    key: idempotencyKey,
-    requestHash: canonicalRequestHash([
+  try {
+    if (idempotencyKey === undefined) {
+      return { kind: 'created', body: await prisma.$transaction(write) };
+    }
+    const endpoint = CREATE_RECORD_ENDPOINT(petId);
+    return await executeIdempotent({
+      actorUserId: actor.userId,
       endpoint,
-      input.type,
-      recordDate,
-      weight?.toFixed(2) ?? null,
-      input.description ?? null,
-    ]),
-    status: 201,
-    run: write,
+      key: idempotencyKey,
+      requestHash: canonicalRequestHash([
+        endpoint,
+        input.type,
+        recordDate,
+        weight?.toFixed(2) ?? null,
+        input.description ?? null,
+        // Solo presentes cuando se usan: la huella anterior no cambia.
+        ...(nextDue ? [`next:${formatLocalDate(nextDue)}`] : []),
+        ...(fulfillsRecordId ? [`fulfills:${fulfillsRecordId}`] : []),
+      ]),
+      status: 201,
+      run: write,
+    });
+  } catch (error) {
+    if (isActiveFulfillmentConflict(error)) throw new PetDueAlreadyFulfilledError();
+    throw error;
+  }
+}
+
+/**
+ * Completar o corregir la próxima fecha de un registro (solo ADMIN): acción
+ * acotada y auditada que cambia ÚNICAMENTE `next_due_date` — nada más del
+ * historial clínico. No aplica a registros anulados ni a ⚖️ Peso.
+ */
+export async function updatePetRecordNextDue(
+  actor: PetActor,
+  petId: string,
+  recordId: string,
+  input: { nextDueDate: string },
+  meta: RequestMeta,
+  now = new Date(),
+) {
+  requireAdmin(actor, 'Solo un administrador puede corregir la próxima fecha.');
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.animalMedicalRecord.findUnique({
+      where: { id: recordId },
+      select: { animalId: true, type: true, recordDate: true, nextDueDate: true, voidedAt: true },
+    });
+    if (!existing || existing.animalId !== petId) throw new PetMedicalRecordNotFoundError();
+    if (existing.voidedAt) throw new PetMedicalRecordAlreadyVoidedError();
+    if (existing.type === 'WEIGHT') {
+      throw new ValidationError('El peso no lleva fecha de próxima aplicación o control.');
+    }
+    const nextDue = resolveNextDue(input.nextDueDate, dueDateOf(existing.recordDate))!;
+    const { count } = await tx.animalMedicalRecord.updateMany({
+      where: { id: recordId, voidedAt: null },
+      data: { nextDueDate: toDbDate(nextDue) },
+    });
+    if (count === 0) throw new PetMedicalRecordAlreadyVoidedError();
+    await recordAuditLog(tx, {
+      actorUserId: actor.userId,
+      action: 'pet.record_next_due_updated',
+      entityType: 'AnimalMedicalRecord',
+      entityId: recordId,
+      previousState: { nextDueDate: existing.nextDueDate ? dateText(existing.nextDueDate) : null },
+      newState: { nextDueDate: formatLocalDate(nextDue) },
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+    });
+    const row = await tx.animalMedicalRecord.findUniqueOrThrow({
+      where: { id: recordId },
+      select: recordSelect,
+    });
+    return { record: serializeRecord(row, businessToday(now)) };
   });
+}
+
+const dueSelect = {
+  id: true,
+  type: true,
+  recordDate: true,
+  description: true,
+  nextDueDate: true,
+  fulfillments: activeFulfillmentSelect,
+  animal: {
+    select: { id: true, name: true, animalType: { select: { name: true, icon: true } } },
+  },
+} as const;
+
+/**
+ * 📅 Vencimientos: atenciones programadas de mascotas ACTIVAS, por fecha
+ * ascendente (primero las vencidas más antiguas). Por defecto solo los
+ * pendientes abiertos; las cumplidas se consultan con `status=FULFILLED`.
+ * Filtros por mascota, tipo y estado, conteo + página en Postgres (índice
+ * `animal_medical_records_next_due_date_idx`): dos sentencias más las
+ * relaciones de la página, nunca una por registro.
+ */
+export async function listPetDue(
+  _actor: PetActor,
+  filters: {
+    petId?: string;
+    type?: MedicalRecordTypeName;
+    status?: DueStatus;
+    page: number;
+    pageSize: number;
+  },
+  now = new Date(),
+) {
+  const today = businessToday(now);
+  const where: Prisma.AnimalMedicalRecordWhereInput = {
+    ...dueStatusWhere(filters.status, today),
+    animal: { active: true },
+    ...(filters.petId ? { animalId: filters.petId } : {}),
+    ...(filters.type ? { type: filters.type } : {}),
+  };
+  const [total, rows] = await Promise.all([
+    prisma.animalMedicalRecord.count({ where }),
+    prisma.animalMedicalRecord.findMany({
+      where,
+      select: dueSelect,
+      orderBy: [{ nextDueDate: 'asc' }, { recordDate: 'asc' }, { id: 'asc' }],
+      skip: (filters.page - 1) * filters.pageSize,
+      take: filters.pageSize,
+    }),
+  ]);
+  return {
+    items: rows.map((row) => ({
+      record: {
+        id: row.id,
+        type: row.type,
+        recordDate: dateText(row.recordDate),
+        description: row.description,
+      },
+      pet: {
+        id: row.animal.id,
+        name: row.animal.name,
+        typeName: row.animal.animalType.name,
+        icon: row.animal.animalType.icon ?? DEFAULT_PET_ICON,
+      },
+      nextDue: serializeNextDue(row.nextDueDate, row.fulfillments[0], today)!,
+    })),
+    today: formatLocalDate(today),
+    refreshAt: nextDayStartsAt(now),
+    page: filters.page,
+    pageSize: filters.pageSize,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / filters.pageSize)),
+  };
 }
 
 /** "✕" del historial (solo ADMIN, confirmación en el cliente): anulación lógica auditada. */
@@ -693,9 +1009,19 @@ export async function voidPetRecord(
   return prisma.$transaction(async (tx) => {
     const existing = await tx.animalMedicalRecord.findUnique({
       where: { id: recordId },
-      select: { animalId: true, type: true, recordDate: true, value: true },
+      select: {
+        animalId: true,
+        type: true,
+        recordDate: true,
+        value: true,
+        nextDueDate: true,
+        fulfillsRecordId: true,
+      },
     });
     if (!existing || existing.animalId !== petId) throw new PetMedicalRecordNotFoundError();
+    // Anular deja de generar su pendiente; si esta atención cumplía otro, ese
+    // pendiente se reabre solo (el cumplimiento cuenta únicamente registros
+    // vigentes). El vínculo se conserva como antecedente.
     const { count } = await tx.animalMedicalRecord.updateMany({
       where: { id: recordId, voidedAt: null },
       data: { voidedAt: now, voidedByUserId: actor.userId },
@@ -711,6 +1037,8 @@ export async function voidPetRecord(
         type: existing.type,
         recordDate: dateText(existing.recordDate),
         weightKg: existing.value?.toString() ?? null,
+        nextDueDate: existing.nextDueDate ? dateText(existing.nextDueDate) : null,
+        fulfillsRecordId: existing.fulfillsRecordId,
         voided: false,
       },
       newState: { voided: true },

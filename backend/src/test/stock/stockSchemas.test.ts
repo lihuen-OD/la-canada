@@ -72,6 +72,7 @@ describe('createStockItemBodySchema', () => {
     categoryId: CATEGORY_ID,
     unit: 'litros',
     minimumQuantity: '3',
+    targetQuantity: '10',
   };
 
   it('acepta un producto válido de área HOUSE', () => {
@@ -80,6 +81,20 @@ describe('createStockItemBodySchema', () => {
 
   it('acepta mínimo 0 porque es un umbral válido, no un movimiento', () => {
     expect(createStockItemBodySchema.safeParse({ ...valid, minimumQuantity: '0' }).success).toBe(
+      true,
+    );
+  });
+
+  it('exige stock objetivo en productos nuevos, con la misma precisión que el mínimo', () => {
+    const withoutTarget: Record<string, unknown> = { ...valid };
+    delete withoutTarget.targetQuantity;
+    expect(createStockItemBodySchema.safeParse(withoutTarget).success).toBe(false);
+    for (const bad of ['-1', '1.234', 'diez', '', '123456789']) {
+      expect(createStockItemBodySchema.safeParse({ ...valid, targetQuantity: bad }).success).toBe(
+        false,
+      );
+    }
+    expect(createStockItemBodySchema.safeParse({ ...valid, targetQuantity: '12.5' }).success).toBe(
       true,
     );
   });

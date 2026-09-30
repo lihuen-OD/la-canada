@@ -1,7 +1,7 @@
 import { config } from '../config';
 import { prisma } from '../lib/prisma';
 import { formatLocalDate, toLocalDate } from '../lib/businessTime';
-import { computeStockLevel } from '../stock/stockLevel';
+import { computeStockLevel, computeSuggestedPurchase } from '../stock/stockLevel';
 import { listTasks, type TaskActor } from '../tasks/tasksService';
 import { listUpcomingEvents } from '../more/eventsService';
 import { defaultPerformanceRange, getPerformance } from '../performance/performanceService';
@@ -12,6 +12,7 @@ const stockSelect = {
   area: true,
   unit: true,
   minimumQuantity: true,
+  targetQuantity: true,
   currentQuantity: true,
 } as const;
 
@@ -87,6 +88,9 @@ export async function getDashboard(actor: TaskActor, now = new Date()) {
   const urgentTasks = tasks.filter(
     (task) => task.frequency === 'URGENT' && task.currentExecution === null,
   );
+  // Alertas de reposición: SOLO productos activos críticos (actual <= mínimo,
+  // igualdad incluida) — los bajos quedan en Inventario, no en Inicio. Misma
+  // regla que Stock y Compras (`computeStockLevel`).
   const stockAlerts = stockRows
     .map((item) => ({
       id: item.id,
@@ -94,10 +98,19 @@ export async function getDashboard(actor: TaskActor, now = new Date()) {
       area: item.area,
       unit: item.unit,
       minimumQuantity: item.minimumQuantity.toString(),
+      targetQuantity: item.targetQuantity?.toString() ?? null,
       currentQuantity: item.currentQuantity.toString(),
-      stockLevel: computeStockLevel(item.currentQuantity, item.minimumQuantity),
+      stockLevel: computeStockLevel(
+        item.currentQuantity,
+        item.minimumQuantity,
+        item.targetQuantity,
+      ),
+      suggestedPurchaseQuantity: computeSuggestedPurchase(
+        item.currentQuantity,
+        item.targetQuantity,
+      ),
     }))
-    .filter((item) => item.stockLevel !== 'ok');
+    .filter((item) => item.stockLevel === 'critical');
 
   return {
     generatedAt: now.toISOString(),

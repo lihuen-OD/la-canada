@@ -57,6 +57,7 @@ export function useMoreCache() {
           queryKeys.more.employees(userId),
           queryKeys.more.team(userId),
           queryKeys.tasks.all(userId),
+          queryKeys.participants(userId),
           queryKeys.admin.users(userId),
           queryKeys.more.events(userId),
           queryKeys.more.summary(userId),
@@ -79,6 +80,7 @@ export function useMoreCache() {
           queryKeys.more.photos(userId),
           queryKeys.more.events(userId),
           queryKeys.tasks.all(userId),
+          queryKeys.participants(userId),
           queryKeys.performance.all(userId),
           queryKeys.chickenCoop.all(userId),
           queryKeys.stock.all(userId),
@@ -88,13 +90,20 @@ export function useMoreCache() {
         ),
       [invalidate, userId],
     ),
-    /** Etapa 5F — el ADMIN cambió SU nombre visible: su cumpleaños (Eventos, Inicio) y Usuarios. */
+    /**
+     * Etapa 5F — el ADMIN cambió SU nombre visible: su cumpleaños (Eventos,
+     * Inicio), Usuarios y, como participante o autor, los selectores y
+     * registros de Stock y Gallinero.
+     */
     afterOwnNameChange: useCallback(
       () =>
         invalidate(
           queryKeys.more.events(userId),
           queryKeys.dashboard(userId),
           queryKeys.admin.users(userId),
+          queryKeys.participants(userId),
+          queryKeys.stock.all(userId),
+          queryKeys.chickenCoop.all(userId),
         ),
       [invalidate, userId],
     ),

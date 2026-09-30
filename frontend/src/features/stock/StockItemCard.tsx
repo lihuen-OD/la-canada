@@ -13,17 +13,19 @@ interface StockItemCardProps {
 
 /**
  * Un producto del inventario con la fila compacta del prototipo (`.si`):
- * nombre, barra + "actual / mínimo unidad" y la etiqueta de nivel; a la
- * derecha 📤 (movimiento), ⚙️ (ajuste, ADMIN) y 📋 (historial). La barra solo
- * aparece cuando el mínimo permite un porcentaje significativo (mínimo 0 →
- * sin barra: 100% fijo sería engañoso). El nivel es `item.stockLevel`,
- * calculado por el backend; la barra es solo su representación visual. Los
- * movimientos de un producto desactivado quedan deshabilitados — el backend
- * también los rechaza.
+ * nombre, barra + cantidades y la etiqueta de nivel; a la derecha 📤
+ * (movimiento), ⚙️ (ajuste, ADMIN) y 📋 (historial). Con objetivo: "actual /
+ * objetivo unidad · mín." y la barra actual / objetivo (tope visual 100%: el
+ * stock puede superar el objetivo). Sin objetivo (producto anterior), la fila
+ * de siempre: "actual / mínimo unidad" y la barra previa. El nivel es
+ * `item.stockLevel`, calculado por el backend; la barra es solo su
+ * representación visual. Los movimientos de un producto desactivado quedan
+ * deshabilitados — el backend también los rechaza.
  */
 export function StockItemCard({ item, isAdmin, onMovement, onDetail }: StockItemCardProps) {
   const level = item.stockLevel;
-  const percent = stockBarPercent(item.currentQuantity, item.minimumQuantity);
+  const percent = stockBarPercent(item.currentQuantity, item.minimumQuantity, item.targetQuantity);
+  const hasTarget = item.targetQuantity !== null;
 
   return (
     <li className="stock-item">
@@ -45,8 +47,19 @@ export function StockItemCard({ item, isAdmin, onMovement, onDetail }: StockItem
             <span className="visually-hidden">Actual: </span>
             {item.currentQuantity}
             <span aria-hidden="true"> / </span>
-            <span className="visually-hidden">, mínimo: </span>
-            {item.minimumQuantity} {item.unit}
+            {hasTarget ? (
+              <>
+                <span className="visually-hidden">, objetivo: </span>
+                {item.targetQuantity} {item.unit}
+                <span aria-hidden="true"> · </span>
+                <span className="visually-hidden">, </span>mín. {item.minimumQuantity}
+              </>
+            ) : (
+              <>
+                <span className="visually-hidden">, mínimo: </span>
+                {item.minimumQuantity} {item.unit}
+              </>
+            )}
           </span>
           <Badge tone={LEVEL_TONE[level]}>{LEVEL_LABEL[level]}</Badge>
         </div>

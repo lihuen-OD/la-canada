@@ -6,6 +6,8 @@
  * este archivo solo replica la forma de los mensajes, no sus reglas.
  */
 
+import type { ParticipantUser, RecordedBy } from './types';
+
 export type StockItemArea = 'HOUSE' | 'GARDEN';
 export type StockCategoryArea = 'HOUSE' | 'GARDEN' | 'BOTH';
 export type StockStatusFilter = 'active' | 'inactive' | 'all';
@@ -21,8 +23,10 @@ export type OperationalMovementType = Exclude<StockMovementType, 'OPENING_BALANC
 export type DestinationType = 'VEHICLE' | 'SECTOR';
 
 /**
- * Nivel calculado por el BACKEND (Etapa 5C.1, `stock/stockLevel.ts`):
- * `critical` saldo ≤ 0; `low` 0 < saldo < mínimo; `ok` saldo > 0 y ≥ mínimo.
+ * Nivel calculado por el BACKEND (`stock/stockLevel.ts`), con mínimo y
+ * objetivo: `critical` actual ≤ mínimo; `low` hasta el punto medio
+ * (mínimo + objetivo) / 2; `ok` por encima. Un producto anterior sin objetivo
+ * es `critical` (≤ mínimo) u `ok` (> mínimo): nunca hay un cuarto estado.
  * El frontend nunca lo recalcula: solo lo muestra (y dibuja su barra).
  */
 export type StockLevel = 'ok' | 'low' | 'critical';
@@ -49,8 +53,12 @@ export interface StockItem {
   area: StockItemArea;
   unit: string;
   minimumQuantity: string;
+  /** Cantidad a la que se busca llegar al reponer; `null` = «Stock objetivo pendiente». */
+  targetQuantity: string | null;
   currentQuantity: string;
   stockLevel: StockLevel;
+  /** Compras: objetivo − actual (del backend); `null` sin objetivo. */
+  suggestedPurchaseQuantity: string | null;
   active: boolean;
   category: StockCategorySummary;
 }
@@ -76,6 +84,10 @@ export interface StockMovement {
   effectiveDate: string;
   reason: string | null;
   employee: StockEmployeeSummary | null;
+  /** Administrador sin ficha que realizó el movimiento (excluyente con `employee`). */
+  participantUser?: ParticipantUser | null;
+  /** Quién lo registró, solo si no es la persona del movimiento (auditoría del alta). */
+  recordedBy?: RecordedBy | null;
   destination: { id: string; name: string; type: DestinationType } | null;
   createdAt: string;
 }
@@ -154,6 +166,8 @@ export interface CreateStockItemRequest {
   categoryId: string;
   unit: string;
   minimumQuantity: string;
+  /** Obligatorio en productos nuevos y mayor que el mínimo. */
+  targetQuantity: string;
 }
 
 /** Sin `currentQuantity`, `area` ni `active`: la cantidad solo cambia vía movimiento. */
@@ -162,12 +176,15 @@ export interface UpdateStockItemRequest {
   categoryId?: string;
   unit?: string;
   minimumQuantity?: string;
+  /** Completa o cambia el objetivo (nunca lo borra). */
+  targetQuantity?: string;
 }
 
 /**
- * `stockItemId` nunca viaja en el body (sale de la ruta). `employeeId` solo
- * lo envía un ADMIN (empleado activo, o `null` = "Administrador"); un
- * EMPLOYEE lo omite y el backend lo fija a su sesión. `effectiveDate`: hoy o
+ * `stockItemId` nunca viaja en el body (sale de la ruta). La persona solo la
+ * envía un ADMIN: `employeeId` (empleado activo) o `participantUserId`
+ * (administrador activo sin ficha, incluido él mismo), nunca los dos; un
+ * EMPLOYEE la omite y el backend la fija a su sesión. El autor nunca viaja. `effectiveDate`: hoy o
  * pasada, para todos (el backend rechaza futuras en `BUSINESS_TIME_ZONE`).
  * `destinationId` es opcional en cualquier tipo (paridad con el prototipo).
  */
@@ -177,6 +194,7 @@ export interface CreateStockMovementRequest {
   effectiveDate?: string;
   destinationId?: string;
   employeeId?: string | null;
+  participantUserId?: string;
   reason?: string;
 }
 
@@ -201,6 +219,8 @@ export interface StockReportFilters {
   type?: StockMovementType;
   itemId?: string;
   employeeId?: string;
+  /** Persona = un administrador sin ficha (excluyente con `employeeId`). */
+  participantUserId?: string;
   destinationId?: string;
 }
 
@@ -253,6 +273,10 @@ export interface StockReportSummary {
   }[];
   employees: {
     employee: StockEmployeeSummary | null;
+    /** Administrador sin ficha que realizó los movimientos del grupo. */
+    participantUser: ParticipantUser | null;
+    /** Sin persona: un grupo por usuario que registró; todo `null` = sin evidencia. */
+    recordedBy: RecordedBy | null;
     total: number;
     byType: Record<StockMovementType, number>;
   }[];
@@ -267,6 +291,8 @@ export interface StockReportMovement {
   createdAt: string;
   item: { id: string; name: string; area: StockItemArea; unit: string; active: boolean };
   employee: StockEmployeeSummary | null;
+  participantUser: ParticipantUser | null;
+  recordedBy: RecordedBy | null;
   destination: { id: string; name: string; type: DestinationType } | null;
 }
 

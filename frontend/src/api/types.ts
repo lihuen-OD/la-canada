@@ -64,3 +64,34 @@ export interface ApiErrorBody {
     stack?: string;
   };
 }
+
+/**
+ * Autor de un registro (`recordedBy` en Stock y Mascotas): el nombre visible
+ * del usuario que lo registró, resuelto por el backend con la sesión del alta.
+ * Solo viene cuando el registro no tiene persona asociada. Nunca `username`.
+ */
+export interface RecordedBy {
+  displayName: string;
+}
+
+/**
+ * Persona que puede figurar como quien realizó una actividad (Stock,
+ * Gallinero): un empleado activo o un ADMIN activo sin ficha. `id` es el
+ * `employeeId` o el `userId` según `kind` — identidad estable, nunca el nombre.
+ */
+export interface ParticipantOption {
+  kind: 'EMPLOYEE' | 'ADMIN';
+  id: string;
+  displayName: string;
+  colorHex: string | null;
+}
+
+export interface ParticipantsResponse {
+  participants: ParticipantOption[];
+}
+
+/** Administrador sin ficha que realizó la actividad (`participantUser` en los DTO). */
+export interface ParticipantUser {
+  id: string;
+  displayName: string;
+}

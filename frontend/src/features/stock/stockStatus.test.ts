@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { movementSignedPrefix, purchaseShortfall, stockBarPercent } from './stockStatus';
+import { movementSignedPrefix, stockBarPercent } from './stockStatus';
 
 describe('nivel de stock: responsabilidad exclusiva del backend', () => {
   it('el módulo visual ya no exporta una regla de nivel propia', async () => {
@@ -8,39 +8,33 @@ describe('nivel de stock: responsabilidad exclusiva del backend', () => {
   });
 });
 
-describe('purchaseShortfall (Compras: máximo(mínimo − actual, 0))', () => {
-  it('aritmética exacta en centésimos, sin errores de float', () => {
-    expect(purchaseShortfall('3', '10')).toBe('7');
-    expect(purchaseShortfall('0.1', '0.3')).toBe('0.2');
-    expect(purchaseShortfall('2.35', '10')).toBe('7.65');
-    expect(purchaseShortfall('9.5', '10')).toBe('0.5');
-  });
-
-  it('nunca negativa: con saldo ≥ mínimo la referencia es 0', () => {
-    expect(purchaseShortfall('25', '10')).toBe('0');
-    expect(purchaseShortfall('0', '0')).toBe('0');
-  });
-
-  it('formato inesperado → null (no inventa una cantidad)', () => {
-    expect(purchaseShortfall('1e3', '10')).toBeNull();
+describe('cantidad sugerida de Compras: responsabilidad exclusiva del backend', () => {
+  it('el módulo visual ya no calcula faltantes propios (usa suggestedPurchaseQuantity)', async () => {
+    const module = await import('./stockStatus');
+    expect(module).not.toHaveProperty('purchaseShortfall');
   });
 });
 
 describe('stockBarPercent', () => {
-  it('fórmula del prototipo: min(100, round(stock / (min*2) * 100))', () => {
-    expect(stockBarPercent('10', '10')).toBe(50);
-    expect(stockBarPercent('20', '10')).toBe(100);
-    expect(stockBarPercent('30', '10')).toBe(100);
-    expect(stockBarPercent('5', '10')).toBe(25);
+  it('con objetivo: actual / objetivo', () => {
+    expect(stockBarPercent('25', '20', '50')).toBe(50);
+    expect(stockBarPercent('19', '20', '50')).toBe(38);
+    expect(stockBarPercent('0', '20', '50')).toBe(0);
   });
 
-  it('mínimo 0 → null: la UI oculta la barra (nunca un 100% engañoso)', () => {
-    expect(stockBarPercent('7', '0')).toBeNull();
-    expect(stockBarPercent('0', '0')).toBeNull();
+  it('por encima del objetivo: el stock puede superarlo, la barra se limita a 100%', () => {
+    expect(stockBarPercent('50', '20', '50')).toBe(100);
+    expect(stockBarPercent('80', '20', '50')).toBe(100);
+  });
+
+  it('sin objetivo (producto anterior): la fórmula previa, min(100, round(stock / (min*2) * 100))', () => {
+    expect(stockBarPercent('10', '10', null)).toBe(50);
+    expect(stockBarPercent('30', '10', null)).toBe(100);
+    expect(stockBarPercent('7', '0', null)).toBeNull(); // mínimo 0: sin barra
   });
 
   it('cantidad no numérica → null', () => {
-    expect(stockBarPercent('abc', '10')).toBeNull();
+    expect(stockBarPercent('abc', '10', '20')).toBeNull();
   });
 });
 

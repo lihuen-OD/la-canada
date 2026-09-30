@@ -22,7 +22,9 @@ import {
   type LocalDate,
 } from '../lib/businessTime';
 import { canonicalRequestHash, executeIdempotent } from '../lib/idempotency';
+import { assertParticipantUserAllowed, requireActiveAdminParticipant } from '../lib/participants';
 import { prisma } from '../lib/prisma';
+import { findUserIdentities, recorderIfDifferent, type RecordCreator } from '../lib/userIdentity';
 import { resolveActor, type RequestMeta, type TaskActor } from '../tasks/tasksService';
 import { computeCoopMetrics, layingRate, periodStart } from './chickenCoopMetrics';
 import {
@@ -71,6 +73,10 @@ const collectionSelect = {
   notes: true,
   createdAt: true,
   employee: { select: { id: true, displayName: true, colorHex: true } },
+  // Administrador sin ficha que juntó y autor (sesión del alta): sus nombres se
+  // resuelven juntos en UNA sentencia (`findUserIdentities`), nunca por relación.
+  participantUserId: true,
+  recordedByUserId: true,
 } as const;
 type CollectionRow = Prisma.EggCollectionGetPayload<{ select: typeof collectionSelect }>;
 
@@ -86,14 +92,36 @@ function serializeCoop(row: CoopRow | null) {
   };
 }
 
-function serializeCollection(row: CollectionRow) {
+/** Nombres visibles de quienes juntaron y registraron un lote (una sentencia). */
+function findCollectionPeople(
+  client: Pick<Prisma.TransactionClient, '$queryRaw'>,
+  rows: readonly CollectionRow[],
+): Promise<ReadonlyMap<string, RecordCreator>> {
+  return findUserIdentities(
+    client,
+    rows.flatMap((row) => [row.participantUserId, row.recordedByUserId]),
+  );
+}
+
+function serializeCollection(row: CollectionRow, people: ReadonlyMap<string, RecordCreator>) {
+  const participant = row.participantUserId ? people.get(row.participantUserId) : undefined;
   return {
     id: row.id,
     collectionDate: dateText(row.collectionDate),
     goodEggsCount: row.goodEggsCount,
     brokenEggsCount: row.brokenEggsCount,
     notes: row.notes,
+    /** Quién juntó: un empleado… */
     employee: row.employee,
+    /** …o un administrador sin ficha (nunca los dos). */
+    participantUser: participant
+      ? { id: participant.userId, displayName: participant.identity.displayName }
+      : null,
+    /** Quién lo registró, solo si no es quien juntó («Registró: …»). */
+    recordedBy: recorderIfDifferent(
+      { employeeId: row.employee?.id ?? null, participantUserId: row.participantUserId },
+      (row.recordedByUserId ? people.get(row.recordedByUserId) : undefined) ?? null,
+    ),
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -177,6 +205,7 @@ export async function listEggCollectionHistory(
           select: collectionSelect,
           orderBy: [{ collectionDate: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
         });
+  const people = await findCollectionPeople(prisma, collections);
   const hens = coop?.activeHensCount ?? null;
   const days = dayRows.map((row) => {
     const date = dateText(row.collectionDate);
@@ -188,7 +217,7 @@ export async function listEggCollectionHistory(
       layingRate: layingRate(goodEggs, hens),
       collections: collections
         .filter((collection) => dateText(collection.collectionDate) === date)
-        .map(serializeCollection),
+        .map((collection) => serializeCollection(collection, people)),
     };
   });
   return {
@@ -213,16 +242,33 @@ function resolveCollectionDate(text: string | undefined, now: Date): LocalDate {
   return local;
 }
 
+interface Collector {
+  employeeId: string | null;
+  participantUserId: string | null;
+  chosenByAdmin: boolean;
+}
+
 /**
  * "¿Quién juntó?": EMPLOYEE queda fijado a su empleado (otro id → 403);
- * ADMIN elige un empleado activo (validado en la transacción) o, sin
- * elegir, su propio empleado si lo tiene. Un ADMIN sin empleado vinculado
- * debe elegir: el prototipo siempre asociaba una persona.
+ * ADMIN elige un empleado activo o un administrador activo sin ficha
+ * (incluido él mismo; ambos validados en la transacción) o, sin elegir, su
+ * propio empleado si lo tiene. Un ADMIN sin empleado vinculado debe elegir:
+ * el prototipo siempre asociaba una persona.
  */
-function resolveCollector(
-  actor: ChickenCoopActor,
-  requested: string | undefined,
-): { employeeId: string; chosenByAdmin: boolean } {
+function resolveCollector(actor: ChickenCoopActor, input: CreateCollectionInput): Collector {
+  assertParticipantUserAllowed(
+    actor,
+    input,
+    'Solo un administrador puede registrar una recolección a nombre de otra persona.',
+  );
+  if (input.participantUserId !== undefined) {
+    return {
+      employeeId: null,
+      participantUserId: input.participantUserId.toLowerCase(),
+      chosenByAdmin: true,
+    };
+  }
+  const requested = input.employeeId;
   if (actor.role !== 'ADMIN') {
     if (!actor.employeeId) throw new EmployeeLinkRequiredError();
     if (requested !== undefined && requested.toLowerCase() !== actor.employeeId.toLowerCase()) {
@@ -230,13 +276,13 @@ function resolveCollector(
         'Solo un administrador puede registrar una recolección a nombre de otra persona.',
       );
     }
-    return { employeeId: actor.employeeId, chosenByAdmin: false };
+    return { employeeId: actor.employeeId, participantUserId: null, chosenByAdmin: false };
   }
   if (requested !== undefined) {
-    return { employeeId: requested.toLowerCase(), chosenByAdmin: true };
+    return { employeeId: requested.toLowerCase(), participantUserId: null, chosenByAdmin: true };
   }
   if (!actor.employeeId) throw new ValidationError('Elegí quién juntó los huevos.');
-  return { employeeId: actor.employeeId, chosenByAdmin: false };
+  return { employeeId: actor.employeeId, participantUserId: null, chosenByAdmin: false };
 }
 
 export type CreateEggCollectionResult =
@@ -250,18 +296,25 @@ export async function createEggCollection(
   now = new Date(),
   idempotencyKey?: string,
 ): Promise<CreateEggCollectionResult> {
-  const { employeeId, chosenByAdmin } = resolveCollector(actor, input.employeeId);
+  const { employeeId, participantUserId, chosenByAdmin } = resolveCollector(actor, input);
   const date = resolveCollectionDate(input.collectionDate, now);
   const collectionDate = formatLocalDate(date);
 
   const write = async (tx: Prisma.TransactionClient) => {
     // Secuencial a propósito: una transacción interactiva usa UNA conexión.
-    if (chosenByAdmin) {
+    if (chosenByAdmin && employeeId) {
       const employee = await tx.employee.findUnique({
         where: { id: employeeId },
         select: { active: true },
       });
       if (!employee?.active) throw new EggCollectorInvalidError();
+    }
+    if (participantUserId) {
+      await requireActiveAdminParticipant(
+        tx,
+        participantUserId,
+        () => new EggCollectorInvalidError(),
+      );
     }
     const coop = await findMainCoop(tx);
     const row = await tx.eggCollection.create({
@@ -271,6 +324,7 @@ export async function createEggCollection(
         goodEggsCount: input.goodEggsCount,
         brokenEggsCount: input.brokenEggsCount,
         employeeId,
+        participantUserId,
         notes: input.notes ?? null,
         recordedByUserId: actor.userId,
       },
@@ -286,12 +340,13 @@ export async function createEggCollection(
         goodEggsCount: row.goodEggsCount,
         brokenEggsCount: row.brokenEggsCount,
         employeeId,
+        participantUserId,
         hasNotes: row.notes !== null,
       },
       ipAddress: meta.ipAddress,
       userAgent: meta.userAgent,
     });
-    return { collection: serializeCollection(row) };
+    return { collection: serializeCollection(row, await findCollectionPeople(tx, [row])) };
   };
 
   if (idempotencyKey === undefined) {
@@ -306,6 +361,8 @@ export async function createEggCollection(
     input.brokenEggsCount,
     employeeId,
     input.notes ?? null,
+    // Solo cuando juntó un administrador: la huella anterior no cambia.
+    ...(participantUserId ? [`participant:${participantUserId}`] : []),
   ]);
   return executeIdempotent({
     actorUserId: actor.userId,
@@ -350,6 +407,7 @@ export async function voidEggCollection(
         goodEggsCount: existing.goodEggsCount,
         brokenEggsCount: existing.brokenEggsCount,
         employeeId: existing.employee?.id ?? null,
+        participantUserId: existing.participantUserId,
         voided: false,
       },
       newState: { voided: true },

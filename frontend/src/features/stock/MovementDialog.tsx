@@ -14,9 +14,15 @@ import type {
 } from '../../api/stockTypes';
 import type { SystemRole } from '../../api/types';
 import { fetchStockDestinations } from '../../api/stockApi';
-import { fetchTaskEmployees } from '../../api/tasksApi';
+import { useParticipants } from '../../api/useParticipants';
 import { useAuth } from '../../auth/useAuth';
 import { getUserDisplayName } from '../../auth/userDisplay';
+import {
+  ownParticipantValue,
+  participantLabel,
+  participantParams,
+  participantValue,
+} from '../../utils/participants';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { AlertIcon } from '../../components/ui/icons';
@@ -95,8 +101,12 @@ export function MovementDialog({
   const [movementType, setMovementType] = useState<EverydayType>(initialType);
   const [quantity, setQuantity] = useState('');
   const [effectiveDate, setEffectiveDate] = useState(today);
-  /** Solo ADMIN: '' = "🔐 Administrador" (sin persona); si no, el id del empleado. */
-  const [personId, setPersonId] = useState('');
+  /**
+   * Solo ADMIN: `EMPLOYEE:<id>` o `ADMIN:<userId>` (cualquier empleado o
+   * administrador activo). Arranca en la propia persona, como la opción
+   * «🔐 Administrador» del prototipo.
+   */
+  const [personId, setPersonId] = useState<string>(() => ownParticipantValue(user));
   const [destinationId, setDestinationId] = useState('');
   const [reason, setReason] = useState('');
   const [adjustmentDirection, setAdjustmentDirection] = useState<
@@ -119,14 +129,11 @@ export function MovementDialog({
     enabled,
     staleTime: STALE_TIME.catalog,
   });
-  const employeesQuery = useQuery({
-    queryKey: queryKeys.tasks.employees(userId),
-    queryFn: fetchTaskEmployees,
-    enabled: enabled && isAdmin,
-    staleTime: STALE_TIME.catalog,
-  });
+  const participantsQuery = useParticipants(isAdmin);
+  const participants = participantsQuery.data?.participants ?? [];
+  const ownValue = ownParticipantValue(user);
   const catalogExpired =
-    isSessionExpired(destinationsQuery.error) || isSessionExpired(employeesQuery.error);
+    isSessionExpired(destinationsQuery.error) || isSessionExpired(participantsQuery.error);
   useEffect(() => {
     if (catalogExpired) onSessionExpired();
   }, [catalogExpired, onSessionExpired]);
@@ -185,8 +192,9 @@ export function MovementDialog({
       effectiveDate,
     };
     if (destinationId) body.destinationId = destinationId;
-    // Solo ADMIN elige persona (null = Administrador); EMPLOYEE nunca la envía.
-    if (isAdmin) body.employeeId = personId || null;
+    // Solo ADMIN elige persona (empleado o administrador); EMPLOYEE nunca la
+    // envía. El autor nunca viaja: el backend lo toma de la sesión.
+    if (isAdmin) Object.assign(body, participantParams(personId) ?? { employeeId: null });
     const normalizedReason = normalizeText(reason);
     if (normalizedReason) body.reason = normalizedReason;
     return body;
@@ -416,10 +424,18 @@ export function MovementDialog({
                       changeField(() => setPersonId(next));
                     }}
                   >
-                    <option value="">🔐 {user ? getUserDisplayName(user) : 'Administrador'}</option>
-                    {(employeesQuery.data?.employees ?? []).map((employee) => (
-                      <option key={employee.id} value={employee.id}>
-                        {employee.displayName}
+                    {/* Mientras carga el catálogo, la propia persona sigue elegida. */}
+                    {ownValue && !participants.some((p) => participantValue(p) === ownValue) ? (
+                      <option value={ownValue}>
+                        🔐 {user ? getUserDisplayName(user) : 'Administrador'}
+                      </option>
+                    ) : null}
+                    {participants.map((participant) => (
+                      <option
+                        key={participantValue(participant)}
+                        value={participantValue(participant)}
+                      >
+                        {participantLabel(participant)}
                       </option>
                     ))}
                   </select>

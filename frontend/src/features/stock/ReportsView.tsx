@@ -11,7 +11,6 @@ import {
   fetchStockReportCsv,
   fetchStockReportSummary,
 } from '../../api/stockApi';
-import { fetchTaskEmployees } from '../../api/tasksApi';
 import { useSessionScope } from '../../api/useSessionScope';
 import type {
   StockMovementType,
@@ -48,6 +47,9 @@ import {
   type ReportFilterState,
   type ReportPeriod,
 } from './stockViewState';
+import { attributedName, recordedByName } from '../../utils/recordAttribution';
+import { participantLabel, participantParams, participantValue } from '../../utils/participants';
+import { useParticipants } from '../../api/useParticipants';
 
 const PERIODS: readonly { value: ReportPeriod; label: string }[] = [
   { value: '7', label: '7 días' },
@@ -83,7 +85,7 @@ function initialReportFilters(): ReportFilterState {
     categoryId: '',
     type: '',
     itemId: '',
-    employeeId: '',
+    personId: '',
     destinationId: '',
   };
 }
@@ -96,7 +98,7 @@ function toApiFilters(state: ReportFilterState): StockReportFilters {
     categoryId: state.categoryId || undefined,
     type: state.type || undefined,
     itemId: state.itemId || undefined,
-    employeeId: state.employeeId || undefined,
+    ...(participantParams(state.personId) ?? {}),
     destinationId: state.destinationId || undefined,
   };
 }
@@ -384,12 +386,7 @@ function AdvancedReportFilters({ filters, onChange, isAdmin }: AdvancedReportFil
     enabled,
     staleTime: STALE_TIME.catalog,
   });
-  const employeesQuery = useQuery({
-    queryKey: queryKeys.tasks.employees(userId),
-    queryFn: fetchTaskEmployees,
-    enabled,
-    staleTime: STALE_TIME.catalog,
-  });
+  const participantsQuery = useParticipants(enabled);
   const productFilters = {
     status: isAdmin ? ('all' as const) : ('active' as const),
     sort: 'name' as const,
@@ -404,7 +401,7 @@ function AdvancedReportFilters({ filters, onChange, isAdmin }: AdvancedReportFil
   useSessionExpiry(
     categoriesQuery.error,
     destinationsQuery.error,
-    employeesQuery.error,
+    participantsQuery.error,
     productsQuery.error,
   );
 
@@ -481,13 +478,13 @@ function AdvancedReportFilters({ filters, onChange, isAdmin }: AdvancedReportFil
         <select
           id={ids.employee}
           className="field__input"
-          value={filters.employeeId}
-          onChange={(event) => onChange({ employeeId: event.target.value })}
+          value={filters.personId}
+          onChange={(event) => onChange({ personId: event.target.value })}
         >
           <option value="">Todas</option>
-          {(employeesQuery.data?.employees ?? []).map((employee) => (
-            <option key={employee.id} value={employee.id}>
-              {employee.displayName}
+          {(participantsQuery.data?.participants ?? []).map((participant) => (
+            <option key={participantValue(participant)} value={participantValue(participant)}>
+              {participantLabel(participant)}
             </option>
           ))}
         </select>
@@ -584,7 +581,7 @@ function CurrentLevelsCard({ summary }: { summary: StockReportSummary }) {
       }
     >
       <p className="stock-reports__note">
-        Productos activos según su stock mínimo, hoy (no depende del período).
+        Productos activos según su stock mínimo y objetivo, hoy (no depende del período).
       </p>
       <table className="stock-reports__table">
         <thead>
@@ -726,37 +723,41 @@ function EmployeesCard({ summary }: { summary: StockReportSummary }) {
         <EmptyState title="No hubo movimientos en el período." titleAs="p" />
       ) : (
         <ul className="stock-reports__rows" role="list">
-          {summary.employees.map((row) => (
-            <li key={row.employee?.id ?? 'none'} className="stock-reports__person">
-              <Avatar
-                name={row.employee?.displayName ?? 'Sin persona'}
-                colorHex={row.employee?.colorHex}
-                variant={row.employee ? 'person' : 'admin'}
-                size="sm"
-              />
-              <div>
-                <span className="stock-reports__name">
-                  {row.employee ? row.employee.displayName : 'Sin persona asociada'}
-                </span>
-                <span className="stock-reports__muted">
-                  {' '}
-                  · {row.total} {row.total === 1 ? 'movimiento' : 'movimientos'}
-                </span>
-                <p className="stock-reports__muted">
-                  {types
-                    .filter((type) => row.byType[type] > 0)
-                    .map((type) => `${MOVEMENT_PLURAL[type]}: ${row.byType[type]}`)
-                    .join(' · ')}
-                </p>
-                {!row.employee ? (
-                  <p className="stock-reports__note">
-                    Saldos iniciales del inventario o movimientos de un administrador sin persona
-                    vinculada.
+          {summary.employees.map((row, index) => {
+            const name = attributedName(row);
+            return (
+              <li
+                key={row.employee?.id ?? row.participantUser?.id ?? `recorded-${index}`}
+                className="stock-reports__person"
+              >
+                <Avatar
+                  name={name ?? 'Sin persona'}
+                  colorHex={row.employee?.colorHex}
+                  variant={row.employee ? 'person' : 'admin'}
+                  size="sm"
+                />
+                <div>
+                  <span className="stock-reports__name">{name ?? 'Sin persona asociada'}</span>
+                  <span className="stock-reports__muted">
+                    {' '}
+                    · {row.total} {row.total === 1 ? 'movimiento' : 'movimientos'}
+                  </span>
+                  <p className="stock-reports__muted">
+                    {types
+                      .filter((type) => row.byType[type] > 0)
+                      .map((type) => `${MOVEMENT_PLURAL[type]}: ${row.byType[type]}`)
+                      .join(' · ')}
                   </p>
-                ) : null}
-              </div>
-            </li>
-          ))}
+                  {name === null ? (
+                    <p className="stock-reports__note">
+                      Saldos iniciales del inventario u otros movimientos sin información de quién
+                      los registró.
+                    </p>
+                  ) : null}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </Card>
@@ -845,8 +846,8 @@ function ReportMovementRow({ movement }: { movement: StockReportMovement }) {
       </div>
       <p className="stock-move__meta">
         <span aria-hidden="true">{AREA_EMOJI[movement.item.area]} </span>
-        {AREA_LABEL[movement.item.area]} ·{' '}
-        {movement.employee ? movement.employee.displayName : 'Sin persona registrada'}
+        {AREA_LABEL[movement.item.area]} · {attributedName(movement) ?? 'Sin persona registrada'}
+        {recordedByName(movement) ? ` · Registró: ${recordedByName(movement)}` : ''}
         {movement.destination ? ` · Destino: ${movement.destination.name}` : ''}
         {movement.reason ? ` · ${movement.reason}` : ''}
       </p>

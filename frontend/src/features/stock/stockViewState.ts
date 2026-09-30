@@ -41,7 +41,8 @@ export interface ReportFilterState {
   categoryId: string;
   type: StockMovementType | '';
   itemId: string;
-  employeeId: string;
+  /** Persona: `EMPLOYEE:<id>` o `ADMIN:<userId>` (identidad estable, nunca el nombre). */
+  personId: string;
   destinationId: string;
 }
 

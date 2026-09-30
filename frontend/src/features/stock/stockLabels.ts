@@ -72,6 +72,11 @@ export const LEVEL_PRIORITY: Record<Exclude<StockLevel, 'ok'>, string> = {
   low: 'Prioridad media',
 };
 
+/** Compras: en lugar de una cantidad inventada cuando falta el objetivo. */
+export const COMPLETE_TARGET_TEXT = 'Completar stock objetivo';
+/** Ayuda del campo en altas y ediciones. */
+export const TARGET_HINT = 'Cantidad a la que querés llegar al reponer.';
+
 export const DESTINATION_TYPE_LABEL: Record<DestinationType, string> = {
   VEHICLE: 'Vehículo',
   SECTOR: 'Sector',

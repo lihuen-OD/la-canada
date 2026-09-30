@@ -10,6 +10,7 @@ import {
   createPetBodySchema,
   createPetRecordBodySchema,
   createPetTypeBodySchema,
+  listPetDueQuerySchema,
   listPetRecordsQuerySchema,
   listPetTypesQuerySchema,
   listPetsQuerySchema,
@@ -17,6 +18,7 @@ import {
   petStatusBodySchema,
   petTypeStatusBodySchema,
   updatePetBodySchema,
+  updatePetRecordNextDueBodySchema,
 } from '../pets/petSchemas';
 import {
   createPet,
@@ -27,11 +29,13 @@ import {
   setPetActive,
   setPetTypeActive,
   getPet,
+  listPetDue,
   listPetRecords,
   listPetTypes,
   listPets,
   resolveActor,
   updatePet,
+  updatePetRecordNextDue,
   voidPetRecord,
   type PetActor,
   type RequestMeta,
@@ -185,6 +189,22 @@ export async function postVoidPetRecord(req: Request, res: Response): Promise<vo
   const petId = idFrom(req.params.id, 'mascota');
   const recordId = idFrom(req.params.recordId, 'registro');
   send(res, 200, await voidPetRecord(actor, petId, recordId, requestMeta(req)));
+}
+
+/** Completar o corregir la próxima fecha (ADMIN; el servicio decide el permiso). */
+export async function patchPetRecordNextDue(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const petId = idFrom(req.params.id, 'mascota');
+  const recordId = idFrom(req.params.recordId, 'registro');
+  const input = parseOrThrow(updatePetRecordNextDueBodySchema, req.body, 'Fecha inválida.');
+  send(res, 200, await updatePetRecordNextDue(actor, petId, recordId, input, requestMeta(req)));
+}
+
+/** 📅 Vencimientos de mascotas activas (todo usuario autenticado). */
+export async function getPetDueHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const filters = parseOrThrow(listPetDueQuerySchema, req.query, 'Filtros inválidos.');
+  send(res, 200, await listPetDue(actor, filters));
 }
 
 // ── Foto ──

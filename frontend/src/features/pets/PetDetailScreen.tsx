@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { ApiError } from '../../api/httpClient';
 import { OfflineError } from '../../api/transportErrors';
@@ -8,6 +8,7 @@ import { IdempotencyIntent, intentFingerprint } from '../../api/idempotency';
 import {
   createPetRecord,
   fetchPet,
+  fetchPetDue,
   fetchPetRecords,
   fetchPetTypes,
   voidPetRecord,
@@ -18,6 +19,7 @@ import type {
   CreatePetRecordRequest,
   MedicalRecordType,
   PetDetailResponse,
+  PetDueItem,
   PetRecord,
 } from '../../api/petTypes';
 import { STALE_TIME } from '../../api/queryClient';
@@ -35,6 +37,8 @@ import { Badge } from '../../components/ui/Badge';
 import { ConfirmDialog } from '../admin/ConfirmDialog';
 import { DeleteConfirmDialog } from '../admin/DeleteConfirmDialog';
 import { useSubmitGuard } from '../tasks/useSubmitGuard';
+import { NextDueDialog } from './NextDueDialog';
+import { PetDueRow } from './PetDueRow';
 import { PetFormDialog } from './PetFormDialog';
 import { PetPhoto } from './PetPhoto';
 import { errorCodeOf, errorMessageOf, humanError, isSessionExpired } from './petErrors';
@@ -44,13 +48,26 @@ import {
   RECORD_TAG_LABEL,
   RECORD_TYPES,
   ageText,
+  dueRelativeText,
+  DUE_STATUS_LABEL,
   formatDate,
   formatKg,
+  fulfillActionLabel,
+  nextDay,
   petSummary,
 } from './petLabels';
+import { useBusinessDayRefresh } from './useBusinessDayRefresh';
 import { usePetsCache } from './usePetsCache';
+import { attributedName } from '../../utils/recordAttribution';
 
 const RECORDS_PAGE_SIZE = 20;
+const UPCOMING_PAGE_SIZE = 20;
+
+/** Corregir la fecha programada (ADMIN) desde la ficha o el historial. */
+type NextDueTarget = {
+  record: { id: string; type: MedicalRecordType; recordDate: string };
+  current: string | null;
+};
 
 /**
  * Ficha de una mascota (`pg-mascota-detalle` del prototipo): perfil con foto,
@@ -64,6 +81,11 @@ export function PetDetailScreen() {
   const { userId, enabled } = useSessionScope();
   const [editing, setEditing] = useState(false);
   const [adminDialog, setAdminDialog] = useState<'none' | 'status' | 'delete'>('none');
+  /** «Registrar aplicación / control»: el pendiente que el formulario va a cumplir. */
+  const [fulfilling, setFulfilling] = useState<PetDueItem | null>(null);
+  const [nextDueTarget, setNextDueTarget] = useState<NextDueTarget | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const fulfillParam = searchParams.get('cumplir');
   const navigate = useNavigate();
   const { afterPetChange, afterPetDeleted } = usePetsCache();
   const handleSessionExpired = useCallback(() => {
@@ -160,15 +182,49 @@ export function PetDetailScreen() {
       ) : null}
 
       <PetKpis detail={detail} />
+      <UpcomingCard
+        petId={pet.id}
+        canRegister={pet.active}
+        isAdmin={isAdmin}
+        fulfillParam={fulfillParam}
+        onFulfillParamHandled={() => {
+          const next = new URLSearchParams(searchParams);
+          next.delete('cumplir');
+          setSearchParams(next, { replace: true });
+        }}
+        onRegister={setFulfilling}
+        onEditDate={setNextDueTarget}
+        onSessionExpired={handleSessionExpired}
+      />
       {pet.active ? (
-        <RecordForm petId={pet.id} today={detail.today} onSessionExpired={handleSessionExpired} />
+        <RecordForm
+          petId={pet.id}
+          today={detail.today}
+          fulfilling={fulfilling}
+          onFulfillDone={() => setFulfilling(null)}
+          onSessionExpired={handleSessionExpired}
+        />
       ) : (
         <p className="notice notice--warning" role="status">
           Mascota inactiva: su historia se conserva, pero no admite registros nuevos
           {isAdmin ? '. Reactivala para volver a registrar datos.' : '.'}
         </p>
       )}
-      <RecordHistory petId={pet.id} isAdmin={isAdmin} onSessionExpired={handleSessionExpired} />
+      <RecordHistory
+        petId={pet.id}
+        isAdmin={isAdmin}
+        onEditDate={setNextDueTarget}
+        onSessionExpired={handleSessionExpired}
+      />
+      {nextDueTarget ? (
+        <NextDueDialog
+          petId={pet.id}
+          record={nextDueTarget.record}
+          current={nextDueTarget.current}
+          onClose={() => setNextDueTarget(null)}
+          onSessionExpired={handleSessionExpired}
+        />
+      ) : null}
 
       {adminDialog === 'status' ? (
         <ConfirmDialog
@@ -272,32 +328,179 @@ function PetKpis({ detail }: { detail: PetDetailResponse }) {
   );
 }
 
+/**
+ * «Próximas atenciones» de la ficha: los pendientes abiertos de ESTA mascota
+ * (mismo endpoint que 📅 Vencimientos, filtrado por mascota), con
+ * «Registrar aplicación / control» si admite registros nuevos. Desde
+ * Vencimientos se llega con `?cumplir=<id>`: se abre el formulario con ese
+ * pendiente ya elegido.
+ */
+function UpcomingCard({
+  petId,
+  canRegister,
+  isAdmin,
+  fulfillParam,
+  onFulfillParamHandled,
+  onRegister,
+  onEditDate,
+  onSessionExpired,
+}: {
+  petId: string;
+  canRegister: boolean;
+  isAdmin: boolean;
+  fulfillParam: string | null;
+  onFulfillParamHandled: () => void;
+  onRegister: (item: PetDueItem) => void;
+  onEditDate: (target: NextDueTarget) => void;
+  onSessionExpired: () => void;
+}) {
+  const { userId, enabled } = useSessionScope();
+  const filters = { petId };
+  const query = useInfiniteQuery({
+    queryKey: queryKeys.pets.due(userId, filters),
+    queryFn: ({ pageParam }) =>
+      fetchPetDue({ ...filters, page: pageParam, pageSize: UPCOMING_PAGE_SIZE }),
+    initialPageParam: 1,
+    getNextPageParam: (last) => (last.page < last.totalPages ? last.page + 1 : undefined),
+    enabled,
+    staleTime: STALE_TIME.operational,
+  });
+  const expired = isSessionExpired(query.error);
+  useEffect(() => {
+    if (expired) onSessionExpired();
+  }, [expired, onSessionExpired]);
+  useBusinessDayRefresh(query.data?.pages[0]?.refreshAt);
+
+  const items = query.data?.pages.flatMap((page) => page.items) ?? [];
+  useEffect(() => {
+    if (!fulfillParam || !query.data) return;
+    const target = items.find((item) => item.record.id === fulfillParam);
+    if (target && canRegister) onRegister(target);
+    onFulfillParamHandled();
+    // Solo al llegar desde Vencimientos (el parámetro se consume una vez).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fulfillParam, query.data]);
+
+  return (
+    <Card
+      title={
+        <>
+          <span aria-hidden="true">📅 </span>Próximas atenciones
+        </>
+      }
+    >
+      {!query.data ? (
+        query.isError ? (
+          <ErrorState
+            title="No pudimos cargar las próximas atenciones"
+            description={errorMessageOf(query.error)}
+            onRetry={() => void query.refetch()}
+          />
+        ) : (
+          <LoadingState label="Cargando próximas atenciones…" />
+        )
+      ) : items.length === 0 ? (
+        <EmptyState
+          titleAs="p"
+          title="Sin atenciones programadas"
+          description="Al registrar una vacuna, desparasitación o control podés indicar la fecha de la próxima."
+        />
+      ) : (
+        <>
+          <ul className="pet-history__list" aria-label="Próximas atenciones">
+            {items.map((item) => (
+              <PetDueRow
+                key={item.record.id}
+                item={item}
+                onRegister={canRegister ? () => onRegister(item) : undefined}
+                onEditDate={
+                  isAdmin
+                    ? () => onEditDate({ record: item.record, current: item.nextDue.date })
+                    : undefined
+                }
+              />
+            ))}
+          </ul>
+          {query.hasNextPage ? (
+            <Button
+              variant="secondary"
+              fullWidth
+              loading={query.isFetchingNextPage}
+              onClick={() => void query.fetchNextPage({ cancelRefetch: false })}
+            >
+              Cargar más
+            </Button>
+          ) : null}
+        </>
+      )}
+    </Card>
+  );
+}
+
 const WEIGHT_PATTERN = /^(?:0[.,]\d{1,2}|[1-9]\d{0,3}(?:[.,]\d{1,2})?)$/;
 type SubmitPhase = 'idle' | 'retry' | 'pending';
 
-/** "➕ Nuevo registro" — cualquier usuario autenticado; persona = la sesión. */
+/**
+ * "➕ Nuevo registro" — cualquier usuario autenticado; persona = la sesión.
+ * Con `fulfilling` («Registrar aplicación / control»), el tipo queda fijo y
+ * la atención cumple ESE pendiente (y solo ese) en la misma transacción; la
+ * persona confirma la fecha real y puede programar la siguiente.
+ */
 function RecordForm({
   petId,
   today,
+  fulfilling,
+  onFulfillDone,
   onSessionExpired,
 }: {
   petId: string;
   today: string;
+  fulfilling: PetDueItem | null;
+  onFulfillDone: () => void;
   onSessionExpired: () => void;
 }) {
   const formId = useId();
+  const cardRef = useRef<HTMLDivElement>(null);
   const { afterRecordChange } = usePetsCache();
   const { isSubmitting, run } = useSubmitGuard();
   const intentRef = useRef(new IdempotencyIntent());
-  const [type, setType] = useState<MedicalRecordType>('VACCINE');
+  const [type, setType] = useState<MedicalRecordType>(fulfilling?.record.type ?? 'VACCINE');
   const [date, setDate] = useState<string | null>(null);
   const [weight, setWeight] = useState('');
-  const [description, setDescription] = useState('');
+  const [description, setDescription] = useState(fulfilling?.record.description ?? '');
+  const [nextDueDate, setNextDueDate] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [phase, setPhase] = useState<SubmitPhase>('idle');
   const effectiveDate = date ?? today;
   const locked = phase === 'pending';
+  const allowsNextDue = type !== 'WEIGHT';
+
+  // Al elegir un pendiente («Registrar aplicación / control»): tipo y
+  // descripción de la atención programada y fecha real a confirmar. Se ajusta
+  // durante el render (patrón de React para estado derivado de una prop); al
+  // terminar, el aviso de éxito se conserva. La clave de idempotencia cambia
+  // sola: el cuerpo incluye el pendiente.
+  const fulfillingId = fulfilling?.record.id ?? null;
+  const [syncedFulfillingId, setSyncedFulfillingId] = useState(fulfillingId);
+  if (fulfillingId !== syncedFulfillingId) {
+    setSyncedFulfillingId(fulfillingId);
+    if (fulfilling) {
+      setType(fulfilling.record.type);
+      setDescription(fulfilling.record.description ?? '');
+      setDate(null);
+      setWeight('');
+      setNextDueDate('');
+      setPhase('idle');
+      setError(null);
+      setSuccess(null);
+    }
+  }
+  useEffect(() => {
+    if (!fulfillingId) return;
+    cardRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    document.getElementById(`${formId}-date`)?.focus({ preventScroll: true });
+  }, [fulfillingId, formId]);
 
   function change(apply: () => void): void {
     apply();
@@ -320,14 +523,23 @@ function RecordForm({
     const text = description.replace(/\s+/g, ' ').trim();
     if (text.length > 300) return 'La descripción no puede superar 300 caracteres.';
     if (/[<>]/.test(text)) return 'La descripción no puede contener HTML.';
+    if (allowsNextDue && nextDueDate && nextDueDate <= effectiveDate) {
+      return 'La fecha de próxima aplicación o control debe ser posterior a la de la atención.';
+    }
     const body: CreatePetRecordRequest = { type, recordDate: effectiveDate };
     if (type === 'WEIGHT') body.weightKg = normalizedWeight.replace(',', '.');
     if (text) body.description = text;
+    if (allowsNextDue && nextDueDate) body.nextDueDate = nextDueDate;
+    if (fulfilling) body.fulfillsRecordId = fulfilling.record.id;
     return body;
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
+    // Un segundo clic justo después de guardar (sin tocar el formulario) no es
+    // un envío nuevo: se conserva el aviso de éxito (mismo criterio que el
+    // Gallinero). Cualquier cambio de campo vuelve a habilitar el envío.
+    if (success) return;
     const result = validate();
     if (typeof result === 'string') {
       setError(result);
@@ -343,8 +555,14 @@ function RecordForm({
         setPhase('idle');
         setWeight('');
         setDescription('');
-        setSuccess(`Registro guardado: ${RECORD_TAG_LABEL[result.type]}.`);
+        setNextDueDate('');
+        setSuccess(
+          fulfilling
+            ? `${RECORD_TAG_LABEL[result.type]} registrada: la atención programada quedó cumplida.`
+            : `Registro guardado: ${RECORD_TAG_LABEL[result.type]}.`,
+        );
         afterRecordChange(petId);
+        if (fulfilling) onFulfillDone();
       } catch (caught) {
         if (isSessionExpired(caught)) {
           onSessionExpired();
@@ -367,120 +585,167 @@ function RecordForm({
 
   const disabled = isSubmitting || locked;
   return (
-    <Card
-      title={
-        <>
-          <span aria-hidden="true">➕ </span>Nuevo registro
-        </>
-      }
-    >
-      <form
-        className="pet-record-form"
-        onSubmit={handleSubmit}
-        noValidate
-        aria-label="Nuevo registro"
+    <div ref={cardRef}>
+      <Card
+        title={
+          <>
+            <span aria-hidden="true">➕ </span>
+            {fulfilling ? fulfillActionLabel(fulfilling.record.type) : 'Nuevo registro'}
+          </>
+        }
       >
-        <div className="pet-form__row">
-          <div className="field">
-            <label className="field__label" htmlFor={`${formId}-type`}>
-              Tipo
-            </label>
-            <select
-              id={`${formId}-type`}
-              className="field__input"
-              value={type}
-              disabled={disabled}
-              onChange={(event) => {
-                const next = event.target.value as MedicalRecordType;
-                change(() => setType(next));
-              }}
-            >
-              {RECORD_TYPES.map((option) => (
-                <option key={option} value={option}>
-                  {RECORD_OPTION_LABEL[option]}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label className="field__label" htmlFor={`${formId}-date`}>
-              Fecha
-            </label>
-            <input
-              id={`${formId}-date`}
-              className="field__input"
-              type="date"
-              max={today}
-              value={effectiveDate}
-              disabled={disabled}
-              onChange={(event) => {
-                const next = event.target.value;
-                change(() => setDate(next));
-              }}
-            />
-          </div>
-        </div>
-        {type === 'WEIGHT' ? (
-          <div className="field">
-            <label className="field__label" htmlFor={`${formId}-weight`}>
-              Peso (kg)
-            </label>
-            <input
-              id={`${formId}-weight`}
-              className="field__input pet-record-form__weight"
-              type="text"
-              inputMode="decimal"
-              autoComplete="off"
-              placeholder="0,0"
-              value={weight}
-              disabled={disabled}
-              onChange={(event) => {
-                const next = event.target.value;
-                change(() => setWeight(next));
-              }}
-            />
-          </div>
+        {fulfilling ? (
+          <p className="notice notice--info pet-record-form__fulfilling" role="status">
+            <span>
+              Cumple: {RECORD_TAG_LABEL[fulfilling.record.type]}
+              {fulfilling.record.description ? ` «${fulfilling.record.description}»` : ''},
+              programada para el {formatDate(fulfilling.nextDue.date)} (
+              {dueRelativeText(fulfilling.nextDue).toLowerCase()}).
+            </span>
+            <Button size="sm" variant="ghost" disabled={isSubmitting} onClick={onFulfillDone}>
+              Cancelar
+            </Button>
+          </p>
         ) : null}
-        <div className="field">
-          <label className="field__label" htmlFor={`${formId}-description`}>
-            Descripción
-          </label>
-          <input
-            id={`${formId}-description`}
-            className="field__input"
-            maxLength={300}
-            autoComplete="off"
-            placeholder="Ej: Vacuna antirrábica, Triple viral..."
-            value={description}
-            disabled={disabled}
-            onChange={(event) => {
-              const next = event.target.value;
-              change(() => setDescription(next));
-            }}
-          />
-        </div>
-        <div aria-live="polite" className="live-status live-status--start">
-          {isSubmitting ? (
-            <span role="status">{locked ? 'Consultando…' : 'Guardando…'}</span>
+        <form
+          className="pet-record-form"
+          onSubmit={handleSubmit}
+          noValidate
+          aria-label="Nuevo registro"
+        >
+          <div className="pet-form__row">
+            <div className="field">
+              <label className="field__label" htmlFor={`${formId}-type`}>
+                Tipo
+              </label>
+              <select
+                id={`${formId}-type`}
+                className="field__input"
+                value={type}
+                // El tipo del pendiente a cumplir no se cambia.
+                disabled={disabled || fulfilling !== null}
+                onChange={(event) => {
+                  const next = event.target.value as MedicalRecordType;
+                  change(() => setType(next));
+                }}
+              >
+                {RECORD_TYPES.map((option) => (
+                  <option key={option} value={option}>
+                    {RECORD_OPTION_LABEL[option]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label className="field__label" htmlFor={`${formId}-date`}>
+                Fecha
+              </label>
+              <input
+                id={`${formId}-date`}
+                className="field__input"
+                type="date"
+                max={today}
+                value={effectiveDate}
+                disabled={disabled}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  change(() => setDate(next));
+                }}
+              />
+            </div>
+          </div>
+          {type === 'WEIGHT' ? (
+            <div className="field">
+              <label className="field__label" htmlFor={`${formId}-weight`}>
+                Peso (kg)
+              </label>
+              <input
+                id={`${formId}-weight`}
+                className="field__input pet-record-form__weight"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                placeholder="0,0"
+                value={weight}
+                disabled={disabled}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  change(() => setWeight(next));
+                }}
+              />
+            </div>
           ) : null}
-          {error ? (
-            <span role="alert">
-              <AlertIcon size="sm" />
-              {error}
-            </span>
+          <div className="field">
+            <label className="field__label" htmlFor={`${formId}-description`}>
+              Descripción
+            </label>
+            <input
+              id={`${formId}-description`}
+              className="field__input"
+              maxLength={300}
+              autoComplete="off"
+              placeholder="Ej: Vacuna antirrábica, Triple viral..."
+              value={description}
+              disabled={disabled}
+              onChange={(event) => {
+                const next = event.target.value;
+                change(() => setDescription(next));
+              }}
+            />
+          </div>
+          {allowsNextDue ? (
+            <div className="field">
+              <label className="field__label" htmlFor={`${formId}-next-due`}>
+                Fecha de próxima aplicación o control
+              </label>
+              <input
+                id={`${formId}-next-due`}
+                className="field__input"
+                type="date"
+                min={effectiveDate ? nextDay(effectiveDate) : undefined}
+                value={nextDueDate}
+                disabled={disabled}
+                aria-describedby={`${formId}-next-due-hint`}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  change(() => setNextDueDate(next));
+                }}
+              />
+              <p className="field__hint" id={`${formId}-next-due-hint`}>
+                Opcional, según la indicación veterinaria. Tiene que ser posterior a la fecha de la
+                atención.
+              </p>
+            </div>
           ) : null}
-          {success ? (
-            <span role="status" className="pet-record-form__success">
-              <CheckCircleIcon size="sm" />
-              {success}
-            </span>
-          ) : null}
-        </div>
-        <Button type="submit" fullWidth loading={isSubmitting}>
-          {locked ? 'Consultar estado' : phase === 'retry' ? 'Reintentar' : 'Guardar registro'}
-        </Button>
-      </form>
-    </Card>
+          <div aria-live="polite" className="live-status live-status--start">
+            {isSubmitting ? (
+              <span role="status">{locked ? 'Consultando…' : 'Guardando…'}</span>
+            ) : null}
+            {error ? (
+              <span role="alert">
+                <AlertIcon size="sm" />
+                {error}
+              </span>
+            ) : null}
+            {success ? (
+              <span role="status" className="pet-record-form__success">
+                <CheckCircleIcon size="sm" />
+                {success}
+              </span>
+            ) : null}
+          </div>
+          <Button type="submit" fullWidth loading={isSubmitting}>
+            {locked
+              ? 'Consultar estado'
+              : phase === 'retry'
+                ? 'Reintentar'
+                : fulfilling
+                  ? fulfillActionLabel(fulfilling.record.type)
+                  : 'Guardar registro'}
+          </Button>
+        </form>
+      </Card>
+    </div>
   );
 }
 
@@ -488,10 +753,12 @@ function RecordForm({
 function RecordHistory({
   petId,
   isAdmin,
+  onEditDate,
   onSessionExpired,
 }: {
   petId: string;
   isAdmin: boolean;
+  onEditDate: (target: NextDueTarget) => void;
   onSessionExpired: () => void;
 }) {
   const { userId, enabled } = useSessionScope();
@@ -516,6 +783,7 @@ function RecordHistory({
   useEffect(() => {
     if (expired) onSessionExpired();
   }, [expired, onSessionExpired]);
+  useBusinessDayRefresh(query.data?.pages[0]?.refreshAt);
 
   const seen = new Set<string>();
   const records = (query.data?.pages.flatMap((page) => page.records) ?? []).filter((record) =>
@@ -551,34 +819,68 @@ function RecordHistory({
         ) : (
           <div className={query.isPlaceholderData ? 'is-stale' : undefined}>
             <ul className="pet-history__list" aria-label="Registros clínicos">
-              {records.map((record) => (
-                <li key={record.id} className="pet-history__item">
-                  <div className="pet-history__head">
-                    <span className="pet-history__tag">{RECORD_TAG_LABEL[record.type]}</span>
-                    <span className="pet-history__date">{formatDate(record.recordDate)}</span>
-                    {record.employee ? (
-                      <span className="pet-history__person">{record.employee.displayName}</span>
+              {records.map((record) => {
+                const person = attributedName(record);
+                return (
+                  <li key={record.id} className="pet-history__item">
+                    <div className="pet-history__head">
+                      <span className="pet-history__tag">{RECORD_TAG_LABEL[record.type]}</span>
+                      <span className="pet-history__date">{formatDate(record.recordDate)}</span>
+                      {person ? <span className="pet-history__person">{person}</span> : null}
+                      {isAdmin ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="pet-history__void"
+                          aria-label={`Eliminar registro ${RECORD_TAG_LABEL[record.type]} del ${formatDate(record.recordDate)}`}
+                          onClick={() => setToVoid(record)}
+                        >
+                          <span aria-hidden="true">✕</span>
+                        </Button>
+                      ) : null}
+                    </div>
+                    {record.weightKg || record.description ? (
+                      <p className="pet-history__text">
+                        {record.weightKg ? <strong>{formatKg(record.weightKg)} kg </strong> : null}
+                        {record.description}
+                      </p>
                     ) : null}
-                    {isAdmin ? (
+                    {record.nextDue || record.fulfills ? (
+                      <p className="pet-history__due">
+                        {record.nextDue ? (
+                          <span>
+                            <span aria-hidden="true">📅 </span>Próxima:{' '}
+                            {formatDate(record.nextDue.date)} ·{' '}
+                            {record.nextDue.status === 'FULFILLED' && record.nextDue.fulfilledBy
+                              ? `Cumplida el ${formatDate(record.nextDue.fulfilledBy.recordDate)}`
+                              : `${DUE_STATUS_LABEL[record.nextDue.status]} · ${dueRelativeText(record.nextDue)}`}
+                          </span>
+                        ) : null}
+                        {record.nextDue && record.fulfills ? ' · ' : null}
+                        {record.fulfills ? (
+                          <span>
+                            Cumple la atención programada del{' '}
+                            {formatDate(record.fulfills.recordDate)}
+                          </span>
+                        ) : null}
+                      </p>
+                    ) : null}
+                    {isAdmin &&
+                    record.type !== 'WEIGHT' &&
+                    record.nextDue?.status !== 'FULFILLED' ? (
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="pet-history__void"
-                        aria-label={`Eliminar registro ${RECORD_TAG_LABEL[record.type]} del ${formatDate(record.recordDate)}`}
-                        onClick={() => setToVoid(record)}
+                        onClick={() =>
+                          onEditDate({ record, current: record.nextDue?.date ?? null })
+                        }
                       >
-                        <span aria-hidden="true">✕</span>
+                        {record.nextDue ? 'Corregir fecha próxima' : 'Programar próxima fecha'}
                       </Button>
                     ) : null}
-                  </div>
-                  {record.weightKg || record.description ? (
-                    <p className="pet-history__text">
-                      {record.weightKg ? <strong>{formatKg(record.weightKg)} kg </strong> : null}
-                      {record.description}
-                    </p>
-                  ) : null}
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
             {query.hasNextPage ? (
               <Button

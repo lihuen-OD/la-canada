@@ -632,10 +632,12 @@ describe('👤 Mi perfil del ADMIN (sin Employee) — 🎂 Mi cumpleaños y 👨
     expect(applyDisplayNameMock).toHaveBeenCalledWith('Nombre sintético');
     expect(await card.findByText('21/07/1985')).toBeInTheDocument();
     const keys = invalidate.mock.calls.map((call) => JSON.stringify(call[0]?.queryKey));
-    // El nombre del ADMIN solo aparece en su sesión, su cumpleaños y Usuarios.
-    expect(
-      keys.some((key) => /tasks|stock|pets|team|family|chickenCoop|performance/.test(key)),
-    ).toBe(false);
+    // El nombre del ADMIN aparece en su sesión, su cumpleaños, Usuarios y, como
+    // participante o autor, en Stock y Gallinero (y sus selectores). Nada más.
+    expect(keys.some((key) => /tasks|pets|team|family|performance/.test(key))).toBe(false);
+    expect(keys).toContain(JSON.stringify(['session', 'u-a', 'participants']));
+    expect(keys).toContain(JSON.stringify(['session', 'u-a', 'stock']));
+    expect(keys).toContain(JSON.stringify(['session', 'u-a', 'chickenCoop']));
     expect(keys).toContain(JSON.stringify(['session', 'u-a', 'more', 'events']));
     expect(keys).toContain(JSON.stringify(['session', 'u-a', 'admin', 'users']));
     expect(api.fetchMyProfile).toHaveBeenCalledTimes(1);

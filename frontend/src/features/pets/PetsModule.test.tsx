@@ -8,7 +8,9 @@ import {
   TYPE_CUSTOM,
   TYPE_DOG,
   detailResponse,
+  dueResponse,
   listResponse,
+  makeDueItem,
   makePet,
   makeRecord,
   recordsResponse,
@@ -20,6 +22,8 @@ const api = vi.hoisted(() => ({
   fetchPets: vi.fn(),
   fetchPet: vi.fn(),
   fetchPetRecords: vi.fn(),
+  fetchPetDue: vi.fn(),
+  updatePetRecordNextDue: vi.fn(),
   fetchPetPhoto: vi.fn(),
   createPetRecord: vi.fn(),
   createPet: vi.fn(),
@@ -80,6 +84,7 @@ beforeEach(() => {
   api.fetchPets.mockResolvedValue(listResponse());
   api.fetchPet.mockResolvedValue(detailResponse());
   api.fetchPetRecords.mockResolvedValue(recordsResponse());
+  api.fetchPetDue.mockResolvedValue(dueResponse());
   asEmployee();
 });
 
@@ -310,6 +315,34 @@ describe('🐾 Mascotas — ficha', () => {
     expect(screen.queryByRole('button', { name: /Eliminar registro/ })).not.toBeInTheDocument();
   });
 
+  it('historial: sin persona, cada registro muestra al administrador que lo cargó', async () => {
+    api.fetchPetRecords.mockResolvedValue(
+      recordsResponse([
+        makeRecord({
+          id: 'r-a',
+          description: 'Cargado por A',
+          employee: null,
+          recordedBy: { displayName: 'Admin sintética Uno' },
+        }),
+        makeRecord({
+          id: 'r-b',
+          description: 'Cargado por B',
+          employee: null,
+          recordedBy: { displayName: 'Admin sintético Dos' },
+        }),
+        makeRecord({ id: 'r-e', description: 'Cargado por la persona' }),
+        makeRecord({ id: 'r-n', description: 'Sin evidencia', employee: null, recordedBy: null }),
+      ]),
+    );
+    renderPets(`/pets/${PET.id}`);
+    const history = await screen.findByRole('list', { name: 'Registros clínicos' });
+    const itemOf = (text: string) => within(history).getByText(text).closest('li') as HTMLElement;
+    expect(itemOf('Cargado por A')).toHaveTextContent('Admin sintética Uno');
+    expect(itemOf('Cargado por B')).toHaveTextContent('Admin sintético Dos');
+    expect(itemOf('Cargado por la persona')).toHaveTextContent('Persona sintética');
+    expect(itemOf('Sin evidencia').querySelector('.pet-history__person')).toBeNull();
+  });
+
   it('"Guardar registro": ⚖️ Peso exige kg (acepta coma), fecha de negocio, Idempotency-Key e invalidación', async () => {
     const user = userEvent.setup();
     api.createPetRecord.mockResolvedValue({
@@ -382,5 +415,314 @@ describe('🐾 Mascotas — ficha', () => {
     expect(image).toHaveAttribute('src', 'blob:sintetico');
     expect(api.fetchPetPhoto).toHaveBeenCalledWith('file-1');
     vi.unstubAllGlobals();
+  });
+});
+
+describe('🐾 Mascotas — próximas aplicaciones o controles', () => {
+  // Sintéticos: dos vacunas distintas programadas para la misma mascota.
+  const RABIES = makeDueItem({
+    record: {
+      id: '00000000-0000-4000-8000-0000000d0a11',
+      type: 'VACCINE',
+      recordDate: '2025-09-20',
+      description: 'Antirrábica sintética',
+    },
+    nextDue: { date: '2026-09-22', status: 'OVERDUE', daysUntil: -3, fulfilledBy: null },
+  });
+  const SEXTUPLE = makeDueItem({
+    record: {
+      id: '00000000-0000-4000-8000-0000000d0a12',
+      type: 'VACCINE',
+      recordDate: '2026-01-10',
+      description: 'Séxtuple sintética',
+    },
+    nextDue: { date: '2026-10-07', status: 'UPCOMING', daysUntil: 12, fulfilledBy: null },
+  });
+  const CHECKUP_TODAY = makeDueItem({
+    record: {
+      id: '00000000-0000-4000-8000-0000000d0a13',
+      type: 'CHECKUP',
+      recordDate: '2026-03-25',
+      description: null,
+    },
+    nextDue: { date: '2026-09-25', status: 'DUE_TODAY', daysUntil: 0, fulfilledBy: null },
+  });
+
+  it('«Nuevo registro»: la próxima fecha es opcional, posterior a la atención y no aparece para Peso', async () => {
+    const user = userEvent.setup();
+    api.createPetRecord.mockResolvedValue({ record: makeRecord() });
+    renderPets(`/pets/${PET.id}`);
+    const form = await screen.findByRole('form', { name: 'Nuevo registro' });
+    const nextDue = within(form).getByLabelText('Fecha de próxima aplicación o control');
+    expect(nextDue).toHaveAttribute('min', '2026-09-26');
+    await user.type(nextDue, '2026-09-25');
+    await user.click(within(form).getByRole('button', { name: 'Guardar registro' }));
+    expect(await within(form).findByRole('alert')).toHaveTextContent(
+      /posterior a la de la atención/,
+    );
+    expect(api.createPetRecord).not.toHaveBeenCalled();
+    await user.clear(nextDue);
+    await user.type(nextDue, '2027-09-25');
+    await user.click(within(form).getByRole('button', { name: 'Guardar registro' }));
+    await waitFor(() => expect(api.createPetRecord).toHaveBeenCalledTimes(1));
+    expect(api.createPetRecord.mock.calls[0]?.[1]).toEqual({
+      type: 'VACCINE',
+      recordDate: '2026-09-25',
+      nextDueDate: '2027-09-25',
+    });
+    await user.selectOptions(within(form).getByLabelText('Tipo'), 'WEIGHT');
+    expect(
+      within(form).queryByLabelText('Fecha de próxima aplicación o control'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('«Próximas atenciones»: tipo, descripción, fechas, estado y tiempo restante o transcurrido', async () => {
+    api.fetchPetDue.mockResolvedValue(dueResponse([RABIES, CHECKUP_TODAY, SEXTUPLE]));
+    renderPets(`/pets/${PET.id}`);
+    const list = await screen.findByRole('list', { name: 'Próximas atenciones' });
+    expect(api.fetchPetDue).toHaveBeenCalledWith(expect.objectContaining({ petId: PET.id }));
+    const rows = within(list).getAllByRole('listitem');
+    expect(rows[0]).toHaveTextContent('Antirrábica sintética');
+    expect(rows[0]).toHaveTextContent('Atención: 20/09/2025');
+    expect(rows[0]).toHaveTextContent('Programada: 22/09/2026');
+    expect(rows[0]).toHaveTextContent('Vencida');
+    expect(rows[0]).toHaveTextContent('Hace 3 días');
+    expect(rows[1]).toHaveTextContent('Vence hoy');
+    expect(within(rows[1]!).getByRole('button', { name: /Registrar control/ })).toBeInTheDocument();
+    expect(rows[2]).toHaveTextContent('En 12 días');
+    expect(
+      within(rows[2]!).getByRole('button', { name: /Registrar aplicación/ }),
+    ).toBeInTheDocument();
+    // EMPLOYEE no corrige fechas.
+    expect(within(list).queryByRole('button', { name: /Corregir/ })).not.toBeInTheDocument();
+  });
+
+  it('«Registrar aplicación» cumple SOLO el pendiente elegido: tipo fijo, fecha real y próxima fecha', async () => {
+    const user = userEvent.setup();
+    api.fetchPetDue.mockResolvedValue(dueResponse([RABIES, SEXTUPLE]));
+    api.createPetRecord.mockResolvedValue({ record: makeRecord() });
+    renderPets(`/pets/${PET.id}`);
+    const list = await screen.findByRole('list', { name: 'Próximas atenciones' });
+    const sextupleRow = within(list).getByText('Séxtuple sintética').closest('li') as HTMLElement;
+    await user.click(within(sextupleRow).getByRole('button', { name: /Registrar aplicación/ }));
+    const form = await screen.findByRole('form', { name: 'Nuevo registro' });
+    expect(
+      screen.getByText(/Cumple: 💉 Vacuna «Séxtuple sintética», programada para el 07\/10\/2026/),
+    ).toBeInTheDocument();
+    expect(within(form).getByLabelText('Tipo')).toBeDisabled();
+    await user.type(
+      within(form).getByLabelText('Fecha de próxima aplicación o control'),
+      '2027-09-25',
+    );
+    await user.dblClick(within(form).getByRole('button', { name: 'Registrar aplicación' }));
+    await waitFor(() => expect(api.createPetRecord).toHaveBeenCalledTimes(1));
+    expect(api.createPetRecord.mock.calls[0]?.[1]).toEqual({
+      type: 'VACCINE',
+      recordDate: '2026-09-25',
+      description: 'Séxtuple sintética',
+      nextDueDate: '2027-09-25',
+      fulfillsRecordId: SEXTUPLE.record.id,
+    });
+    // Invalida ficha, historial y pendientes.
+    await waitFor(() => expect(api.fetchPetDue.mock.calls.length).toBeGreaterThanOrEqual(2));
+    expect(await screen.findByText(/la atención programada quedó cumplida/)).toBeInTheDocument();
+  });
+
+  it('desde 📅 Vencimientos (?cumplir=) la ficha abre el formulario con ese pendiente', async () => {
+    api.fetchPetDue.mockResolvedValue(dueResponse([RABIES, SEXTUPLE]));
+    renderPets(`/pets/${PET.id}?cumplir=${RABIES.record.id}`);
+    expect(
+      await screen.findByText(/Cumple: 💉 Vacuna «Antirrábica sintética»/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Registrar aplicación' })).toBeInTheDocument();
+  });
+
+  it('una mascota inactiva muestra sus pendientes sin «Registrar aplicación»', async () => {
+    api.fetchPet.mockResolvedValue(detailResponse(makePet({ active: false })));
+    api.fetchPetDue.mockResolvedValue(dueResponse([RABIES]));
+    renderPets(`/pets/${PET.id}`);
+    const list = await screen.findByRole('list', { name: 'Próximas atenciones' });
+    expect(within(list).queryByRole('button', { name: /Registrar/ })).not.toBeInTheDocument();
+  });
+
+  it('historial: próxima fecha con su estado, cumplida y el antecedente que la cumplió', async () => {
+    api.fetchPetRecords.mockResolvedValue(
+      recordsResponse([
+        makeRecord({
+          id: 'r-programada',
+          description: 'Programada',
+          nextDue: { date: '2026-10-07', status: 'UPCOMING', daysUntil: 12, fulfilledBy: null },
+        }),
+        makeRecord({
+          id: 'r-cumplida',
+          description: 'Cumplida',
+          nextDue: {
+            date: '2026-09-01',
+            status: 'FULFILLED',
+            daysUntil: -24,
+            fulfilledBy: { id: 'r-aplicacion', recordDate: '2026-09-03' },
+          },
+        }),
+        makeRecord({
+          id: 'r-aplicacion',
+          description: 'Aplicación',
+          fulfills: { id: 'r-cumplida', type: 'VACCINE', recordDate: '2025-09-01' },
+        }),
+        makeRecord({ id: 'r-antiguo', description: 'Antiguo sin fecha' }),
+      ]),
+    );
+    renderPets(`/pets/${PET.id}`);
+    const history = within(await screen.findByRole('list', { name: 'Registros clínicos' }));
+    const item = (text: string) => history.getByText(text).closest('li') as HTMLElement;
+    expect(item('Programada')).toHaveTextContent('Próxima: 07/10/2026 · Próxima · En 12 días');
+    expect(item('Cumplida')).toHaveTextContent('Cumplida el 03/09/2026');
+    expect(item('Aplicación')).toHaveTextContent('Cumple la atención programada del 01/09/2025');
+    expect(item('Antiguo sin fecha')).not.toHaveTextContent(/Próxima|Vencida/);
+  });
+
+  it('ADMIN completa la fecha de un registro anterior con una acción acotada', async () => {
+    asAdmin();
+    const user = userEvent.setup();
+    api.fetchPetRecords.mockResolvedValue(
+      recordsResponse([makeRecord({ id: 'r-antiguo', description: 'Antiguo sin fecha' })]),
+    );
+    api.updatePetRecordNextDue.mockResolvedValue({ record: makeRecord() });
+    renderPets(`/pets/${PET.id}`);
+    const history = within(await screen.findByRole('list', { name: 'Registros clínicos' }));
+    await user.click(history.getByRole('button', { name: 'Programar próxima fecha' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Completar fecha programada' });
+    await user.type(
+      within(dialog).getByLabelText('Fecha de próxima aplicación o control'),
+      '2026-12-01',
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar fecha' }));
+    await waitFor(() =>
+      expect(api.updatePetRecordNextDue).toHaveBeenCalledWith(PET.id, 'r-antiguo', '2026-12-01'),
+    );
+    await waitFor(() => expect(api.fetchPetDue.mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+
+  it('listado: indicador discreto de vencidas, de hoy y próximas (del backend, sin pedir por mascota)', async () => {
+    api.fetchPets.mockResolvedValue({
+      ...listResponse([
+        { ...PET, dueSummary: { overdue: 1, dueToday: 1, upcoming: 2 } },
+        {
+          ...makePet({ id: 'otra', name: 'Otra sintética' }),
+          dueSummary: { overdue: 0, dueToday: 0, upcoming: 0 },
+        },
+      ]),
+    });
+    renderPets();
+    const card = (await screen.findByRole('link', { name: new RegExp(PET.name) })) as HTMLElement;
+    expect(card).toHaveTextContent('1 vencida · 1 hoy · 2 próximas');
+    const other = screen.getByRole('link', { name: /Otra sintética/ });
+    expect(other).not.toHaveTextContent(/vencida|próxima/);
+    expect(api.fetchPetDue).not.toHaveBeenCalled();
+  });
+});
+
+describe('🐾 Mascotas — 📅 Vencimientos', () => {
+  const OVERDUE = makeDueItem({
+    record: {
+      id: 'd-1',
+      type: 'VACCINE',
+      recordDate: '2025-01-01',
+      description: 'Vencida sintética',
+    },
+    nextDue: { date: '2026-09-20', status: 'OVERDUE', daysUntil: -5, fulfilledBy: null },
+  });
+  const FULFILLED = makeDueItem({
+    record: {
+      id: 'd-2',
+      type: 'DEWORMING',
+      recordDate: '2025-01-01',
+      description: 'Cumplida sintética',
+    },
+    nextDue: {
+      date: '2026-06-01',
+      status: 'FULFILLED',
+      daysUntil: -116,
+      fulfilledBy: { id: 'x', recordDate: '2026-06-01' },
+    },
+  });
+
+  it('pestaña dentro de Mascotas; pendientes por defecto y filtros por estado, mascota y tipo en el backend', async () => {
+    const user = userEvent.setup();
+    api.fetchPetDue.mockResolvedValue(dueResponse([OVERDUE]));
+    renderPets('/pets');
+    await user.click(
+      within(await screen.findByRole('navigation', { name: 'Secciones de Mascotas' })).getByRole(
+        'link',
+        { name: /Vencimientos/ },
+      ),
+    );
+    const list = await screen.findByRole('list', { name: 'Atenciones programadas' });
+    expect(within(list).getByText('Vencida sintética')).toBeInTheDocument();
+    expect(within(list).getByRole('link', { name: new RegExp(PET.name) })).toHaveAttribute(
+      'href',
+      `/pets/${PET.id}`,
+    );
+    expect(api.fetchPetDue).toHaveBeenLastCalledWith({ page: 1, pageSize: 20 });
+
+    api.fetchPetDue.mockResolvedValue(dueResponse([FULFILLED]));
+    await user.click(
+      within(screen.getByRole('group', { name: 'Filtrar por estado' })).getByRole('button', {
+        name: 'Cumplidas',
+      }),
+    );
+    await waitFor(() =>
+      expect(api.fetchPetDue).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: 'FULFILLED' }),
+      ),
+    );
+    const fulfilledRow = (await screen.findByText('Cumplida sintética')).closest(
+      'li',
+    ) as HTMLElement;
+    expect(
+      within(fulfilledRow).queryByRole('button', { name: /Registrar/ }),
+    ).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Tipo'), 'DEWORMING');
+    await waitFor(() =>
+      expect(api.fetchPetDue).toHaveBeenLastCalledWith(
+        expect.objectContaining({ type: 'DEWORMING' }),
+      ),
+    );
+    await user.selectOptions(screen.getByLabelText('Mascota'), PET.id);
+    await waitFor(() =>
+      expect(api.fetchPetDue).toHaveBeenLastCalledWith(expect.objectContaining({ petId: PET.id })),
+    );
+  });
+
+  it('estado vacío claro y «Registrar aplicación» lleva a la ficha con ese pendiente', async () => {
+    const user = userEvent.setup();
+    api.fetchPetDue.mockResolvedValueOnce(dueResponse([]));
+    renderPets('/pets/due');
+    expect(await screen.findByText('No hay atenciones programadas.')).toBeInTheDocument();
+    api.fetchPetDue.mockResolvedValue(dueResponse([OVERDUE]));
+    await user.click(
+      within(screen.getByRole('group', { name: 'Filtrar por estado' })).getByRole('button', {
+        name: 'Vencidas',
+      }),
+    );
+    await user.click(await screen.findByRole('button', { name: /Registrar aplicación/ }));
+    expect(await screen.findByText(/Cumple: 💉 Vacuna «Vencida sintética»/)).toBeInTheDocument();
+  });
+
+  it('al empezar el día de negocio (refreshAt) se revalidan los estados, sin sondeo', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const soon = new Date(Date.now() + 5_000).toISOString();
+      api.fetchPetDue.mockResolvedValue({ ...dueResponse([OVERDUE]), refreshAt: soon });
+      renderPets('/pets/due');
+      await screen.findByText('Vencida sintética');
+      const calls = api.fetchPetDue.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(api.fetchPetDue.mock.calls.length).toBe(calls);
+      await vi.advanceTimersByTimeAsync(3_000);
+      await waitFor(() => expect(api.fetchPetDue.mock.calls.length).toBe(calls + 1));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -19,6 +19,7 @@ const db = vi.hoisted(() => {
       findMany: fn(),
     },
     employee: { findUnique: fn() },
+    user: { findUnique: fn() },
     auditLog: { create: fn() },
     $queryRaw: fn(),
     $transaction: fn(),
@@ -171,6 +172,99 @@ describe('registrar recolección', () => {
       ),
     ).rejects.toMatchObject({ code: 'EGG_COLLECTOR_INVALID' });
     expect(db.eggCollection.create).not.toHaveBeenCalled();
+  });
+
+  // Sintéticos: Benja (ADMIN de la sesión) registra que Viki (ADMIN sin ficha) juntó.
+  const VIKI = '55555555-5555-4555-8555-555555555555';
+
+  it('ADMIN elige a otro administrador sin ficha: participante Viki, autor Benja (de la sesión)', async () => {
+    db.user.findUnique.mockResolvedValue({ role: 'ADMIN', status: 'ACTIVE', employeeId: null });
+    db.eggCollection.create.mockResolvedValue(
+      collectionRow({ employee: null, participantUserId: VIKI, recordedByUserId: 'user-a' }),
+    );
+    // Nombres de quien juntó y de quien registró: UNA sentencia agrupada.
+    db.$queryRaw.mockResolvedValue([
+      { id: VIKI, employeeId: null, displayName: 'Viki sintética' },
+      { id: 'user-a', employeeId: null, displayName: 'Benja sintético' },
+    ]);
+    const result = await createEggCollection(
+      ADMIN,
+      { goodEggsCount: 6, brokenEggsCount: 0, participantUserId: VIKI },
+      META,
+      NOW,
+    );
+    expect(db.user.findUnique.mock.calls[0]?.[0]).toMatchObject({ where: { id: VIKI } });
+    expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(db.$queryRaw.mock.calls[0]?.[0].values).toEqual(
+      expect.arrayContaining([VIKI, 'user-a']),
+    );
+    expect(db.eggCollection.create.mock.calls[0]?.[0].data).toMatchObject({
+      employeeId: null,
+      participantUserId: VIKI,
+      recordedByUserId: 'user-a',
+    });
+    expect(result.kind === 'created' && result.body.collection).toMatchObject({
+      employee: null,
+      participantUser: { id: VIKI, displayName: 'Viki sintética' },
+      recordedBy: { displayName: 'Benja sintético' },
+    });
+    expect(db.auditLog.create.mock.calls[0]?.[0].data).toMatchObject({
+      actorUserId: 'user-a',
+      newState: expect.objectContaining({ employeeId: null, participantUserId: VIKI }),
+    });
+  });
+
+  it('ADMIN se elige a sí mismo: no se repite como autor', async () => {
+    db.user.findUnique.mockResolvedValue({ role: 'ADMIN', status: 'ACTIVE', employeeId: null });
+    db.eggCollection.create.mockResolvedValue(
+      collectionRow({ employee: null, participantUserId: 'user-a', recordedByUserId: 'user-a' }),
+    );
+    db.$queryRaw.mockResolvedValue([
+      { id: 'user-a', employeeId: null, displayName: 'Benja sintético' },
+    ]);
+    const result = await createEggCollection(
+      ADMIN,
+      { goodEggsCount: 1, brokenEggsCount: 0, participantUserId: 'user-a' },
+      META,
+      NOW,
+    );
+    expect(result.kind === 'created' && result.body.collection).toMatchObject({
+      participantUser: { id: 'user-a', displayName: 'Benja sintético' },
+      recordedBy: null,
+    });
+  });
+
+  it.each([
+    ['no es ADMIN', { role: 'EMPLOYEE', status: 'ACTIVE', employeeId: null }],
+    ['no está activo', { role: 'ADMIN', status: 'SUSPENDED', employeeId: null }],
+    [
+      'tiene ficha (se elige por su empleado)',
+      { role: 'ADMIN', status: 'ACTIVE', employeeId: EMPLOYEE_ID },
+    ],
+    ['no existe', null],
+  ])('rechaza un administrador elegido que %s, sin escribir', async (_label, user) => {
+    db.user.findUnique.mockResolvedValue(user);
+    await expect(
+      createEggCollection(
+        ADMIN,
+        { goodEggsCount: 1, brokenEggsCount: 0, participantUserId: VIKI },
+        META,
+        NOW,
+      ),
+    ).rejects.toMatchObject({ code: 'EGG_COLLECTOR_INVALID' });
+    expect(db.eggCollection.create).not.toHaveBeenCalled();
+  });
+
+  it('EMPLOYEE conserva sus permisos: no puede elegir a un administrador', async () => {
+    await expect(
+      createEggCollection(
+        EMPLOYEE,
+        { goodEggsCount: 1, brokenEggsCount: 0, participantUserId: VIKI },
+        META,
+        NOW,
+      ),
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(db.$transaction).not.toHaveBeenCalled();
   });
 
   it('fecha pasada permitida; futura rechazada según el día de BUSINESS_TIME_ZONE (no UTC)', async () => {

@@ -20,13 +20,35 @@ const api = vi.hoisted(() => ({
   configureChickenCoop: vi.fn(),
   adjustChickenCoopHens: vi.fn(),
 }));
-const { useAuthMock, logoutMock, fetchTaskEmployeesMock } = vi.hoisted(() => ({
+const { useAuthMock, logoutMock, fetchParticipantsMock } = vi.hoisted(() => ({
   useAuthMock: vi.fn(),
   logoutMock: vi.fn(),
-  fetchTaskEmployeesMock: vi.fn(),
+  fetchParticipantsMock: vi.fn(),
 }));
 vi.mock('../../api/chickenCoopApi', () => api);
-vi.mock('../../api/tasksApi', () => ({ fetchTaskEmployees: fetchTaskEmployeesMock }));
+vi.mock('../../api/participantsApi', () => ({ fetchParticipants: fetchParticipantsMock }));
+
+// Sintéticos: «Benja» es el ADMIN de la sesión (u-a, sin ficha); «Viki», otra ADMIN sin ficha.
+const ADMIN_SELF = {
+  kind: 'ADMIN' as const,
+  id: 'u-a',
+  displayName: 'Benja sintético',
+  colorHex: null,
+};
+const ADMIN_VIKI = {
+  kind: 'ADMIN' as const,
+  id: 'u-viki',
+  displayName: 'Viki sintética',
+  colorHex: null,
+};
+const asParticipant = (collector: {
+  id: string;
+  displayName: string;
+  colorHex: string | null;
+}) => ({
+  kind: 'EMPLOYEE' as const,
+  ...collector,
+});
 vi.mock('../../auth/useAuth', () => ({ useAuth: useAuthMock }));
 
 import { ChickenCoopScreen } from './ChickenCoopScreen';
@@ -63,8 +85,10 @@ const form = () => screen.getByRole('form', { name: 'Registrar recolección' });
 beforeEach(() => {
   for (const mock of Object.values(api)) mock.mockReset();
   logoutMock.mockReset();
-  fetchTaskEmployeesMock.mockReset();
-  fetchTaskEmployeesMock.mockResolvedValue({ employees: [COLLECTOR_A, COLLECTOR_B] });
+  fetchParticipantsMock.mockReset();
+  fetchParticipantsMock.mockResolvedValue({
+    participants: [ADMIN_SELF, ADMIN_VIKI, asParticipant(COLLECTOR_A), asParticipant(COLLECTOR_B)],
+  });
   api.fetchChickenCoopSummary.mockImplementation(async (days: 7 | 30 | 90 | 365) =>
     makeSummary({ days }),
   );
@@ -113,7 +137,7 @@ describe('Gallinero — pantalla del prototipo', () => {
     expect(screen.queryByRole('button', { name: /eliminar recolección/i })).not.toBeInTheDocument();
     expect(within(form()).getByText(COLLECTOR_A.displayName)).toBeInTheDocument();
     expect(within(form()).queryByRole('combobox')).not.toBeInTheDocument();
-    expect(fetchTaskEmployeesMock).not.toHaveBeenCalled();
+    expect(fetchParticipantsMock).not.toHaveBeenCalled();
   });
 
   it('EMPLOYEE registra: sin persona en el body, fecha de negocio, Idempotency-Key e invalidación', async () => {
@@ -375,15 +399,78 @@ describe('Gallinero — ADMIN', () => {
     expect(screen.getByRole('button', { name: 'Dar de baja gallinas' })).toBeDisabled();
   });
 
-  it('"¿Quién juntó?": elige entre empleados activos y lo envía; el actor real lo pone el backend', async () => {
+  it('"¿Quién juntó?": arranca en el propio ADMIN y ofrece administradores y empleados una sola vez', async () => {
+    await renderScreen();
+    const select = await within(form()).findByRole('combobox', { name: '¿Quién juntó?' });
+    await waitFor(() => expect(select).toHaveValue('ADMIN:u-a'));
+    expect(
+      Array.from((select as HTMLSelectElement).options).map((option) => option.textContent),
+    ).toEqual([
+      '🔐 Benja sintético',
+      '🔐 Viki sintética',
+      COLLECTOR_A.displayName,
+      COLLECTOR_B.displayName,
+    ]);
+  });
+
+  it('Benja registra que Viki juntó: se envía Viki; el autor lo pone el backend', async () => {
+    const user = userEvent.setup();
+    api.createEggCollection.mockResolvedValue({
+      collection: makeCollection({
+        employee: null,
+        participantUser: { id: 'u-viki', displayName: 'Viki sintética' },
+        recordedBy: { displayName: 'Benja sintético' },
+      }),
+    });
+    await renderScreen();
+    const select = await within(form()).findByRole('combobox', { name: '¿Quién juntó?' });
+    await waitFor(() => expect(select).toHaveValue('ADMIN:u-a'));
+    await user.selectOptions(select, 'ADMIN:u-viki');
+    await user.type(within(form()).getByLabelText('Huevos buenos'), '6');
+    await user.click(within(form()).getByRole('button', { name: 'Registrar recolección' }));
+    await waitFor(() =>
+      expect(api.createEggCollection.mock.calls[0]?.[0]).toEqual({
+        goodEggsCount: 6,
+        brokenEggsCount: 0,
+        collectionDate: '2026-09-25',
+        participantUserId: 'u-viki',
+      }),
+    );
+    expect(await screen.findByText(/\(Viki sintética\)/)).toBeInTheDocument();
+  });
+
+  it('historial: quién juntó y, aparte, quién registró si fue otra persona', async () => {
+    api.fetchEggCollectionHistory.mockResolvedValue(
+      historyResponse([
+        makeDay({
+          collections: [
+            makeCollection({
+              id: 'c-viki',
+              employee: null,
+              participantUser: { id: 'u-viki', displayName: 'Viki sintética' },
+              recordedBy: { displayName: 'Benja sintético' },
+            }),
+            makeCollection({ id: 'c-own', employee: COLLECTOR_A, recordedBy: null }),
+          ],
+        }),
+      ]),
+    );
+    await renderScreen();
+    const viki = (await screen.findByText(/Viki sintética —/)).closest('li') as HTMLElement;
+    expect(viki).toHaveTextContent('Registró: Benja sintético');
+    const own = screen.getByText(new RegExp(`${COLLECTOR_A.displayName} —`)).closest('li')!;
+    expect(own).not.toHaveTextContent('Registró');
+  });
+
+  it('"¿Quién juntó?": elige un empleado y lo envía; el actor real lo pone el backend', async () => {
     const user = userEvent.setup();
     api.createEggCollection.mockResolvedValue({
       collection: makeCollection({ employee: COLLECTOR_B }),
     });
     await renderScreen();
     const select = await within(form()).findByRole('combobox', { name: '¿Quién juntó?' });
-    await waitFor(() => expect(select).toHaveValue(COLLECTOR_A.id));
-    await user.selectOptions(select, COLLECTOR_B.id);
+    await waitFor(() => expect(select).toHaveValue('ADMIN:u-a'));
+    await user.selectOptions(select, `EMPLOYEE:${COLLECTOR_B.id}`);
     await user.type(within(form()).getByLabelText('Huevos rotos'), '2');
     await user.click(within(form()).getByRole('button', { name: 'Registrar recolección' }));
     await waitFor(() =>
