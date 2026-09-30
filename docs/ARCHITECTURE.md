@@ -925,3 +925,14 @@ Faltan dos datos del despliegue para fijar el valor: (a) si el frontend llamará
 **Render y Netlify.** El health **no mantiene vivo** el servidor: solo se consulta mientras hay una falla real que resolver. No hay cron, ping periódico ni keep-alive, y no se intenta eludir los límites del plan gratuito. Netlify debe redirigir `/api/v1/health` al backend igual que el resto de `/api/*` (la regla `/api/*` ya lo cubre; ver `frontend/README.md`). No se documentan URLs productivas: siguen sin existir en el repo.
 
 **Rendimiento** (medido en `test/coldStart.test.tsx`, `httpClient.transport.test.ts`, `backendAvailability.test.ts`): arranque con backend disponible 3 → 4 requests (+1 health sin base), sin cartel ni retraso; backend simulado dormido (503 ×3 → 200): 4 health checks y recuperación a los ~14 s del reloj simulado; navegación posterior 0 health checks; StrictMode sin duplicados; revisita con caché 0 requests extra; pestaña oculta y offline 0 sondeo. El health no consulta PostgreSQL y ningún request suma consultas. Bundle JS +11,5 kB (+3,5 kB gzip), CSS +2,1 kB (+0,4 kB gzip) en el cierre inicial, y +2,2 kB (+0,8 kB gzip) por los tres riesgos. Sin dependencias nuevas (el spinner es el existente).
+
+## 33. Identificación de administradores en los registros
+
+Un `ADMIN` sin `Employee` es una identidad propia: cuando un registro no tiene persona asociada, se muestra el nombre visible de quien lo registró (Employee → `UserProfile` → «Administrador»; nunca `username`, id ni correo). La persona asociada, si existe, nunca se reemplaza. Resolución compartida en `backend/src/lib/userIdentity.ts` (`userIdentitySelect`/`toUserIdentity`, `findCreatorsFromAudit` y su equivalente SQL `auditCreatorJoinSql`); en el frontend, `utils/recordAttribution.ts`. El DTO agrega solo `recordedBy: { displayName } | null`, y únicamente en registros sin persona.
+
+- **Stock**: sin columna de autor; la evidencia es la auditoría `stock.movement.created`, escrita en la misma transacción que el movimiento con el usuario de la sesión. Solo cuenta la acción de alta y solo si hay exactamente una con actor; si no, no hay autor. Historial: una consulta agrupada por página, y solo cuando hay filas sin persona. Reportes y CSV: `LEFT JOIN LATERAL` en la misma sentencia (índice `audit_logs(entity_type, entity_id)`), así que la cantidad de sentencias no cambia.
+- **Mascotas**: `recordedByUserId` (el alta, nunca `voidedByUserId`) como relación del `select`.
+- **Jardín**: `publishedBy` usa el nombre visible (antes caía al `username`). Abrir el historial pasa de 5 a 6 consultas fijas (se suma `user_profiles`), sin N+1.
+- **Sin cambios** (se revisaron): Gallinero, Novedades y Tareas obligan a elegir un empleado, así que nunca les falta persona. Fotos muestra la persona etiquetada, que es opcional y no es el autor. Eventos no muestra autor.
+
+Sin migraciones ni backfill: los datos existentes alcanzan. Caché e invalidaciones: sin cambios.

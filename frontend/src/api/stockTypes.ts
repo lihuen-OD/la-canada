@@ -6,6 +6,8 @@
  * este archivo solo replica la forma de los mensajes, no sus reglas.
  */
 
+import type { RecordedBy } from './types';
+
 export type StockItemArea = 'HOUSE' | 'GARDEN';
 export type StockCategoryArea = 'HOUSE' | 'GARDEN' | 'BOTH';
 export type StockStatusFilter = 'active' | 'inactive' | 'all';
@@ -76,6 +78,8 @@ export interface StockMovement {
   effectiveDate: string;
   reason: string | null;
   employee: StockEmployeeSummary | null;
+  /** Quién lo registró, solo sin persona asociada (auditoría del alta). */
+  recordedBy?: RecordedBy | null;
   destination: { id: string; name: string; type: DestinationType } | null;
   createdAt: string;
 }
@@ -253,6 +257,8 @@ export interface StockReportSummary {
   }[];
   employees: {
     employee: StockEmployeeSummary | null;
+    /** Sin persona: un grupo por usuario que registró; ambos `null` = sin evidencia. */
+    recordedBy: RecordedBy | null;
     total: number;
     byType: Record<StockMovementType, number>;
   }[];
@@ -267,6 +273,7 @@ export interface StockReportMovement {
   createdAt: string;
   item: { id: string; name: string; area: StockItemArea; unit: string; active: boolean };
   employee: StockEmployeeSummary | null;
+  recordedBy: RecordedBy | null;
   destination: { id: string; name: string; type: DestinationType } | null;
 }
 

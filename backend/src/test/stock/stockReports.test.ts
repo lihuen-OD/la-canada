@@ -432,6 +432,7 @@ describe('listStockReportMovements — paginación en Postgres, sin N+1', () => 
         createdAt: '2026-09-24T13:00:00.000Z',
         item: { id: ITEM, name: 'Producto sintético A', area: 'HOUSE', unit: 'kg', active: true },
         employee: null,
+        recordedBy: null,
         destination: { id: DESTINATION, name: 'Destino sintético', type: 'SECTOR' },
       },
     ]);
@@ -446,6 +447,184 @@ describe('listStockReportMovements — paginación en Postgres, sin N+1', () => 
       ),
     ).rejects.toThrow('El período no puede empezar en el futuro.');
     expect(queries).toHaveLength(0);
+  });
+});
+
+describe('reportes — autor de los movimientos sin persona asociada', () => {
+  const ADMIN_A = 'aaaaaaaa-0000-4000-8000-00000000000a';
+  const ADMIN_B = 'bbbbbbbb-0000-4000-8000-00000000000b';
+
+  it('el autor sale de la auditoría de ALTA y solo para filas sin persona (parámetros, sin N+1)', async () => {
+    await listStockReportMovements(admin, { ...baseFilters, page: 1, pageSize: 20 }, NOW);
+    const page = queries.find((query) => kindOf(query.sql) === 'movementsPage')!;
+    expect(queries).toHaveLength(2);
+    expect(page.sql).toContain('LEFT JOIN LATERAL');
+    expect(page.sql).toContain('m."employee_id" IS NULL');
+    expect(page.sql).toContain('HAVING COUNT(*) = 1');
+    expect(page.values).toEqual(
+      expect.arrayContaining(['StockMovement', 'stock.movement.created', 'Administrador']),
+    );
+    // Nunca el username ni ninguna edición/anulación posterior.
+    expect(page.sql).not.toContain('username');
+  });
+
+  it('personas: un grupo por administrador que registró; las aperturas sin autor quedan aparte', async () => {
+    respond = (sql) =>
+      kindOf(sql) === 'employees'
+        ? [
+            {
+              id: null,
+              displayName: null,
+              colorHex: null,
+              creatorId: null,
+              creatorName: null,
+              type: 'OPENING_BALANCE',
+              count: 4,
+            },
+            {
+              id: null,
+              displayName: null,
+              colorHex: null,
+              creatorId: ADMIN_A,
+              creatorName: 'Admin sintética Uno',
+              type: 'INCOME',
+              count: 2,
+            },
+            {
+              id: null,
+              displayName: null,
+              colorHex: null,
+              creatorId: ADMIN_B,
+              creatorName: 'Admin sintético Dos',
+              type: 'CONSUMPTION',
+              count: 1,
+            },
+            {
+              id: null,
+              displayName: null,
+              colorHex: null,
+              creatorId: ADMIN_B,
+              creatorName: 'Admin sintético Dos',
+              type: 'INCOME',
+              count: 1,
+            },
+            {
+              id: 'e1',
+              displayName: 'Persona sintética',
+              colorHex: '#4a7c59',
+              creatorId: null,
+              creatorName: null,
+              type: 'CONSUMPTION',
+              count: 2,
+            },
+          ]
+        : [];
+    const summary = await getStockReportSummary(admin, baseFilters, NOW);
+    expect(summary.employees).toEqual([
+      {
+        employee: null,
+        recordedBy: null,
+        total: 4,
+        byType: expect.objectContaining({ OPENING_BALANCE: 4 }),
+      },
+      {
+        employee: null,
+        recordedBy: { displayName: 'Admin sintética Uno' },
+        total: 2,
+        byType: expect.objectContaining({ INCOME: 2 }),
+      },
+      {
+        employee: null,
+        recordedBy: { displayName: 'Admin sintético Dos' },
+        total: 2,
+        byType: expect.objectContaining({ INCOME: 1, CONSUMPTION: 1 }),
+      },
+      {
+        employee: { id: 'e1', displayName: 'Persona sintética', colorHex: '#4a7c59' },
+        recordedBy: null,
+        total: 2,
+        byType: expect.objectContaining({ CONSUMPTION: 2 }),
+      },
+    ]);
+    // Ningún dato de cuenta (id de usuario, username) sale en el DTO.
+    expect(JSON.stringify(summary.employees)).not.toContain(ADMIN_A);
+  });
+
+  it('listado: la persona asociada se conserva; sin ella, el autor; sin evidencia, null', async () => {
+    const base = {
+      type: 'INCOME',
+      quantity: '1.00',
+      effectiveDate: new Date('2026-09-24T00:00:00.000Z'),
+      reason: null,
+      createdAt: new Date('2026-09-24T13:00:00.000Z'),
+      itemId: ITEM,
+      itemName: 'Producto sintético A',
+      itemArea: 'GARDEN',
+      itemUnit: 'kg',
+      itemActive: true,
+      employeeId: null,
+      employeeName: null,
+      employeeColor: null,
+      creatorName: null,
+      destinationId: null,
+      destinationName: null,
+      destinationType: null,
+    };
+    respond = (sql) =>
+      kindOf(sql) === 'movementsPage'
+        ? [
+            { ...base, id: 'm1', creatorName: 'Admin sintética Uno' },
+            { ...base, id: 'm2', creatorName: 'Admin sintético Dos' },
+            { ...base, id: 'm3', employeeId: 'e1', employeeName: 'Persona sintética' },
+            { ...base, id: 'm4', type: 'OPENING_BALANCE' },
+          ]
+        : [{ total: 4 }];
+    const { movements } = await listStockReportMovements(
+      admin,
+      { ...baseFilters, page: 1, pageSize: 20 },
+      NOW,
+    );
+    expect(movements.map((row) => [row.employee?.displayName ?? null, row.recordedBy])).toEqual([
+      [null, { displayName: 'Admin sintética Uno' }],
+      [null, { displayName: 'Admin sintético Dos' }],
+      ['Persona sintética', null],
+      [null, null],
+    ]);
+  });
+
+  it('CSV: «Persona» es la persona asociada o, sin ella, quien registró; las aperturas quedan vacías', async () => {
+    const row = (overrides: Record<string, unknown>) => ({
+      type: 'INCOME',
+      quantity: '3.00',
+      effectiveDate: new Date('2026-09-20T00:00:00.000Z'),
+      reason: null,
+      itemName: 'Producto sintético',
+      itemUnit: 'kg',
+      employeeId: null,
+      employeeName: null,
+      creatorName: null,
+      destinationName: null,
+      ...overrides,
+    });
+    respond = () => [
+      row({ creatorName: 'Admin sintética Uno' }),
+      row({ creatorName: 'Admin sintético Dos' }),
+      row({ employeeId: 'e1', employeeName: 'Persona sintética' }),
+      row({ type: 'OPENING_BALANCE' }),
+    ];
+    const { content } = await exportStockReportCsv(admin, baseFilters, NOW);
+    const persons = content
+      .slice(1)
+      .split('\n')
+      .slice(1)
+      .map((line) => line.split(',')[4]);
+    expect(persons).toEqual([
+      '"Admin sintética Uno"',
+      '"Admin sintético Dos"',
+      '"Persona sintética"',
+      '""',
+    ]);
+    expect(queries[0]!.sql).toContain('LEFT JOIN LATERAL');
   });
 });
 

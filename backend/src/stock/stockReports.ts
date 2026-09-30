@@ -9,9 +9,10 @@ import {
   type LocalDate,
 } from '../lib/businessTime';
 import { prisma } from '../lib/prisma';
+import { auditCreatorJoinSql } from '../lib/userIdentity';
 import { STOCK_LEVEL_CASE_SQL, type StockLevel } from './stockLevel';
 import { STOCK_REPORT_MAX_DAYS } from './stockSchemas';
-import type { StockActor } from './stockService';
+import { MOVEMENT_AUDIT_ENTITY, MOVEMENT_CREATED_ACTION, type StockActor } from './stockService';
 
 /**
  * Reportes de Stock (Etapa 5C.2) — agregaciones SIEMPRE en PostgreSQL, nunca
@@ -175,6 +176,8 @@ interface EmployeeRow {
   id: string | null;
   displayName: string | null;
   colorHex: string | null;
+  creatorId: string | null;
+  creatorName: string | null;
   type: MovementTypeName;
   count: number;
 }
@@ -194,6 +197,7 @@ interface MovementRow {
   employeeId: string | null;
   employeeName: string | null;
   employeeColor: string | null;
+  creatorName: string | null;
   destinationId: string | null;
   destinationName: string | null;
   destinationType: 'VEHICLE' | 'SECTOR' | null;
@@ -201,6 +205,19 @@ interface MovementRow {
 
 const FROM_MOVEMENTS = Prisma.sql`FROM "stock_movements" m
   JOIN "stock_items" i ON i."id" = m."stock_item_id"`;
+
+/**
+ * Autor (`creator."userId"`/`creator."displayName"`) de los movimientos SIN
+ * persona asociada, según su auditoría de alta — mismo criterio que el
+ * historial del producto (`findCreatorsFromAudit`). Con persona no se busca;
+ * las aperturas del seed no tienen auditoría y quedan sin autor.
+ */
+const MOVEMENT_CREATOR_JOIN = auditCreatorJoinSql({
+  entityType: MOVEMENT_AUDIT_ENTITY,
+  action: MOVEMENT_CREATED_ACTION,
+  entityIdSql: Prisma.sql`m."id"::text`,
+  condition: Prisma.sql`m."employee_id" IS NULL`,
+});
 
 type QuantityByUnit = { unit: string; quantity: string };
 
@@ -294,11 +311,14 @@ export async function getStockReportSummary(
       LIMIT ${DESTINATION_ROWS_LIMIT}`),
     prisma.$queryRaw<EmployeeRow[]>(Prisma.sql`
       SELECT e."id", e."display_name" AS "displayName", e."color_hex" AS "colorHex",
+        creator."userId"::text AS "creatorId", creator."displayName" AS "creatorName",
         m."type"::text AS "type", COUNT(*)::int AS "count"
       ${FROM_MOVEMENTS}
       LEFT JOIN "employees" e ON e."id" = m."employee_id"
+      ${MOVEMENT_CREATOR_JOIN}
       WHERE ${where}
-      GROUP BY e."id", e."display_name", e."color_hex", m."type"`),
+      GROUP BY e."id", e."display_name", e."color_hex", creator."userId", creator."displayName",
+        m."type"`),
   ]);
 
   // Totales: conteos globales por tipo; cantidades solo agrupadas por unidad.
@@ -366,23 +386,27 @@ export async function getStockReportSummary(
       (a.destination?.name ?? '').localeCompare(b.destination?.name ?? '', 'es'),
   );
 
-  // Personas: conteos por tipo; `null` = sin persona asociada (apertura del
-  // seed o movimiento registrado por un ADMIN sin empleado vinculado).
+  // Personas: conteos por tipo. Sin persona asociada, un grupo por cada
+  // usuario que registró (un ADMIN sin empleado vinculado, con su nombre), y
+  // `employee` y `recordedBy` en `null` solo para lo que no tiene autor
+  // identificable (aperturas del seed).
   const people = new Map<
     string,
     {
       employee: { id: string; displayName: string; colorHex: string } | null;
+      recordedBy: { displayName: string } | null;
       total: number;
       byType: Record<MovementTypeName, number>;
     }
   >();
   for (const row of employeeRows) {
-    const key = row.id ?? 'none';
+    const key = row.id ?? (row.creatorId ? `recorded:${row.creatorId}` : 'none');
     const entry = people.get(key) ?? {
       employee:
         row.id && row.displayName
           ? { id: row.id, displayName: row.displayName, colorHex: row.colorHex ?? '' }
           : null,
+      recordedBy: !row.id && row.creatorName ? { displayName: row.creatorName } : null,
       total: 0,
       byType: emptyByType(),
     };
@@ -390,11 +414,15 @@ export async function getStockReportSummary(
     entry.total += row.count;
     people.set(key, entry);
   }
+  const personName = (entry: {
+    employee: { displayName: string } | null;
+    recordedBy: { displayName: string } | null;
+  }) => entry.employee?.displayName ?? entry.recordedBy?.displayName ?? null;
   const employees = [...people.values()].sort(
     (a, b) =>
       b.total - a.total ||
-      Number(a.employee === null) - Number(b.employee === null) ||
-      (a.employee?.displayName ?? '').localeCompare(b.employee?.displayName ?? '', 'es'),
+      Number(personName(a) === null) - Number(personName(b) === null) ||
+      (personName(a) ?? '').localeCompare(personName(b) ?? '', 'es'),
   );
 
   return {
@@ -449,9 +477,11 @@ export async function listStockReportMovements(
         i."id" AS "itemId", i."name" AS "itemName", i."area"::text AS "itemArea",
         i."unit" AS "itemUnit", i."active" AS "itemActive",
         e."id" AS "employeeId", e."display_name" AS "employeeName", e."color_hex" AS "employeeColor",
+        creator."displayName" AS "creatorName",
         d."id" AS "destinationId", d."name" AS "destinationName", d."type"::text AS "destinationType"
       ${FROM_MOVEMENTS}
       LEFT JOIN "employees" e ON e."id" = m."employee_id"
+      ${MOVEMENT_CREATOR_JOIN}
       LEFT JOIN "consumption_destinations" d ON d."id" = m."destination_id"
       WHERE ${where}
       ORDER BY m."effective_date" DESC, m."created_at" DESC, m."id" DESC
@@ -484,6 +514,7 @@ export async function listStockReportMovements(
         row.employeeId && row.employeeName
           ? { id: row.employeeId, displayName: row.employeeName, colorHex: row.employeeColor ?? '' }
           : null,
+      recordedBy: row.creatorName ? { displayName: row.creatorName } : null,
       destination:
         row.destinationId && row.destinationName && row.destinationType
           ? { id: row.destinationId, name: row.destinationName, type: row.destinationType }
@@ -520,6 +551,7 @@ interface CsvRow {
   itemUnit: string;
   employeeId: string | null;
   employeeName: string | null;
+  creatorName: string | null;
   destinationName: string | null;
 }
 
@@ -581,9 +613,11 @@ export async function exportStockReportCsv(
       m."effective_date" AS "effectiveDate", m."reason",
       i."name" AS "itemName", i."unit" AS "itemUnit",
       m."employee_id" AS "employeeId", e."display_name" AS "employeeName",
+      creator."displayName" AS "creatorName",
       d."name" AS "destinationName"
     ${FROM_MOVEMENTS}
     LEFT JOIN "employees" e ON e."id" = m."employee_id"
+    ${MOVEMENT_CREATOR_JOIN}
     LEFT JOIN "consumption_destinations" d ON d."id" = m."destination_id"
     WHERE ${where}
     ORDER BY m."effective_date" ASC, m."created_at" ASC, m."id" ASC
@@ -601,7 +635,8 @@ export async function exportStockReportCsv(
         row.itemName,
         decimalText(row.quantity),
         row.itemUnit,
-        row.employeeName ?? '',
+        // Persona asociada; sin ella, quien lo registró (mismo criterio que la pantalla).
+        row.employeeName ?? row.creatorName ?? '',
         row.destinationName ?? '',
         csvMotivo(row),
       ]

@@ -49,6 +49,7 @@ import {
   petSummary,
 } from './petLabels';
 import { usePetsCache } from './usePetsCache';
+import { attributedName } from '../../utils/recordAttribution';
 
 const RECORDS_PAGE_SIZE = 20;
 
@@ -551,34 +552,35 @@ function RecordHistory({
         ) : (
           <div className={query.isPlaceholderData ? 'is-stale' : undefined}>
             <ul className="pet-history__list" aria-label="Registros clínicos">
-              {records.map((record) => (
-                <li key={record.id} className="pet-history__item">
-                  <div className="pet-history__head">
-                    <span className="pet-history__tag">{RECORD_TAG_LABEL[record.type]}</span>
-                    <span className="pet-history__date">{formatDate(record.recordDate)}</span>
-                    {record.employee ? (
-                      <span className="pet-history__person">{record.employee.displayName}</span>
+              {records.map((record) => {
+                const person = attributedName(record);
+                return (
+                  <li key={record.id} className="pet-history__item">
+                    <div className="pet-history__head">
+                      <span className="pet-history__tag">{RECORD_TAG_LABEL[record.type]}</span>
+                      <span className="pet-history__date">{formatDate(record.recordDate)}</span>
+                      {person ? <span className="pet-history__person">{person}</span> : null}
+                      {isAdmin ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="pet-history__void"
+                          aria-label={`Eliminar registro ${RECORD_TAG_LABEL[record.type]} del ${formatDate(record.recordDate)}`}
+                          onClick={() => setToVoid(record)}
+                        >
+                          <span aria-hidden="true">✕</span>
+                        </Button>
+                      ) : null}
+                    </div>
+                    {record.weightKg || record.description ? (
+                      <p className="pet-history__text">
+                        {record.weightKg ? <strong>{formatKg(record.weightKg)} kg </strong> : null}
+                        {record.description}
+                      </p>
                     ) : null}
-                    {isAdmin ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="pet-history__void"
-                        aria-label={`Eliminar registro ${RECORD_TAG_LABEL[record.type]} del ${formatDate(record.recordDate)}`}
-                        onClick={() => setToVoid(record)}
-                      >
-                        <span aria-hidden="true">✕</span>
-                      </Button>
-                    ) : null}
-                  </div>
-                  {record.weightKg || record.description ? (
-                    <p className="pet-history__text">
-                      {record.weightKg ? <strong>{formatKg(record.weightKg)} kg </strong> : null}
-                      {record.description}
-                    </p>
-                  ) : null}
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
             {query.hasNextPage ? (
               <Button

@@ -47,6 +47,7 @@ import {
   createPet,
   createPetRecord,
   createPetType,
+  listPetRecords,
   listPets,
   setPetActive,
   setPetTypeActive,
@@ -221,6 +222,45 @@ describe('registros clínicos', () => {
     expect(data.employeeId).toBeNull();
     expect(data.recordedByUserId).toBe('user-a');
     expect(data.value.toString()).toBe('12.5');
+  });
+
+  it('historial: sin persona, quien lo registró (cada ADMIN el suyo); con persona, la persona', async () => {
+    const row = (id: string, employee: unknown, recordedBy: unknown) => ({
+      id,
+      type: 'VACCINE',
+      recordDate: new Date('2026-09-20T00:00:00.000Z'),
+      description: null,
+      value: null,
+      createdAt: NOW,
+      employee,
+      recordedBy,
+    });
+    db.animal.findUnique.mockResolvedValue({ id: PET_ID });
+    db.animalMedicalRecord.count.mockResolvedValue(4);
+    db.animalMedicalRecord.findMany.mockResolvedValue([
+      row('r1', null, { employee: null, personalProfile: { displayName: 'Admin sintética Uno' } }),
+      row('r2', null, { employee: null, personalProfile: { displayName: 'Admin sintético Dos' } }),
+      row(
+        'r3',
+        { id: 'emp-1', displayName: 'Persona sintética', colorHex: '#4a7c59' },
+        { employee: null, personalProfile: { displayName: 'Admin sintética Uno' } },
+      ),
+      row('r4', null, null),
+    ]);
+    const { records } = await listPetRecords(ADMIN, PET_ID, { page: 1, pageSize: 20 });
+    expect(
+      records.map((record) => [record.employee?.displayName ?? null, record.recordedBy]),
+    ).toEqual([
+      [null, { displayName: 'Admin sintética Uno' }],
+      [null, { displayName: 'Admin sintético Dos' }],
+      ['Persona sintética', null],
+      [null, null],
+    ]);
+    // El autor sale de `recordedByUserId` (el alta), nunca de `voidedBy` ni del username.
+    const select = db.animalMedicalRecord.findMany.mock.calls[0]?.[0].select;
+    expect(select).toHaveProperty('recordedBy');
+    expect(select).not.toHaveProperty('voidedBy');
+    expect(JSON.stringify(select)).not.toContain('username');
   });
 
   it('EMPLOYEE sin empleado vinculado → 409; mascota inexistente → 404', async () => {

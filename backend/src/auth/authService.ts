@@ -58,7 +58,7 @@ export interface LoginResult {
  * disponible, porque es un identificador técnico interno, no un nombre
  * pensado para mostrarse.
  */
-const ADMIN_FALLBACK_DISPLAY_NAME = 'Administrador';
+export const ADMIN_FALLBACK_DISPLAY_NAME = 'Administrador';
 
 type NamedUser = {
   employee?: { displayName: string } | null;

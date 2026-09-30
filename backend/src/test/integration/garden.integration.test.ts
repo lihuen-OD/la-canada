@@ -375,8 +375,10 @@ describe('🌳 Jardín — publicación e historial', () => {
     expect([first.status, second.status]).toEqual([201, 201]);
     expect(first.body.version.versionNumber).toBe(baseline.maxVersion + 1);
     expect(second.body.version.versionNumber).toBe(baseline.maxVersion + 2);
-    // El ADMIN de este test no tiene empleado: se muestra su username, nunca su id.
-    expect(first.body.version.publishedBy).toBe(`${RUN}-admin`);
+    // El ADMIN de este test no tiene empleado ni nombre en Mi perfil: se ve
+    // «Administrador» — nunca su username técnico ni su id.
+    expect(first.body.version.publishedBy).toBe('Administrador');
+    expect(JSON.stringify(first.body)).not.toContain(`${RUN}-admin`);
     expect(first.body.version).not.toHaveProperty('fileAssetId');
     expect(first.body.version).not.toHaveProperty('objectKey');
     expect(first.body.version).not.toHaveProperty('publishedByUserId');
@@ -496,7 +498,7 @@ describe('🌳 Jardín — publicación e historial', () => {
   });
 
   it('abrir Jardín cuesta un número FIJO de consultas: sin N+1 ni lectura del plano', async () => {
-    // 2 del login (autenticación) + 5 del módulo, que no crecen con la cantidad
+    // 2 del login (autenticación) + 6 del módulo, que no crecen con la cantidad
     // de versiones: se mide con una página de 1 y con una de 20.
     const moduleQueries = (list: string[]) =>
       list.filter((sql) => !sql.startsWith('SELECT s."id"'));
@@ -511,9 +513,10 @@ describe('🌳 Jardín — publicación e historial', () => {
     expect(one.result.body.versions).toHaveLength(1);
     // Con pageSize 20 entra todo el historial de este RUN en una sola página.
     expect(many.result.body.versions).toHaveLength(many.result.body.total);
-    expect(moduleQueries(one.sql).length).toBe(5);
+    expect(moduleQueries(one.sql).length).toBe(6);
     expect(moduleQueries(many.sql)).toEqual(moduleQueries(one.sql));
-    // El conteo, la página y sus tres relaciones (archivo, autor, empleado):
+    // El conteo, la página y sus cuatro relaciones (archivo, autor, y el
+    // empleado o el perfil personal del autor para su nombre visible):
     // ninguna consulta por versión.
     expect(moduleQueries(many.sql)).toEqual(
       expect.arrayContaining([
@@ -522,6 +525,7 @@ describe('🌳 Jardín — publicación e historial', () => {
         expect.stringContaining('file_assets'),
         expect.stringContaining('users'),
         expect.stringContaining('employees'),
+        expect.stringContaining('user_profiles'),
       ]),
     );
   });

@@ -64,3 +64,12 @@ export interface ApiErrorBody {
     stack?: string;
   };
 }
+
+/**
+ * Autor de un registro (`recordedBy` en Stock y Mascotas): el nombre visible
+ * del usuario que lo registró, resuelto por el backend con la sesión del alta.
+ * Solo viene cuando el registro no tiene persona asociada. Nunca `username`.
+ */
+export interface RecordedBy {
+  displayName: string;
+}

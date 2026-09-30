@@ -310,6 +310,34 @@ describe('🐾 Mascotas — ficha', () => {
     expect(screen.queryByRole('button', { name: /Eliminar registro/ })).not.toBeInTheDocument();
   });
 
+  it('historial: sin persona, cada registro muestra al administrador que lo cargó', async () => {
+    api.fetchPetRecords.mockResolvedValue(
+      recordsResponse([
+        makeRecord({
+          id: 'r-a',
+          description: 'Cargado por A',
+          employee: null,
+          recordedBy: { displayName: 'Admin sintética Uno' },
+        }),
+        makeRecord({
+          id: 'r-b',
+          description: 'Cargado por B',
+          employee: null,
+          recordedBy: { displayName: 'Admin sintético Dos' },
+        }),
+        makeRecord({ id: 'r-e', description: 'Cargado por la persona' }),
+        makeRecord({ id: 'r-n', description: 'Sin evidencia', employee: null, recordedBy: null }),
+      ]),
+    );
+    renderPets(`/pets/${PET.id}`);
+    const history = await screen.findByRole('list', { name: 'Registros clínicos' });
+    const itemOf = (text: string) => within(history).getByText(text).closest('li') as HTMLElement;
+    expect(itemOf('Cargado por A')).toHaveTextContent('Admin sintética Uno');
+    expect(itemOf('Cargado por B')).toHaveTextContent('Admin sintético Dos');
+    expect(itemOf('Cargado por la persona')).toHaveTextContent('Persona sintética');
+    expect(itemOf('Sin evidencia').querySelector('.pet-history__person')).toBeNull();
+  });
+
   it('"Guardar registro": ⚖️ Peso exige kg (acepta coma), fecha de negocio, Idempotency-Key e invalidación', async () => {
     const user = userEvent.setup();
     api.createPetRecord.mockResolvedValue({

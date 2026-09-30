@@ -28,6 +28,7 @@ import { canonicalRequestHash, executeIdempotent } from '../lib/idempotency';
 import { getObjectStorage } from '../lib/objectStorage';
 import { runEntityDeletion } from '../lib/deletion';
 import { prisma } from '../lib/prisma';
+import { toUserIdentity, userIdentitySelect } from '../lib/userIdentity';
 import { resolveActor, type RequestMeta, type TaskActor } from '../tasks/tasksService';
 import {
   BUILTIN_PET_TYPE_NAMES,
@@ -166,6 +167,7 @@ const recordSelect = {
   value: true,
   createdAt: true,
   employee: { select: { id: true, displayName: true, colorHex: true } },
+  recordedBy: { select: userIdentitySelect },
 } as const;
 type RecordRow = Prisma.AnimalMedicalRecordGetPayload<{ select: typeof recordSelect }>;
 
@@ -177,6 +179,9 @@ function serializeRecord(row: RecordRow) {
     description: row.description,
     weightKg: row.value?.toString() ?? null,
     employee: row.employee,
+    // Sin persona (un ADMIN sin empleado), quien lo registró: `recordedByUserId`
+    // es la sesión del alta (nunca quien lo anuló, que va en `voidedByUserId`).
+    recordedBy: row.employee ? null : toUserIdentity(row.recordedBy),
     createdAt: row.createdAt.toISOString(),
   };
 }

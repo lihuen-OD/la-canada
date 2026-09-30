@@ -196,7 +196,14 @@ export interface FakeStockPrisma {
   movements: FakeMovement[];
   auditLogs: FakeAuditRecord[];
   idempotencyRecords: FakeIdempotencyRecord[];
+  /** Nombre visible por usuario (autor de la auditoría), como `userIdentitySelect`. */
+  users: Map<string, FakeUserIdentity>;
   reset(seed?: FakeStockSeed): void;
+}
+
+export interface FakeUserIdentity {
+  employee: { displayName: string } | null;
+  personalProfile: { displayName: string | null } | null;
 }
 
 export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma {
@@ -207,6 +214,7 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
   const movements: FakeMovement[] = [];
   const auditLogs: FakeAuditRecord[] = [];
   const idempotencyRecords: FakeIdempotencyRecord[] = [];
+  const users = new Map<string, FakeUserIdentity>();
   const calls: FakeStockCalls = { stockItemUpdateMany: [] };
   const hooks: FakeStockHooks = {};
   let transactionTail: Promise<void> = Promise.resolve();
@@ -220,6 +228,7 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
     movements.length = 0;
     auditLogs.length = 0;
     idempotencyRecords.length = 0;
+    users.clear();
     calls.stockItemUpdateMany.length = 0;
     hooks.beforeStockItemUpdateMany = undefined;
     hooks.beforeIdempotencyRecordCreate = undefined;
@@ -634,6 +643,18 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
         auditLogs.push(record);
         return record;
       },
+      findMany: async ({ where }: any) =>
+        auditLogs
+          .filter(
+            (row) =>
+              row.entityType === where.entityType &&
+              row.action === where.action &&
+              (where.entityId.in as string[]).includes(row.entityId),
+          )
+          .map((row) => ({
+            entityId: row.entityId,
+            actor: row.actorUserId ? (users.get(row.actorUserId) ?? null) : null,
+          })),
     },
     $transaction: async (fn: (tx: any) => Promise<any>) => {
       const previous = transactionTail;
@@ -683,6 +704,7 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
     movements,
     auditLogs,
     idempotencyRecords,
+    users,
     reset,
   };
 }

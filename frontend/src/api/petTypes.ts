@@ -1,5 +1,7 @@
 /** Contrato de `/api/v1/pets` (Etapa 5M) — ver backend/src/pets. */
 
+import type { RecordedBy } from './types';
+
 export type MedicalRecordType = 'VACCINE' | 'WEIGHT' | 'DEWORMING' | 'CHECKUP' | 'CLINICAL_EVENT';
 export type PhotoStorageStatus = 'configured' | 'unconfigured';
 
@@ -61,6 +63,8 @@ export interface PetRecord {
   description: string | null;
   weightKg: string | null;
   employee: { id: string; displayName: string; colorHex: string | null } | null;
+  /** Sin persona (un ADMIN sin empleado): quien cargó el registro. */
+  recordedBy?: RecordedBy | null;
   createdAt: string;
 }
 

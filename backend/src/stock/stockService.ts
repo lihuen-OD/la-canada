@@ -33,6 +33,7 @@ import {
 } from '../lib/businessTime';
 import { runEntityDeletion } from '../lib/deletion';
 import { prisma } from '../lib/prisma';
+import { findCreatorsFromAudit, type UserIdentity } from '../lib/userIdentity';
 import { resolveActor, type RequestMeta, type TaskActor } from '../tasks/tasksService';
 import { buildStockLevelIdsSql, computeStockLevel, type StockLevel } from './stockLevel';
 import {
@@ -150,6 +151,31 @@ const movementSelect = {
 
 type MovementRow = Prisma.StockMovementGetPayload<{ select: typeof movementSelect }>;
 
+/**
+ * `StockMovement` no guarda su autor en una columna: la evidencia es la
+ * auditoría `stock.movement.created`, escrita en la MISMA transacción que el
+ * movimiento con el usuario de la sesión. Exportadas para los reportes.
+ */
+export const MOVEMENT_AUDIT_ENTITY = 'StockMovement';
+export const MOVEMENT_CREATED_ACTION = 'stock.movement.created';
+
+/**
+ * Autor de los movimientos SIN persona asociada (un ADMIN sin empleado que
+ * eligió «Administrador»): lo único que la pantalla muestra en su lugar. Con
+ * persona no hace falta (la persona se conserva tal cual), y las aperturas
+ * del seed no tienen auditoría: quedan sin autor. Una sentencia por lote.
+ */
+function findMovementCreators(
+  client: Pick<Prisma.TransactionClient, 'auditLog'>,
+  rows: readonly MovementRow[],
+): Promise<Map<string, UserIdentity>> {
+  return findCreatorsFromAudit(client, {
+    entityType: MOVEMENT_AUDIT_ENTITY,
+    action: MOVEMENT_CREATED_ACTION,
+    entityIds: rows.filter((row) => row.employee === null).map((row) => row.id),
+  });
+}
+
 // ── Serialización ─────────────────────────────────────────────────────────
 
 function serializeItem(row: ItemRow) {
@@ -170,7 +196,7 @@ function serializeItem(row: ItemRow) {
 
 export type SerializedStockItem = ReturnType<typeof serializeItem>;
 
-function serializeMovement(row: MovementRow) {
+function serializeMovement(row: MovementRow, creators: ReadonlyMap<string, UserIdentity>) {
   return {
     id: row.id,
     type: row.type,
@@ -179,6 +205,8 @@ function serializeMovement(row: MovementRow) {
     effectiveDate: row.effectiveDate.toISOString().slice(0, 10),
     reason: row.reason,
     employee: row.employee,
+    /** Quién lo registró — solo se resuelve cuando no hay persona asociada. */
+    recordedBy: row.employee ? null : (creators.get(row.id) ?? null),
     destination: row.destination,
     createdAt: row.createdAt.toISOString(),
   };
@@ -312,8 +340,9 @@ export async function listStockMovements(itemId: string, filters: ListMovementsF
       take: filters.pageSize,
     }),
   ]);
+  const creators = await findMovementCreators(prisma, rows);
   return {
-    movements: rows.map(serializeMovement),
+    movements: rows.map((row) => serializeMovement(row, creators)),
     page: filters.page,
     pageSize: filters.pageSize,
     total,
@@ -1004,9 +1033,10 @@ export async function createStockMovement(
       prisma.stockItem.findUnique({ where: { id: itemId }, select: itemSelect }),
     ]);
     if (!movementRow || !itemRow) throw new StockItemNotFoundError();
+    const creators = await findMovementCreators(prisma, [movementRow]);
     return {
       kind: 'created',
-      movement: serializeMovement(movementRow),
+      movement: serializeMovement(movementRow, creators),
       item: serializeItem(itemRow),
     };
   }
@@ -1046,7 +1076,11 @@ export async function createStockMovement(
           select: itemSelect,
         });
         if (!movementRow || !itemRow) throw new StockItemNotFoundError();
-        const body = { movement: serializeMovement(movementRow), item: serializeItem(itemRow) };
+        const creators = await findMovementCreators(tx, [movementRow]);
+        const body = {
+          movement: serializeMovement(movementRow, creators),
+          item: serializeItem(itemRow),
+        };
         // 6) completa el registro en la MISMA transacción: al confirmar, la
         // respuesta ya está disponible para futuros replays.
         await tx.idempotencyRecord.update({

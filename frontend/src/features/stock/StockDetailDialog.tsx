@@ -23,6 +23,7 @@ import {
   formatStockDay,
 } from './stockLabels';
 import { movementSignedPrefix } from './stockStatus';
+import { attributedName } from '../../utils/recordAttribution';
 
 interface StockDetailDialogProps {
   /** Producto con el que se abrió el diálogo (snapshot del listado, recién cargado). */
@@ -227,7 +228,7 @@ function MovementRow({ movement, unit }: { movement: StockMovement; unit: string
         </span>
       </div>
       <p className="stock-move__meta">
-        {movement.employee ? movement.employee.displayName : 'Sin persona registrada'}
+        {attributedName(movement) ?? 'Sin persona registrada'}
         {movement.destination ? ` · Destino: ${movement.destination.name}` : ''}
         {movement.reason ? ` · ${movement.reason}` : ''}
       </p>

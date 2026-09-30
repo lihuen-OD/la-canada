@@ -48,6 +48,7 @@ import {
   type ReportFilterState,
   type ReportPeriod,
 } from './stockViewState';
+import { attributedName } from '../../utils/recordAttribution';
 
 const PERIODS: readonly { value: ReportPeriod; label: string }[] = [
   { value: '7', label: '7 días' },
@@ -726,37 +727,38 @@ function EmployeesCard({ summary }: { summary: StockReportSummary }) {
         <EmptyState title="No hubo movimientos en el período." titleAs="p" />
       ) : (
         <ul className="stock-reports__rows" role="list">
-          {summary.employees.map((row) => (
-            <li key={row.employee?.id ?? 'none'} className="stock-reports__person">
-              <Avatar
-                name={row.employee?.displayName ?? 'Sin persona'}
-                colorHex={row.employee?.colorHex}
-                variant={row.employee ? 'person' : 'admin'}
-                size="sm"
-              />
-              <div>
-                <span className="stock-reports__name">
-                  {row.employee ? row.employee.displayName : 'Sin persona asociada'}
-                </span>
-                <span className="stock-reports__muted">
-                  {' '}
-                  · {row.total} {row.total === 1 ? 'movimiento' : 'movimientos'}
-                </span>
-                <p className="stock-reports__muted">
-                  {types
-                    .filter((type) => row.byType[type] > 0)
-                    .map((type) => `${MOVEMENT_PLURAL[type]}: ${row.byType[type]}`)
-                    .join(' · ')}
-                </p>
-                {!row.employee ? (
-                  <p className="stock-reports__note">
-                    Saldos iniciales del inventario o movimientos de un administrador sin persona
-                    vinculada.
+          {summary.employees.map((row, index) => {
+            const name = attributedName(row);
+            return (
+              <li key={row.employee?.id ?? `recorded-${index}`} className="stock-reports__person">
+                <Avatar
+                  name={name ?? 'Sin persona'}
+                  colorHex={row.employee?.colorHex}
+                  variant={row.employee ? 'person' : 'admin'}
+                  size="sm"
+                />
+                <div>
+                  <span className="stock-reports__name">{name ?? 'Sin persona asociada'}</span>
+                  <span className="stock-reports__muted">
+                    {' '}
+                    · {row.total} {row.total === 1 ? 'movimiento' : 'movimientos'}
+                  </span>
+                  <p className="stock-reports__muted">
+                    {types
+                      .filter((type) => row.byType[type] > 0)
+                      .map((type) => `${MOVEMENT_PLURAL[type]}: ${row.byType[type]}`)
+                      .join(' · ')}
                   </p>
-                ) : null}
-              </div>
-            </li>
-          ))}
+                  {name === null ? (
+                    <p className="stock-reports__note">
+                      Saldos iniciales del inventario u otros movimientos sin información de quién
+                      los registró.
+                    </p>
+                  ) : null}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </Card>
@@ -845,8 +847,7 @@ function ReportMovementRow({ movement }: { movement: StockReportMovement }) {
       </div>
       <p className="stock-move__meta">
         <span aria-hidden="true">{AREA_EMOJI[movement.item.area]} </span>
-        {AREA_LABEL[movement.item.area]} ·{' '}
-        {movement.employee ? movement.employee.displayName : 'Sin persona registrada'}
+        {AREA_LABEL[movement.item.area]} · {attributedName(movement) ?? 'Sin persona registrada'}
         {movement.destination ? ` · Destino: ${movement.destination.name}` : ''}
         {movement.reason ? ` · ${movement.reason}` : ''}
       </p>

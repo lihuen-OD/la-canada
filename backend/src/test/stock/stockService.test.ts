@@ -573,6 +573,121 @@ describe('listStockMovements (histórico)', () => {
   });
 });
 
+describe('listStockMovements — autor de los movimientos sin persona asociada', () => {
+  const USER_ADMIN_A = 'a1a1a1a1-0000-4000-8000-00000000000a';
+  const USER_ADMIN_B = 'b2b2b2b2-0000-4000-8000-00000000000b';
+  const USER_ADMIN_NO_NAME = 'c3c3c3c3-0000-4000-8000-00000000000c';
+  const adminA: StockActor = { userId: USER_ADMIN_A, role: 'ADMIN', employeeId: null };
+  const adminB: StockActor = { userId: USER_ADMIN_B, role: 'ADMIN', employeeId: null };
+  const adminNoName: StockActor = { userId: USER_ADMIN_NO_NAME, role: 'ADMIN', employeeId: null };
+  const NOW = new Date('2026-09-30T15:00:00.000Z');
+
+  beforeEach(() => {
+    const { users } = getFakeStockPrisma();
+    users.set(USER_ADMIN_A, {
+      employee: null,
+      personalProfile: { displayName: 'Admin sintética Uno' },
+    });
+    users.set(USER_ADMIN_B, {
+      employee: null,
+      personalProfile: { displayName: 'Admin sintético Dos' },
+    });
+    users.set(USER_ADMIN_NO_NAME, { employee: null, personalProfile: null });
+    users.set(USER_EMPLOYEE, { employee: { displayName: 'Juan Pérez' }, personalProfile: null });
+  });
+
+  const income = (actor: StockActor, extra: Record<string, unknown> = {}) =>
+    createStockMovement(
+      actor,
+      ITEM_FERTILIZANTE,
+      { type: 'INCOME', quantity: '3', ...extra } as never,
+      meta,
+      NOW,
+    );
+
+  it('cada movimiento muestra al administrador que lo registró, sin importar quién consulta', async () => {
+    const byA = await income(adminA);
+    const byB = await income(adminB);
+    expect(byA.movement.recordedBy).toEqual({ displayName: 'Admin sintética Uno' });
+    expect(byB.movement.recordedBy).toEqual({ displayName: 'Admin sintético Dos' });
+
+    // El historial no depende de la sesión que lo pide (no recibe actor): la
+    // misma consulta devuelve la misma atribución para cualquier usuario.
+    const first = await listStockMovements(ITEM_FERTILIZANTE, { page: 1, pageSize: 50 });
+    const second = await listStockMovements(ITEM_FERTILIZANTE, { page: 1, pageSize: 50 });
+    expect(second).toEqual(first);
+    const byId = new Map(first.movements.map((row) => [row.id, row]));
+    expect(byId.get(byA.movement.id)).toMatchObject({
+      employee: null,
+      recordedBy: { displayName: 'Admin sintética Uno' },
+    });
+    expect(byId.get(byB.movement.id)).toMatchObject({
+      employee: null,
+      recordedBy: { displayName: 'Admin sintético Dos' },
+    });
+    // Nunca el id de usuario ni el username.
+    expect(JSON.stringify(first)).not.toContain(USER_ADMIN_A);
+  });
+
+  it('la persona asociada se conserva: ni el empleado ni lo registrado a su nombre se reemplazan', async () => {
+    const own = await income(employee);
+    const onBehalf = await income(adminA, { employeeId: EMP_JUAN });
+    const { movements } = await listStockMovements(ITEM_FERTILIZANTE, { page: 1, pageSize: 50 });
+    for (const id of [own.movement.id, onBehalf.movement.id]) {
+      expect(movements.find((row) => row.id === id)).toMatchObject({
+        employee: { id: EMP_JUAN, displayName: 'Juan Pérez' },
+        recordedBy: null,
+      });
+    }
+  });
+
+  it('sin nombre cargado, el ADMIN se ve «Administrador» (nunca el username)', async () => {
+    const created = await income(adminNoName);
+    expect(created.movement.recordedBy).toEqual({ displayName: 'Administrador' });
+  });
+
+  it('una auditoría posterior de otra acción no reemplaza al autor original', async () => {
+    const byA = await income(adminA);
+    getFakeStockPrisma().auditLogs.push({
+      id: 'later-audit',
+      actorUserId: USER_ADMIN_B,
+      action: 'stock.movement.voided',
+      entityType: 'StockMovement',
+      entityId: byA.movement.id,
+      ipAddress: null,
+      userAgent: null,
+      createdAt: new Date(),
+    });
+    const { movements } = await listStockMovements(ITEM_FERTILIZANTE, { page: 1, pageSize: 50 });
+    expect(movements.find((row) => row.id === byA.movement.id)?.recordedBy).toEqual({
+      displayName: 'Admin sintética Uno',
+    });
+  });
+
+  it('sin evidencia (apertura del seed) o con evidencia ambigua no se inventa un autor', async () => {
+    const byA = await income(adminA);
+    // Dos auditorías de alta para el mismo movimiento: ambigua → sin autor.
+    getFakeStockPrisma().auditLogs.push({
+      id: 'duplicate-creation',
+      actorUserId: USER_ADMIN_B,
+      action: 'stock.movement.created',
+      entityType: 'StockMovement',
+      entityId: byA.movement.id,
+      ipAddress: null,
+      userAgent: null,
+      createdAt: new Date(),
+    });
+    const fertilizer = await listStockMovements(ITEM_FERTILIZANTE, { page: 1, pageSize: 50 });
+    expect(fertilizer.movements.find((row) => row.id === byA.movement.id)?.recordedBy).toBeNull();
+    const detergent = await listStockMovements(ITEM_DETERGENTE, {
+      type: 'OPENING_BALANCE',
+      page: 1,
+      pageSize: 50,
+    });
+    expect(detergent.movements[0]).toMatchObject({ employee: null, recordedBy: null });
+  });
+});
+
 // ── Administración del catálogo ───────────────────────────────────────────
 
 describe('createStockCategory / updateStockCategory', () => {

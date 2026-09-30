@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../api/httpClient';
+import type { StockMovementType } from '../../api/stockTypes';
 import {
   CATEGORY_A,
   CATEGORY_B,
@@ -659,6 +660,57 @@ describe('Stock — detalle e historial', () => {
     expect(api.fetchStockItem).not.toHaveBeenCalled();
   });
 
+  it('sin persona asociada muestra al administrador que registró cada movimiento (no a quien mira)', async () => {
+    // Quien mira es otro ADMIN, con su propio nombre: nunca se usa para atribuir.
+    useAuthMock.mockReturnValue({
+      user: {
+        id: 'u-a',
+        role: 'ADMIN',
+        status: 'ACTIVE',
+        displayName: 'Admin que mira',
+        employee: null,
+      },
+      logout: logoutMock,
+      hasRole: (role: string) => role === 'ADMIN',
+    });
+    api.fetchStockItem.mockResolvedValue({ item: OK_ITEM });
+    api.fetchStockItemMovements.mockResolvedValue(
+      movementsList([
+        makeMovement({
+          id: 'm-a',
+          reason: 'Por A',
+          recordedBy: { displayName: 'Admin sintética Uno' },
+        }),
+        makeMovement({
+          id: 'm-b',
+          reason: 'Por B',
+          recordedBy: { displayName: 'Admin sintético Dos' },
+        }),
+        makeMovement({
+          id: 'm-e',
+          reason: 'Por la persona',
+          employee: { id: 'e1', displayName: 'Persona sintética', colorHex: '#4a7c59' },
+          recordedBy: null,
+        }),
+        makeMovement({ id: 'm-o', type: 'OPENING_BALANCE', reason: 'Apertura', recordedBy: null }),
+      ]),
+    );
+    await renderInventory();
+    await userEvent.setup().click(
+      within(screen.getByText(OK_ITEM.name).closest('li') as HTMLElement).getByRole('button', {
+        name: /historial/i,
+      }),
+    );
+    const dialog = await screen.findByRole('dialog');
+    const meta = async (reason: string) =>
+      (await within(dialog).findByText(new RegExp(reason))).closest('p')?.textContent ?? '';
+    expect(await meta('Por A')).toContain('Admin sintética Uno');
+    expect(await meta('Por B')).toContain('Admin sintético Dos');
+    expect(await meta('Por la persona')).toContain('Persona sintética');
+    expect(await meta('Apertura')).toContain('Sin persona registrada');
+    expect(dialog).not.toHaveTextContent('Admin que mira');
+  });
+
   it('una respuesta anterior no sobrescribe un filtro de historial más nuevo', async () => {
     api.fetchStockItem.mockResolvedValue({ item: OK_ITEM });
     const oldResponse = deferred<ReturnType<typeof movementsList>>();
@@ -1103,6 +1155,74 @@ describe('Stock — 📊 Reportes', () => {
     // El destino es opcional en cualquier tipo de movimiento.
     await user.selectOptions(screen.getByLabelText('Tipo de movimiento'), 'INCOME');
     expect(screen.getByLabelText('Destino')).toBeInTheDocument();
+  });
+
+  it('movimientos por persona y listado: cada administrador con su nombre; sin evidencia, aparte', async () => {
+    const summary = emptyReportSummary();
+    const byType = (counts: Partial<Record<StockMovementType, number>>) => ({
+      OPENING_BALANCE: 0,
+      INCOME: 0,
+      CONSUMPTION: 0,
+      ADJUSTMENT_INCREASE: 0,
+      ADJUSTMENT_DECREASE: 0,
+      ...counts,
+    });
+    summary.employees = [
+      { employee: null, recordedBy: null, total: 4, byType: byType({ OPENING_BALANCE: 4 }) },
+      {
+        employee: null,
+        recordedBy: { displayName: 'Admin sintética Uno' },
+        total: 2,
+        byType: byType({ INCOME: 2 }),
+      },
+      {
+        employee: null,
+        recordedBy: { displayName: 'Admin sintético Dos' },
+        total: 1,
+        byType: byType({ CONSUMPTION: 1 }),
+      },
+    ];
+    api.fetchStockReportSummary.mockResolvedValue(summary);
+    const movement = (id: string, reason: string, recordedBy: { displayName: string } | null) => ({
+      id,
+      type: 'INCOME' as const,
+      quantity: '3',
+      effectiveDate: '2026-09-24',
+      reason,
+      createdAt: '2026-09-24T12:00:00.000Z',
+      item: {
+        id: 'i1',
+        name: 'Fertilizante sintético',
+        area: 'GARDEN' as const,
+        unit: 'kg',
+        active: true,
+      },
+      employee: null,
+      recordedBy,
+      destination: null,
+    });
+    api.fetchStockReportMovements.mockResolvedValue(
+      reportMovementsList([
+        movement('r-a', 'Ingreso de A', { displayName: 'Admin sintética Uno' }),
+        movement('r-b', 'Ingreso de B', { displayName: 'Admin sintético Dos' }),
+        movement('r-n', 'Sin evidencia', null),
+      ]),
+    );
+    renderStock('/stock/reports');
+    const people = await screen.findByText('Movimientos por persona');
+    const card = people.closest('section') ?? document.body;
+    expect(within(card as HTMLElement).getByText('Admin sintética Uno')).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByText('Admin sintético Dos')).toBeInTheDocument();
+    expect(within(card as HTMLElement).getAllByText('Sin persona asociada')).toHaveLength(1);
+    expect(
+      within(card as HTMLElement).getByText(/sin información de quién los registró/i),
+    ).toBeInTheDocument();
+
+    const meta = (reason: string) => screen.getByText(new RegExp(reason)).closest('p')?.textContent;
+    await screen.findByText(/Ingreso de A/);
+    expect(meta('Ingreso de A')).toContain('Admin sintética Uno');
+    expect(meta('Ingreso de B')).toContain('Admin sintético Dos');
+    expect(meta('Sin evidencia')).toContain('Sin persona registrada');
   });
 
   it('una validación del backend (rango abusivo) se muestra en lenguaje humano', async () => {
