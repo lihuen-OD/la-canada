@@ -8,7 +8,6 @@ import type {
   ListStockItemsParams,
   StockItem,
   StockItemsListResponse,
-  StockLevel,
   UpdateStockItemRequest,
 } from '../../api/stockTypes';
 import { useAuth } from '../../auth/useAuth';
@@ -27,16 +26,15 @@ import { useDebouncedSearch, useSessionExpiry } from './stockHooks';
 import {
   AREA_EMOJI,
   AREA_LABEL,
+  COMPLETE_TARGET_TEXT,
   LEVEL_LABEL,
-  LEVEL_PRIORITY,
   LEVEL_TONE,
   MOVEMENT_SUCCESS_TEXT,
+  TARGET_PENDING_TEXT,
 } from './stockLabels';
-import { purchaseShortfall } from './stockStatus';
 import { useStockCache } from './useStockCache';
-import { usePurchaseFilters, type AreaFilter, type PurchaseLevelFilter } from './stockViewState';
+import { usePurchaseFilters, type AreaFilter } from './stockViewState';
 
-type PurchaseLevel = Exclude<StockLevel, 'ok'>;
 type PurchaseGrouping = 'status' | 'category';
 
 type DialogState =
@@ -46,35 +44,24 @@ type DialogState =
   | { type: 'edit'; item: StockItem };
 
 const PAGE_SIZE = 50;
-const LEVEL_FILTERS: readonly { value: PurchaseLevelFilter; label: string; emoji?: string }[] = [
-  { value: 'all', label: 'Todos' },
-  { value: 'critical', label: 'Críticos', emoji: '🔴' },
-  { value: 'low', label: 'Bajos', emoji: '🟡' },
-];
 const AREA_FILTERS: readonly { value: AreaFilter; label: string; emoji?: string }[] = [
   { value: 'all', label: 'Todas' },
   { value: 'HOUSE', label: AREA_LABEL.HOUSE, emoji: AREA_EMOJI.HOUSE },
   { value: 'GARDEN', label: AREA_LABEL.GARDEN, emoji: AREA_EMOJI.GARDEN },
 ];
-const SECTION_TITLE: Record<PurchaseLevel, string> = {
-  critical: 'Críticos',
-  low: 'Bajos',
-};
-
-/** Encabezados de grupo del prototipo (`🔴 Crítico`, `🟡 Bajo`), siempre junto al texto. */
-const SECTION_EMOJI: Record<PurchaseLevel, string> = {
-  critical: '🔴',
-  low: '🟡',
-};
+/** Encabezado de grupo del prototipo (`🔴 Crítico`), siempre junto al texto. */
+const CRITICAL_SECTION = { emoji: '🔴', title: 'Críticos' };
 
 /**
- * 🛒 Compras — vista DERIVADA del inventario (docs/BUSINESS_RULES.md §8,
- * decisión 5C.1): productos activos con `stockLevel` crítico o bajo según el
- * backend. Sin tabla, estado "comprado" ni alertas persistidas. Una consulta
- * paginada por nivel (`GET /stock/items?stockLevel=…&sort=name`), así el
- * orden es críticos → bajos → nombre sin ordenar nada en el navegador. Las
- * claves pertenecen a la familia `stock.items`: registrar un ingreso
- * invalida la lista y un producto que alcanzó su mínimo desaparece solo.
+ * 🛒 Compras — vista DERIVADA del inventario (docs/BUSINESS_RULES.md §8):
+ * SOLO productos activos CRÍTICOS según el backend (actual ≤ mínimo). Sin
+ * tabla, estado "comprado" ni alertas persistidas. Una consulta paginada
+ * (`GET /stock/items?stockLevel=critical&sort=name`), ordenada por nombre sin
+ * ordenar nada en el navegador. La cantidad sugerida (objetivo − actual) es
+ * `item.suggestedPurchaseQuantity` del backend: una sugerencia que no
+ * registra compras ni mueve stock. Las claves pertenecen a la familia
+ * `stock.items`: registrar un ingreso o cambiar mínimo/objetivo invalida la
+ * lista, y un producto que salió de crítico desaparece solo.
  */
 export function PurchasesView() {
   const { user } = useAuth();
@@ -106,38 +93,20 @@ export function PurchasesView() {
     categoryId: filters.categoryId || undefined,
     q: filters.q || undefined,
   };
-  const critical = usePurchaseLevel('critical', baseFilters, enabled && filters.level !== 'low');
-  const low = usePurchaseLevel('low', baseFilters, enabled && filters.level !== 'critical');
-  const sections = [
-    ...(filters.level !== 'low' ? [{ level: 'critical' as const, state: critical }] : []),
-    ...(filters.level !== 'critical' ? [{ level: 'low' as const, state: low }] : []),
-  ];
+  const critical = useCriticalPurchases(baseFilters, enabled);
 
-  const handleSessionExpired = useSessionExpiry(
-    critical.query.error,
-    low.query.error,
-    categoriesQuery.error,
-  );
+  const handleSessionExpired = useSessionExpiry(critical.query.error, categoriesQuery.error);
 
-  const loaded = sections.every((section) => section.state.pages);
-  const failed = sections.some((section) => !section.state.pages && section.state.query.isError);
-  const refreshing =
-    loaded &&
-    sections.some(
-      (section) => section.state.query.isFetching && !section.state.query.isFetchingNextPage,
-    );
-  const totalPending = sections.reduce((sum, section) => sum + section.state.total, 0);
-  const visibleItems = (() => {
-    const seen = new Set<string>();
-    return sections.flatMap((section) =>
-      section.state.items.filter((item) => (seen.has(item.id) ? false : (seen.add(item.id), true))),
-    );
-  })();
+  const loaded = Boolean(critical.pages);
+  const failed = !critical.pages && critical.query.isError;
+  const refreshing = loaded && critical.query.isFetching && !critical.query.isFetchingNextPage;
+  const totalPending = critical.total;
+  const visibleItems = critical.items;
   const groups = groupPurchases(visibleItems, grouping);
   const hasFilters = filters.area !== 'all' || Boolean(filters.categoryId) || Boolean(filters.q);
 
   const retry = () => {
-    for (const section of sections) void section.state.query.refetch();
+    void critical.query.refetch();
   };
   const closeDialog = () => setDialog({ type: 'none' });
   const sharePurchases = async () => {
@@ -174,8 +143,8 @@ export function PurchasesView() {
 
       <div className="stock-purchases__toolbar">
         <p className="stock-purchases__explain">
-          Ítems activos con stock bajo o crítico según su mínimo. «Falta» es solo una referencia
-          para llegar al mínimo: no es una orden de compra ni modifica el stock.
+          Ítems activos en stock crítico (en su mínimo o por debajo). «Comprar» sugiere cuánto falta
+          para llegar al stock objetivo: no es una orden de compra ni modifica el stock.
         </p>
         <Button size="sm" variant="ghost" disabled={!loaded} onClick={() => void sharePurchases()}>
           <span aria-hidden="true">📤 </span>Compartir
@@ -183,18 +152,6 @@ export function PurchasesView() {
       </div>
 
       <div className="stock-filters">
-        <div className="filter-scroller" role="group" aria-label="Filtrar por nivel">
-          {LEVEL_FILTERS.map((option) => (
-            <Chip
-              key={option.value}
-              selected={filters.level === option.value}
-              onSelect={() => updateFilters({ level: option.value })}
-              leading={option.emoji ? <span aria-hidden="true">{option.emoji}</span> : undefined}
-            >
-              {option.label}
-            </Chip>
-          ))}
-        </div>
         <div className="filter-scroller" role="group" aria-label="Filtrar por área">
           {AREA_FILTERS.map((option) => (
             <Chip
@@ -273,7 +230,7 @@ export function PurchasesView() {
             description={
               hasFilters
                 ? 'Probá con otra área, categoría o búsqueda.'
-                : 'Todos los productos activos están en su stock mínimo o por encima.'
+                : 'Ningún producto activo está en su stock mínimo o por debajo.'
             }
           />
         </Card>
@@ -308,21 +265,19 @@ export function PurchasesView() {
               </Card>
             ),
           )}
-          {sections.map(({ level, state }) =>
-            state.hasMore ? (
-              <div className="stock__more" key={`more-${level}`}>
-                <Button
-                  variant="secondary"
-                  disabled={state.query.isFetchingNextPage}
-                  onClick={state.loadMore}
-                >
-                  {state.query.isFetchingNextPage
-                    ? 'Cargando…'
-                    : `Cargar más ${SECTION_TITLE[level].toLowerCase()} (${state.items.length} de ${state.total})`}
-                </Button>
-              </div>
-            ) : null,
-          )}
+          {critical.hasMore ? (
+            <div className="stock__more">
+              <Button
+                variant="secondary"
+                disabled={critical.query.isFetchingNextPage}
+                onClick={critical.loadMore}
+              >
+                {critical.query.isFetchingNextPage
+                  ? 'Cargando…'
+                  : `Cargar más (${critical.items.length} de ${critical.total})`}
+              </Button>
+            </div>
+          ) : null}
         </>
       )}
 
@@ -367,12 +322,14 @@ export function PurchasesView() {
 
 function groupPurchases(items: StockItem[], grouping: PurchaseGrouping) {
   if (grouping === 'status') {
-    return (['critical', 'low'] as const).map((level) => ({
-      key: level,
-      emoji: SECTION_EMOJI[level],
-      title: SECTION_TITLE[level],
-      items: items.filter((item) => item.stockLevel === level),
-    }));
+    return [
+      {
+        key: 'critical',
+        emoji: CRITICAL_SECTION.emoji,
+        title: CRITICAL_SECTION.title,
+        items: items.filter((item) => item.stockLevel === 'critical'),
+      },
+    ];
   }
   const byCategory = new Map<
     string,
@@ -394,23 +351,36 @@ function purchaseShareText(items: StockItem[], grouping: PurchaseGrouping): stri
     if (group.items.length === 0) continue;
     lines.push('', group.title);
     for (const item of group.items) {
-      const missing = purchaseShortfall(item.currentQuantity, item.minimumQuantity) ?? '0';
+      const target =
+        item.targetQuantity !== null
+          ? `objetivo: ${item.targetQuantity} ${item.unit}`
+          : TARGET_PENDING_TEXT.toLowerCase();
       lines.push(
-        `• ${item.name} — actual: ${item.currentQuantity} ${item.unit}; mínimo: ${item.minimumQuantity} ${item.unit}; falta: ${missing} ${item.unit}`,
+        `• ${item.name} — ${purchaseText(item)} (actual: ${item.currentQuantity} ${item.unit}; mínimo: ${item.minimumQuantity} ${item.unit}; ${target})`,
       );
     }
   }
   return lines.join('\n');
 }
 
-/** Una consulta paginada de productos activos en `level`, ordenada por nombre. */
-function usePurchaseLevel(
-  level: PurchaseLevel,
+/**
+ * «Comprar: 31 kg» — la cantidad sugerida del backend con su unidad, o
+ * «Completar stock objetivo» si el producto todavía no lo tiene (nunca se
+ * inventa una cantidad).
+ */
+function purchaseText(item: StockItem): string {
+  return item.suggestedPurchaseQuantity !== null
+    ? `comprar: ${item.suggestedPurchaseQuantity} ${item.unit}`
+    : COMPLETE_TARGET_TEXT;
+}
+
+/** Una consulta paginada de productos activos CRÍTICOS, ordenada por nombre. */
+function useCriticalPurchases(
   baseFilters: Omit<ListStockItemsParams, 'page' | 'pageSize' | 'stockLevel'>,
   enabled: boolean,
 ) {
   const { userId } = useSessionScope();
-  const filters = { ...baseFilters, stockLevel: level };
+  const filters = { ...baseFilters, stockLevel: 'critical' as const };
   const query = useInfiniteQuery({
     queryKey: queryKeys.stock.items(userId, filters),
     queryFn: ({ pageParam }) =>
@@ -453,10 +423,10 @@ interface PurchaseRowProps {
 }
 
 function PurchaseRow({ item, isAdmin, onIncome, onDetail, onEdit }: PurchaseRowProps) {
-  // El backend es la autoridad del nivel; una fila `ok` solo podría llegar
-  // por una revalidación en curso y se muestra igual, sin prioridad.
+  // El backend es la autoridad del nivel y de la cantidad sugerida; una fila
+  // no crítica solo podría llegar por una revalidación en curso.
   const level = item.stockLevel;
-  const shortfall = purchaseShortfall(item.currentQuantity, item.minimumQuantity);
+  const hasTarget = item.targetQuantity !== null;
   return (
     <li className="stock-purchase">
       <div className="stock-purchase__info">
@@ -467,18 +437,27 @@ function PurchaseRow({ item, isAdmin, onIncome, onDetail, onEdit }: PurchaseRowP
           </span>
           <span>{item.category.name}</span>
           <Badge tone={LEVEL_TONE[level]}>{LEVEL_LABEL[level]}</Badge>
-          {level !== 'ok' ? <span className="visually-hidden">{LEVEL_PRIORITY[level]}</span> : null}
+          {level === 'critical' ? <span className="visually-hidden">Prioridad alta</span> : null}
         </p>
         <p className="stock-purchase__numbers">
           <span>
             <span className="visually-hidden">Actual: </span>
             {item.currentQuantity}
-            <span aria-hidden="true"> / </span>
-            <span className="visually-hidden">, mínimo: </span>
-            {item.minimumQuantity} {item.unit}
+            {hasTarget ? (
+              <>
+                <span aria-hidden="true"> / </span>
+                <span className="visually-hidden">, objetivo: </span>
+                {item.targetQuantity}
+              </>
+            ) : null}{' '}
+            {item.unit}
+            <span aria-hidden="true"> · </span>
+            <span className="visually-hidden">, </span>mín. {item.minimumQuantity}
           </span>
           <span className="stock-purchase__shortfall">
-            Falta: {shortfall !== null ? `${shortfall} ${item.unit}` : '—'}
+            {item.suggestedPurchaseQuantity !== null
+              ? `Comprar: ${item.suggestedPurchaseQuantity} ${item.unit}`
+              : COMPLETE_TARGET_TEXT}
           </span>
         </p>
       </div>

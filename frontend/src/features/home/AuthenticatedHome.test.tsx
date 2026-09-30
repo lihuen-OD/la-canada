@@ -20,7 +20,7 @@ const dashboard: DashboardResponse = {
   generatedAt: '2026-09-25T12:00:00.000Z',
   today: '2026-09-25',
   timeZone: 'America/Argentina/Cordoba',
-  kpis: { tasksCompleted: 3, tasksTotal: 5, urgentPending: 1, stockAlerts: 1, goodEggsToday: 7 },
+  kpis: { tasksCompleted: 3, tasksTotal: 5, urgentPending: 1, stockAlerts: 2, goodEggsToday: 7 },
   urgentTasks: [
     {
       id: 't1',
@@ -58,9 +58,23 @@ const dashboard: DashboardResponse = {
       name: 'Alimento',
       area: 'GARDEN',
       unit: 'kg',
-      minimumQuantity: '10',
-      currentQuantity: '4',
-      stockLevel: 'low',
+      // Ejemplo acordado: mínimo 20, objetivo 50, actual 19 → comprar 31.
+      minimumQuantity: '20',
+      targetQuantity: '50',
+      currentQuantity: '19',
+      stockLevel: 'critical',
+      suggestedPurchaseQuantity: '31',
+    },
+    {
+      id: 's2',
+      name: 'Producto sintético antiguo',
+      area: 'HOUSE',
+      unit: 'u',
+      minimumQuantity: '5',
+      targetQuantity: null,
+      currentQuantity: '5',
+      stockLevel: 'critical',
+      suggestedPurchaseQuantity: null,
     },
   ],
   upcomingEvents: [
@@ -107,10 +121,34 @@ describe('Dashboard de Inicio', () => {
     expect(screen.getByText('3/5')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '🚨 Urgentes' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '👥 Avance del equipo' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '⚠️ Stock bajo' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '⚠️ Stock crítico' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '📅 Próximos eventos' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '📝 Últimas novedades' })).toBeInTheDocument();
     expect(screen.queryByText(/clima|mascotas/i)).not.toBeInTheDocument();
+  });
+
+  it('alertas de reposición: solo críticos del backend, con cantidad sugerida y enlace a Compras', async () => {
+    mocks.getDashboard.mockResolvedValueOnce(dashboard);
+    renderHome();
+    const card = (await screen.findByRole('heading', { name: '⚠️ Stock crítico' })).closest(
+      'section',
+    ) as HTMLElement;
+    const example = within(card).getByText('Alimento').closest('li') as HTMLElement;
+    expect(example).toHaveTextContent('19/50 kg · mín. 20');
+    expect(within(example).getByText('Comprar: 31 kg')).toBeInTheDocument();
+    expect(within(example).getByText('Crítico')).toBeInTheDocument();
+    // Igual al mínimo ya es crítico; sin objetivo, no se inventa una cantidad.
+    const legacy = within(card).getByText('Producto sintético antiguo').closest('li')!;
+    expect(within(legacy as HTMLElement).getByText('Completar stock objetivo')).toBeInTheDocument();
+    expect(legacy.querySelector('.home-stock__bar')).toBeNull();
+    expect(card).not.toHaveTextContent(/Bajo/);
+    expect(within(card).getByRole('link', { name: 'Ver compras' })).toHaveAttribute(
+      'href',
+      '/stock/purchases',
+    );
+    expect(
+      screen.getByText('Stock crítico', { selector: '*:not(h2):not(h3)' }),
+    ).toBeInTheDocument();
   });
 
   it('ADMIN: avance del equipo con las métricas canónicas del backend, período y enlace a Desempeño', async () => {
@@ -224,7 +262,7 @@ describe('Dashboard de Inicio', () => {
     });
     renderHome();
     expect(await screen.findByText('Sin urgentes 🎉')).toBeInTheDocument();
-    expect(screen.getByText('Todo el stock en orden ✅')).toBeInTheDocument();
+    expect(screen.getByText('Ningún producto en stock crítico ✅')).toBeInTheDocument();
     expect(screen.getByText('Sin eventos próximos')).toBeInTheDocument();
     expect(screen.getByText('Sin novedades')).toBeInTheDocument();
   });

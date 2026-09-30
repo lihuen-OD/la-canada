@@ -36,8 +36,11 @@ export interface DashboardResponse {
     area: 'HOUSE' | 'GARDEN';
     unit: string;
     minimumQuantity: string;
+    targetQuantity: string | null;
     currentQuantity: string;
-    stockLevel: 'low' | 'critical';
+    /** Inicio solo recibe críticos (actual ≤ mínimo); los bajos quedan en Stock. */
+    stockLevel: 'critical';
+    suggestedPurchaseQuantity: string | null;
   }[];
   upcomingEvents: EventListItem[];
   latestNews: { id: string; text: string; createdAt: string; employee: PersonRef }[];

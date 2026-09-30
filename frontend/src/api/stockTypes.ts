@@ -23,11 +23,13 @@ export type OperationalMovementType = Exclude<StockMovementType, 'OPENING_BALANC
 export type DestinationType = 'VEHICLE' | 'SECTOR';
 
 /**
- * Nivel calculado por el BACKEND (Etapa 5C.1, `stock/stockLevel.ts`):
- * `critical` saldo ≤ 0; `low` 0 < saldo < mínimo; `ok` saldo > 0 y ≥ mínimo.
+ * Nivel calculado por el BACKEND (`stock/stockLevel.ts`), con mínimo y
+ * objetivo: `critical` actual ≤ mínimo; `low` hasta el punto medio
+ * (mínimo + objetivo) / 2; `ok` por encima; `pending` fuera de crítico y sin
+ * objetivo cargado (producto anterior: estado neutral de configuración).
  * El frontend nunca lo recalcula: solo lo muestra (y dibuja su barra).
  */
-export type StockLevel = 'ok' | 'low' | 'critical';
+export type StockLevel = 'ok' | 'low' | 'critical' | 'pending';
 export type StockListSort = 'area' | 'name';
 export type StockDestinationStatusFilter = 'active' | 'all';
 
@@ -51,8 +53,12 @@ export interface StockItem {
   area: StockItemArea;
   unit: string;
   minimumQuantity: string;
+  /** Cantidad a la que se busca llegar al reponer; `null` = «Stock objetivo pendiente». */
+  targetQuantity: string | null;
   currentQuantity: string;
   stockLevel: StockLevel;
+  /** Compras: objetivo − actual (del backend); `null` sin objetivo. */
+  suggestedPurchaseQuantity: string | null;
   active: boolean;
   category: StockCategorySummary;
 }
@@ -160,6 +166,8 @@ export interface CreateStockItemRequest {
   categoryId: string;
   unit: string;
   minimumQuantity: string;
+  /** Obligatorio en productos nuevos y mayor que el mínimo. */
+  targetQuantity: string;
 }
 
 /** Sin `currentQuantity`, `area` ni `active`: la cantidad solo cambia vía movimiento. */
@@ -168,6 +176,8 @@ export interface UpdateStockItemRequest {
   categoryId?: string;
   unit?: string;
   minimumQuantity?: string;
+  /** Completa o cambia el objetivo (nunca lo borra). */
+  targetQuantity?: string;
 }
 
 /**
@@ -249,7 +259,14 @@ export interface StockReportSummary {
     critical: number;
     low: number;
     ok: number;
-    byArea: { area: StockItemArea; critical: number; low: number; ok: number }[];
+    pending: number;
+    byArea: {
+      area: StockItemArea;
+      critical: number;
+      low: number;
+      ok: number;
+      pending: number;
+    }[];
   };
   products: {
     withMovements: number;

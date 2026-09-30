@@ -10,7 +10,7 @@ import {
   emptyReportSummary,
   itemsList,
   makeItem,
-  makeLowItem,
+  makeCritItem,
   reportMovementsList,
 } from './fixtures/stock';
 import { historyResponse, makeCollection, makeSummary } from './fixtures/chickenCoop';
@@ -94,8 +94,8 @@ function body(path: string): unknown {
   if (path.startsWith('/stock/reports/summary')) return emptyReportSummary();
   if (path.startsWith('/stock/reports/movements')) return reportMovementsList();
   if (/^\/stock\/items\/[^/?]+\/movements/.test(path)) return { movement: {}, item: makeItem() };
-  if (path.startsWith('/stock/items') && path.includes('stockLevel=low')) {
-    return itemsList([makeLowItem()]);
+  if (path.startsWith('/stock/items') && path.includes('stockLevel=critical')) {
+    return itemsList([makeCritItem()]);
   }
   if (path.startsWith('/stock/items') && path.includes('stockLevel=')) return itemsList([]);
   if (path.startsWith('/stock/items')) return itemsList([makeItem()]);
@@ -339,9 +339,10 @@ describe('Stock — subvistas SPA (Etapa 5C.2)', () => {
 
     await user.click(within(stockNav()).getByRole('link', { name: 'Compras' }));
     await screen.findByText('1 producto por reponer');
+    // Compras lista solo críticos: UNA consulta (antes críticos + bajos).
     const purchases = gets().filter((call) => call.includes('stockLevel='));
-    expect(purchases).toHaveLength(2);
-    expect(new Set(purchases).size).toBe(2);
+    expect(purchases).toHaveLength(1);
+    expect(purchases[0]).toContain('stockLevel=critical');
 
     await user.click(within(stockNav()).getByRole('link', { name: 'Reportes' }));
     await screen.findByRole('region', { name: 'Resumen del período' });

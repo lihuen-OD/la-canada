@@ -114,7 +114,13 @@ async function createActor(role: 'ADMIN' | 'EMPLOYEE', suffix: string, linked?: 
   return { userId: user.id, token };
 }
 
-async function createItem(suffix: string, unit: string, current: string, minimum: string) {
+async function createItem(
+  suffix: string,
+  unit: string,
+  current: string,
+  minimum: string,
+  target: string,
+) {
   const item = await prisma.stockItem.create({
     data: {
       name: `${RUN}-${suffix}`,
@@ -122,6 +128,7 @@ async function createItem(suffix: string, unit: string, current: string, minimum
       categoryId,
       unit,
       minimumQuantity: new Prisma.Decimal(minimum),
+      targetQuantity: new Prisma.Decimal(target),
       currentQuantity: new Prisma.Decimal(current),
     },
     select: { id: true },
@@ -170,9 +177,11 @@ beforeAll(async () => {
     })
   ).id;
   // kg: 10 con mínimo 20 → bajo; litros: 5 con mínimo 1 → ok; inactivo: 3 con mínimo 1.
-  itemKg = await createItem('kg', 'kg', '10', '20');
-  itemLiters = await createItem('litros', 'litros', '5', '1');
-  itemInactive = await createItem('inactivo', 'kg', '3', '1');
+  // kg: mínimo 10, objetivo 20 (crítico al empezar; tras los movimientos, 12 →
+  // bajo); litros: mínimo 1, objetivo 5 → normal; inactivo: fuera de niveles.
+  itemKg = await createItem('kg', 'kg', '10', '10', '20');
+  itemLiters = await createItem('litros', 'litros', '5', '1', '5');
+  itemInactive = await createItem('inactivo', 'kg', '3', '1', '5');
 
   (pg.Client.prototype as unknown as { query: QueryFn }).query = function (
     this: unknown,
@@ -301,8 +310,9 @@ describe('GET /stock/reports/summary — agregaciones reales', () => {
     // Nunca un total mezclado de kg + litros.
     expect(JSON.stringify(body.totals)).not.toContain('3.5');
 
-    // Niveles actuales (solo activos de la categoría): kg 12 < 20 → bajo; litros ok.
-    expect(body.currentLevels).toMatchObject({ critical: 0, low: 1, ok: 1 });
+    // Niveles actuales (solo activos de la categoría): kg 12 ≤ (10 + 20) / 2 →
+    // bajo; litros 4 > (1 + 5) / 2 → ok.
+    expect(body.currentLevels).toMatchObject({ critical: 0, low: 1, ok: 1, pending: 0 });
 
     expect(body.products.withMovements).toBe(3);
     expect(body.products.mostMoved[0]).toMatchObject({

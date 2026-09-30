@@ -37,6 +37,8 @@ export interface FakeStockItem {
   categoryId: string;
   unit: string;
   minimumQuantity: string;
+  /** `null` = stock objetivo pendiente (producto anterior a la columna). */
+  targetQuantity: string | null;
   currentQuantity: string;
   active: boolean;
   createdAt: Date;
@@ -100,7 +102,9 @@ export interface FakeIdempotencyRecord {
 
 export interface FakeStockSeed {
   categories?: Omit<FakeStockCategory, 'createdAt' | 'updatedAt'>[];
-  items?: Omit<FakeStockItem, 'createdAt' | 'updatedAt'>[];
+  items?: (Omit<FakeStockItem, 'createdAt' | 'updatedAt' | 'targetQuantity'> & {
+    targetQuantity?: string | null;
+  })[];
   destinations?: FakeDestination[];
   employees?: FakeEmployeeSummary[];
   movements?: (Omit<FakeMovement, 'createdAt' | 'updatedAt' | 'participantUserId'> & {
@@ -249,7 +253,12 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
       categories.set(row.id, { ...row, createdAt: now, updatedAt: now });
     }
     for (const row of newSeed.items ?? []) {
-      items.set(row.id, { ...row, createdAt: now, updatedAt: now });
+      items.set(row.id, {
+        ...row,
+        targetQuantity: row.targetQuantity ?? null,
+        createdAt: now,
+        updatedAt: now,
+      });
     }
     for (const row of newSeed.destinations ?? []) destinations.set(row.id, row);
     for (const row of newSeed.employees ?? []) employees.set(row.id, row);
@@ -450,6 +459,7 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
           active: true,
           ...data,
           minimumQuantity: String(data.minimumQuantity),
+          targetQuantity: data.targetQuantity != null ? String(data.targetQuantity) : null,
           currentQuantity: String(data.currentQuantity),
           id: data.id ?? nextId(),
           createdAt: now,
@@ -476,6 +486,10 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
             data.minimumQuantity !== undefined
               ? String(data.minimumQuantity)
               : existing.minimumQuantity,
+          targetQuantity:
+            data.targetQuantity !== undefined
+              ? String(data.targetQuantity)
+              : existing.targetQuantity,
           updatedAt: new Date(),
         };
         items.set(where.id, updated);
@@ -668,11 +682,13 @@ export function createFakeStockPrisma(seed: FakeStockSeed = {}): FakeStockPrisma
         );
       }
       const level = query.values[0];
-      if (level !== 'ok' && level !== 'low' && level !== 'critical') {
+      if (level !== 'ok' && level !== 'low' && level !== 'critical' && level !== 'pending') {
         throw new Error(`fakeStockPrisma: nivel de stock desconocido: ${String(level)}`);
       }
       return [...items.values()]
-        .filter((row) => matchesStockLevel(row.currentQuantity, row.minimumQuantity, level))
+        .filter((row) =>
+          matchesStockLevel(row.currentQuantity, row.minimumQuantity, row.targetQuantity, level),
+        )
         .map((row) => ({ id: row.id }));
     },
     user: {

@@ -41,9 +41,11 @@ export function makeItem(overrides: Partial<StockItem> = {}): StockItem {
     area: 'HOUSE',
     unit: 'kg',
     minimumQuantity: '10',
+    targetQuantity: '30',
     currentQuantity: '25',
-    // Siempre explícito, como lo manda el backend: el frontend no lo recalcula.
+    // Siempre explícitos, como los manda el backend: el frontend no los recalcula.
     stockLevel: 'ok',
+    suggestedPurchaseQuantity: '5',
     active: true,
     category: { id: CATEGORY_A.id, name: CATEGORY_A.name, area: CATEGORY_A.area },
     ...overrides,
@@ -54,9 +56,12 @@ export function makeLowItem(): StockItem {
   return makeItem({
     id: '00000000-0000-4000-8000-00000000i002',
     name: 'Producto sintético bajo',
-    currentQuantity: '3',
+    // 10 < 15 <= (10 + 30) / 2.
+    currentQuantity: '15',
     minimumQuantity: '10',
+    targetQuantity: '30',
     stockLevel: 'low',
+    suggestedPurchaseQuantity: '15',
   });
 }
 
@@ -66,7 +71,9 @@ export function makeCritItem(): StockItem {
     name: 'Producto sintético crítico',
     currentQuantity: '0',
     minimumQuantity: '5',
+    targetQuantity: '20',
     stockLevel: 'critical',
+    suggestedPurchaseQuantity: '20',
   });
 }
 
@@ -75,7 +82,23 @@ export function makeZeroMinItem(): StockItem {
     id: '00000000-0000-4000-8000-00000000i004',
     name: 'Producto sintético sin mínimo',
     minimumQuantity: '0',
+    targetQuantity: '10',
     currentQuantity: '7',
+    suggestedPurchaseQuantity: '3',
+  });
+}
+
+/** Producto anterior al stock objetivo: sin objetivo, fuera de crítico → pendiente. */
+export function makeLegacyItem(overrides: Partial<StockItem> = {}): StockItem {
+  return makeItem({
+    id: '00000000-0000-4000-8000-00000000i005',
+    name: 'Producto sintético sin objetivo',
+    minimumQuantity: '10',
+    targetQuantity: null,
+    currentQuantity: '12',
+    stockLevel: 'pending',
+    suggestedPurchaseQuantity: null,
+    ...overrides,
   });
 }
 
@@ -154,9 +177,10 @@ export function emptyReportSummary(from = '2026-08-27', to = '2026-09-25'): Stoc
       critical: 0,
       low: 0,
       ok: 0,
+      pending: 0,
       byArea: [
-        { area: 'HOUSE', critical: 0, low: 0, ok: 0 },
-        { area: 'GARDEN', critical: 0, low: 0, ok: 0 },
+        { area: 'HOUSE', critical: 0, low: 0, ok: 0, pending: 0 },
+        { area: 'GARDEN', critical: 0, low: 0, ok: 0, pending: 0 },
       ],
     },
     products: { withMovements: 0, mostMoved: [], mostConsumed: [] },

@@ -101,13 +101,14 @@ export function InventoryView({ area }: { area: StockItemArea }) {
   );
   const groups = useMemo(() => groupItemsByCategory(items), [items]);
   const last = pages?.[pages.length - 1];
-  // Barra de alerta del prototipo (`⚠️ N ítems bajo mínimo`): solo con TODAS
+  // Barra de alerta del prototipo (`⚠️ N ítems bajo mínimo`), ahora de los
+  // CRÍTICOS (actual ≤ mínimo, igual que Compras e Inicio): solo con TODAS
   // las páginas del filtro cargadas, para que el conteo nunca sea parcial. El
   // nivel es el `stockLevel` del backend; no se agregan requests.
   const belowMinimum = useMemo(
     () =>
       last && last.page >= last.totalPages
-        ? items.filter((item) => item.active && item.stockLevel !== 'ok')
+        ? items.filter((item) => item.active && item.stockLevel === 'critical')
         : [],
     [items, last],
   );
@@ -172,7 +173,8 @@ export function InventoryView({ area }: { area: StockItemArea }) {
             <span aria-hidden="true">⚠️</span>
             <span>
               <strong>
-                {belowMinimum.length} {belowMinimum.length === 1 ? 'ítem' : 'ítems'} bajo mínimo
+                {belowMinimum.length} {belowMinimum.length === 1 ? 'ítem' : 'ítems'} en o bajo el
+                mínimo
               </strong>
               {`: ${belowMinimum.map((item) => item.name).join(', ')}`}
             </span>

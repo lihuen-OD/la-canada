@@ -108,6 +108,7 @@ describe('stockApi — rutas y verbos del contrato 5A', () => {
       categoryId: 'c1',
       unit: 'kg',
       minimumQuantity: '5',
+      targetQuantity: '20',
     };
     await createStockItem(itemBody);
     expect(apiRequestMock).toHaveBeenCalledWith('/stock/items', {

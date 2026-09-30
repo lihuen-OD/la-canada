@@ -606,9 +606,15 @@ model StockItem {
   category   StockCategory @relation(fields: [categoryId], references: [id])
 
   unit            String
-  minimumQuantity Decimal @map("minimum_quantity") @db.Decimal(10, 2)
-  currentQuantity Decimal @default(0) @map("current_quantity") @db.Decimal(10, 2)
-  active          Boolean @default(true)
+  minimumQuantity Decimal  @map("minimum_quantity") @db.Decimal(10, 2)
+  /// Stock objetivo: cantidad a la que se busca llegar al reponer (no es un
+  /// máximo: un ingreso puede superarlo). Nullable solo por los productos
+  /// anteriores a la columna, que quedan «Stock objetivo pendiente» hasta que
+  /// un ADMIN lo complete (nunca se inventa). Los productos nuevos lo exigen.
+  /// CHECK en la migración: nulo, o no negativo y mayor que el mínimo.
+  targetQuantity  Decimal? @map("target_quantity") @db.Decimal(10, 2)
+  currentQuantity Decimal  @default(0) @map("current_quantity") @db.Decimal(10, 2)
+  active          Boolean  @default(true)
 
   movements StockMovement[]
 

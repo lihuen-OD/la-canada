@@ -90,6 +90,7 @@ describe('getDashboard', () => {
         area: 'HOUSE',
         unit: 'u',
         minimumQuantity: '10',
+        targetQuantity: '30',
         currentQuantity: '0',
       },
     ]);
@@ -125,6 +126,46 @@ describe('getDashboard', () => {
       ],
     });
     expect(mocks.listTasks).toHaveBeenCalledWith(actor, { status: 'active' }, expect.any(Date));
+  });
+
+  it('alertas de reposición: solo críticos (igual al mínimo incluido), nunca bajos; activos', async () => {
+    mocks.listTasks.mockResolvedValue({ tasks: [] });
+    const item = (id: string, currentQuantity: string, targetQuantity: string | null) => ({
+      id,
+      name: `Producto sintético ${id}`,
+      area: 'HOUSE',
+      unit: 'kg',
+      minimumQuantity: '20',
+      targetQuantity,
+      currentQuantity,
+    });
+    mocks.stockItems.mockResolvedValue([
+      item('igual-al-minimo', '20', '50'),
+      item('debajo', '19', '50'),
+      item('bajo', '35', '50'),
+      item('normal', '35.01', '50'),
+      item('sin-objetivo-critico', '3', null),
+      item('sin-objetivo-pendiente', '25', null),
+    ]);
+    const result = await getDashboard(actor, new Date('2026-09-25T12:00:00.000Z'));
+    expect(mocks.stockItems).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { active: true } }),
+    );
+    expect(result.stockAlerts.map((alert) => alert.id)).toEqual([
+      'igual-al-minimo',
+      'debajo',
+      'sin-objetivo-critico',
+    ]);
+    expect(result.kpis.stockAlerts).toBe(3);
+    expect(result.stockAlerts.every((alert) => alert.stockLevel === 'critical')).toBe(true);
+    expect(result.stockAlerts.find((alert) => alert.id === 'debajo')).toMatchObject({
+      targetQuantity: '50',
+      suggestedPurchaseQuantity: '31',
+    });
+    expect(
+      result.stockAlerts.find((alert) => alert.id === 'sin-objetivo-critico')
+        ?.suggestedPurchaseQuantity,
+    ).toBeNull();
   });
 
   it('EMPLOYEE sin empleado vinculado: sin desempeño y sin consultarlo', async () => {

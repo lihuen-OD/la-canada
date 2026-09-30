@@ -98,7 +98,9 @@ function seed() {
         area: 'HOUSE' as const,
         categoryId: CAT_HOUSE,
         unit: 'litros',
-        minimumQuantity: '3',
+        // Bajo: 1 < 2 <= (1 + 5) / 2.
+        minimumQuantity: '1',
+        targetQuantity: '5',
         currentQuantity: '2',
         active: true,
       },
@@ -108,7 +110,9 @@ function seed() {
         area: 'HOUSE' as const,
         categoryId: CAT_HOUSE,
         unit: 'rollos',
+        // Normal (por encima del objetivo, que no es un máximo), inactivo.
         minimumQuantity: '12',
+        targetQuantity: '20',
         currentQuantity: '24',
         active: false,
       },
@@ -118,7 +122,9 @@ function seed() {
         area: 'GARDEN' as const,
         categoryId: CAT_GARDEN,
         unit: 'kg',
-        minimumQuantity: '10',
+        // Bajo: 2 < 5 <= (2 + 10) / 2.
+        minimumQuantity: '2',
+        targetQuantity: '10',
         currentQuantity: '5',
         active: true,
       },
@@ -820,6 +826,7 @@ describe('createStockItem', () => {
     categoryId: CAT_HOUSE,
     unit: 'unidades',
     minimumQuantity: '4',
+    targetQuantity: '10',
   };
 
   it('un EMPLOYEE no crea productos', async () => {
@@ -829,12 +836,28 @@ describe('createStockItem', () => {
   it('crea con saldo 0 (sin movimiento OPENING_BALANCE) y audita', async () => {
     const { item } = await createStockItem(admin, input, meta);
     expect(item.currentQuantity).toBe('0');
+    expect(item.targetQuantity).toBe('10');
+    // Saldo 0 <= mínimo 4: crítico, con sugerencia hasta el objetivo.
+    expect(item.stockLevel).toBe('critical');
+    expect(item.suggestedPurchaseQuantity).toBe('10');
     expect(item.active).toBe(true);
     expect(item.category).toEqual({ id: CAT_HOUSE, name: 'Limpieza', area: 'HOUSE' });
     const fake = getFakeStockPrisma();
     expect(fake.movements).toHaveLength(2); // solo los del seed
     const log = fake.auditLogs.find((entry) => entry.action === 'stock.item.created');
-    expect(log).toBeDefined();
+    expect(log?.newState).toMatchObject({ minimumQuantity: '4', targetQuantity: '10' });
+  });
+
+  it.each([
+    ['igual', '4'],
+    ['menor', '3.99'],
+  ])('rechaza un objetivo %s al mínimo sin escribir', async (_label, targetQuantity) => {
+    await expect(createStockItem(admin, { ...input, targetQuantity }, meta)).rejects.toThrow(
+      'El stock objetivo debe ser mayor que el stock mínimo.',
+    );
+    expect([...getFakeStockPrisma().items.values()].some((row) => row.name === input.name)).toBe(
+      false,
+    );
   });
 
   it('nombre duplicado en el área → 409', async () => {
@@ -872,8 +895,84 @@ describe('updateStockItem / setStockItemActive', () => {
     expect(result.item.currentQuantity).toBe('2'); // intocado
     const fake = getFakeStockPrisma();
     const log = fake.auditLogs.find((entry) => entry.action === 'stock.item.updated');
-    expect(log?.previousState).toMatchObject({ name: 'Detergente', minimumQuantity: '3' });
+    expect(log?.previousState).toMatchObject({ name: 'Detergente', minimumQuantity: '1' });
     expect(log?.newState).toMatchObject({ name: 'Detergente 2L', minimumQuantity: '4' });
+    // Nuevo mínimo 4 >= saldo 2: pasa a crítico en la misma respuesta.
+    expect(result.item.stockLevel).toBe('critical');
+  });
+
+  it('cambiar el objetivo recalcula nivel y cantidad sugerida (mínimo 20, objetivo 50, actual 19 → 31)', async () => {
+    const fake = getFakeStockPrisma();
+    Object.assign(fake.items.get(ITEM_FERTILIZANTE)!, {
+      minimumQuantity: '20',
+      targetQuantity: '40',
+      currentQuantity: '19',
+    });
+    const before = await getStockItem(ITEM_FERTILIZANTE);
+    expect(before.item).toMatchObject({ stockLevel: 'critical', suggestedPurchaseQuantity: '21' });
+    const { item } = await updateStockItem(
+      admin,
+      ITEM_FERTILIZANTE,
+      { targetQuantity: '50' },
+      meta,
+    );
+    expect(item).toMatchObject({
+      targetQuantity: '50',
+      stockLevel: 'critical',
+      suggestedPurchaseQuantity: '31',
+    });
+    fake.items.get(ITEM_FERTILIZANTE)!.currentQuantity = '35';
+    expect((await getStockItem(ITEM_FERTILIZANTE)).item.stockLevel).toBe('low');
+    fake.items.get(ITEM_FERTILIZANTE)!.currentQuantity = '35.01';
+    expect((await getStockItem(ITEM_FERTILIZANTE)).item.stockLevel).toBe('ok');
+    const log = fake.auditLogs.find((entry) => entry.action === 'stock.item.updated');
+    expect(log?.previousState).toMatchObject({ targetQuantity: '40' });
+    expect(log?.newState).toMatchObject({ targetQuantity: '50' });
+  });
+
+  it('rechaza objetivo igual o menor al mínimo (propio o el mínimo nuevo), sin escribir', async () => {
+    await expect(
+      updateStockItem(admin, ITEM_FERTILIZANTE, { targetQuantity: '2' }, meta),
+    ).rejects.toThrow('El stock objetivo debe ser mayor que el stock mínimo.');
+    await expect(
+      updateStockItem(admin, ITEM_FERTILIZANTE, { minimumQuantity: '10' }, meta),
+    ).rejects.toThrow('El stock objetivo debe ser mayor que el stock mínimo.');
+    expect(getFakeStockPrisma().items.get(ITEM_FERTILIZANTE)).toMatchObject({
+      minimumQuantity: '2',
+      targetQuantity: '10',
+    });
+  });
+
+  it('producto antiguo sin objetivo: «pendiente» y se puede renombrar/desactivar sin completarlo', async () => {
+    const fake = getFakeStockPrisma();
+    Object.assign(fake.items.get(ITEM_DETERGENTE)!, { targetQuantity: null, currentQuantity: '8' });
+    const legacy = await getStockItem(ITEM_DETERGENTE);
+    expect(legacy.item).toMatchObject({
+      targetQuantity: null,
+      stockLevel: 'pending',
+      suggestedPurchaseQuantity: null,
+    });
+    await updateStockItem(admin, ITEM_DETERGENTE, { name: 'Detergente viejo' }, meta);
+    const off = await setStockItemActive(admin, ITEM_DETERGENTE, false, meta);
+    expect(off.item).toMatchObject({ active: false, targetQuantity: null });
+    // Pero cambiar el mínimo exige completar el objetivo.
+    await expect(
+      updateStockItem(admin, ITEM_DETERGENTE, { minimumQuantity: '2' }, meta),
+    ).rejects.toThrow('Completá el stock objetivo para cambiar el stock mínimo.');
+    // Crítico sin objetivo: sin cantidad inventada.
+    fake.items.get(ITEM_DETERGENTE)!.currentQuantity = '1';
+    expect((await getStockItem(ITEM_DETERGENTE)).item).toMatchObject({
+      stockLevel: 'critical',
+      suggestedPurchaseQuantity: null,
+    });
+    // Completar el objetivo junto con el mínimo sí se acepta.
+    const done = await updateStockItem(
+      admin,
+      ITEM_DETERGENTE,
+      { minimumQuantity: '2', targetQuantity: '6' },
+      meta,
+    );
+    expect(done.item).toMatchObject({ targetQuantity: '6', suggestedPurchaseQuantity: '5' });
   });
 
   it('producto inexistente → 404', async () => {

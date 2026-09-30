@@ -231,7 +231,12 @@ async function createActor(
   return { userId: user.id, token };
 }
 
-async function createItem(suffix: string, current: string, minimum = '1'): Promise<string> {
+async function createItem(
+  suffix: string,
+  current: string,
+  minimum = '1',
+  target: string | null = null,
+): Promise<string> {
   const item = await prisma.stockItem.create({
     data: {
       name: `${RUN}-${suffix}`,
@@ -239,6 +244,7 @@ async function createItem(suffix: string, current: string, minimum = '1'): Promi
       categoryId,
       unit: 'unidades',
       minimumQuantity: new Prisma.Decimal(minimum),
+      targetQuantity: target === null ? null : new Prisma.Decimal(target),
       currentQuantity: new Prisma.Decimal(current),
     },
     select: { id: true },
@@ -592,10 +598,11 @@ describe('Idempotency-Key — rollback real en Postgres', () => {
 // ── stockLevel server-side (SQL real) ─────────────────────────────────────
 
 describe('GET /stock/items?stockLevel — SQL parametrizado real', () => {
-  it('critical/low/ok se resuelven en Postgres, con conteo y DTO coherentes', async () => {
-    const critical = await createItem('lvl-critical', '0', '0');
-    const low = await createItem('lvl-low', '2', '3');
-    const ok = await createItem('lvl-ok', '3', '3');
+  it('critical/low/ok/pending se resuelven en Postgres, con conteo y DTO coherentes', async () => {
+    const critical = await createItem('lvl-critical', '0', '0', '5');
+    const low = await createItem('lvl-low', '2', '1', '5'); // 2 <= (1 + 5) / 2
+    const ok = await createItem('lvl-ok', '4', '1', '5');
+    const pending = await createItem('lvl-pending', '3', '1'); // sin objetivo
     const list = (level: string) =>
       request(app)
         .get('/api/v1/stock/items')
@@ -605,6 +612,7 @@ describe('GET /stock/items?stockLevel — SQL parametrizado real', () => {
       ['critical', critical],
       ['low', low],
       ['ok', ok],
+      ['pending', pending],
     ] as const) {
       const response = await list(level);
       expect(response.status).toBe(200);

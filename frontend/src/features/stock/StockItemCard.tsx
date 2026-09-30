@@ -1,7 +1,7 @@
 import type { StockItem } from '../../api/stockTypes';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { LEVEL_LABEL, LEVEL_TONE } from './stockLabels';
+import { LEVEL_LABEL, LEVEL_TONE, TARGET_PENDING_TEXT } from './stockLabels';
 import { stockBarPercent } from './stockStatus';
 
 interface StockItemCardProps {
@@ -13,17 +13,18 @@ interface StockItemCardProps {
 
 /**
  * Un producto del inventario con la fila compacta del prototipo (`.si`):
- * nombre, barra + "actual / mínimo unidad" y la etiqueta de nivel; a la
- * derecha 📤 (movimiento), ⚙️ (ajuste, ADMIN) y 📋 (historial). La barra solo
- * aparece cuando el mínimo permite un porcentaje significativo (mínimo 0 →
- * sin barra: 100% fijo sería engañoso). El nivel es `item.stockLevel`,
- * calculado por el backend; la barra es solo su representación visual. Los
- * movimientos de un producto desactivado quedan deshabilitados — el backend
- * también los rechaza.
+ * nombre, barra + "actual / objetivo unidad · mín." y la etiqueta de nivel; a
+ * la derecha 📤 (movimiento), ⚙️ (ajuste, ADMIN) y 📋 (historial). La barra
+ * representa actual / objetivo (tope visual 100%: el stock puede superar el
+ * objetivo) y solo aparece con objetivo cargado; sin él, «Stock objetivo
+ * pendiente». El nivel es `item.stockLevel`, calculado por el backend; la
+ * barra es solo su representación visual. Los movimientos de un producto
+ * desactivado quedan deshabilitados — el backend también los rechaza.
  */
 export function StockItemCard({ item, isAdmin, onMovement, onDetail }: StockItemCardProps) {
   const level = item.stockLevel;
-  const percent = stockBarPercent(item.currentQuantity, item.minimumQuantity);
+  const percent = stockBarPercent(item.currentQuantity, item.targetQuantity);
+  const hasTarget = item.targetQuantity !== null;
 
   return (
     <li className="stock-item">
@@ -44,11 +45,22 @@ export function StockItemCard({ item, isAdmin, onMovement, onDetail }: StockItem
           <span className="stock-item__quantity">
             <span className="visually-hidden">Actual: </span>
             {item.currentQuantity}
-            <span aria-hidden="true"> / </span>
-            <span className="visually-hidden">, mínimo: </span>
-            {item.minimumQuantity} {item.unit}
+            {hasTarget ? (
+              <>
+                <span aria-hidden="true"> / </span>
+                <span className="visually-hidden">, objetivo: </span>
+                {item.targetQuantity}
+              </>
+            ) : null}{' '}
+            {item.unit}
+            <span aria-hidden="true"> · </span>
+            <span className="visually-hidden">, </span>mín. {item.minimumQuantity}
           </span>
           <Badge tone={LEVEL_TONE[level]}>{LEVEL_LABEL[level]}</Badge>
+          {/* Crítico sin objetivo: el badge dice «Crítico»; falta el objetivo igual. */}
+          {!hasTarget && level !== 'pending' ? (
+            <span className="stock-item__quantity">{TARGET_PENDING_TEXT}</span>
+          ) : null}
         </div>
       </div>
 

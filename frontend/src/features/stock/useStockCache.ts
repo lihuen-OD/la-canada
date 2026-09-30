@@ -38,6 +38,8 @@ export function useStockCache() {
   const afterItemChange = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.stock.itemsAll(userId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.stock.itemAll(userId) });
+    // Mínimo/objetivo cambian los niveles de «Estado actual por área».
+    void queryClient.invalidateQueries({ queryKey: queryKeys.stock.reportsAll(userId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard(userId) });
   }, [queryClient, userId]);
 

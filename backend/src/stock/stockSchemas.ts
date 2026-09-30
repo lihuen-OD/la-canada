@@ -89,6 +89,19 @@ export const stockMinimumQuantityTextSchema = z
     'El stock mínimo debe ser un número no negativo con hasta 2 decimales.',
   );
 
+/**
+ * Stock objetivo (cantidad a la que se busca llegar al reponer): misma
+ * representación decimal y límite que el mínimo. Que sea MAYOR que el mínimo
+ * lo valida el servicio (en una edición depende del mínimo guardado) y, como
+ * defensa en profundidad, un CHECK de la base.
+ */
+export const stockTargetQuantityTextSchema = z
+  .string({ message: 'El stock objetivo es obligatorio.' })
+  .regex(
+    /^(?:0(?:\.\d{1,2})?|[1-9]\d{0,7}(?:\.\d{1,2})?)$/,
+    'El stock objetivo debe ser un número no negativo con hasta 2 decimales.',
+  );
+
 const dateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha debe tener formato YYYY-MM-DD.');
@@ -161,7 +174,7 @@ export const listStockItemsQuerySchema = z
     q: z.string().min(1).max(100).optional(),
     /** Filtro server-side por nivel (ver `stock/stockLevel.ts`); la paginación se aplica después. */
     stockLevel: z
-      .enum(['ok', 'low', 'critical'], { message: 'Nivel de stock inválido.' })
+      .enum(['ok', 'low', 'critical', 'pending'], { message: 'Nivel de stock inválido.' })
       .optional(),
     /**
      * Orden del listado: `area` (Casa primero, luego nombre — inventario) o
@@ -181,6 +194,8 @@ export const createStockItemBodySchema = z
     categoryId: uuidSchema,
     unit: plainText('La unidad', 1, STOCK_UNIT_MAX_LENGTH),
     minimumQuantity: stockMinimumQuantityTextSchema,
+    /** Obligatorio en productos nuevos (mayor que el mínimo). */
+    targetQuantity: stockTargetQuantityTextSchema,
   })
   .strict();
 
@@ -195,6 +210,12 @@ export const updateStockItemBodySchema = z
     categoryId: uuidSchema.optional(),
     unit: plainText('La unidad', 1, STOCK_UNIT_MAX_LENGTH).optional(),
     minimumQuantity: stockMinimumQuantityTextSchema.optional(),
+    /**
+     * Completa o cambia el objetivo (nunca lo borra: no es nullable). Si la
+     * edición toca el mínimo o el objetivo, el servicio exige que el objetivo
+     * resultante exista y sea mayor que el mínimo.
+     */
+    targetQuantity: stockTargetQuantityTextSchema.optional(),
   })
   .strict()
   .refine((body) => Object.values(body).some((value) => value !== undefined), {

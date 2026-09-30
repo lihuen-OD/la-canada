@@ -1,41 +1,71 @@
 import { Prisma } from '../generated/prisma/client';
 
 /**
- * Nivel de stock (Etapa 5C.1) — la única definición de la regla, usada por:
- * (a) el DTO de producto (`serializeItem`), (b) el filtro server-side de
- * `GET /stock/items` vía SQL, y (c) el fake de tests. Ver
- * docs/BUSINESS_RULES.md §7 (regla histórica de la barra del prototipo).
+ * Nivel de stock — la única definición de la regla, usada por: (a) el DTO de
+ * producto (`serializeItem`) y el de Inicio, (b) el filtro server-side de
+ * `GET /stock/items` y los conteos de reportes vía SQL, y (c) el fake de
+ * tests. Ver docs/BUSINESS_RULES.md §7.
  *
- * Prioridad de las ramas — misma en SQL y en TypeScript:
- *   1. `critical`: saldo <= 0 (incluye (0,0): el saldo vacío es crítico
- *      aunque el mínimo también sea 0 — interpretación documentada, ver
- *      docs/BUSINESS_RULES.md §7);
- *   2. `low`: saldo > 0 y saldo < mínimo;
- *   3. `ok`: saldo > 0 y saldo >= mínimo (la igualdad con el mínimo es "ok").
+ * Con stock mínimo y stock OBJETIVO (la cantidad a la que se busca llegar al
+ * reponer), en este orden — igual en SQL y en TypeScript:
+ *   1. `critical`: actual <= mínimo (la igualdad ya es crítica; con mínimo 0,
+ *      el saldo 0 es crítico);
+ *   2. `pending`: sin objetivo cargado (productos anteriores a la columna).
+ *      Fuera de crítico no se inventa un nivel: queda neutral hasta que un
+ *      ADMIN complete el objetivo;
+ *   3. `low`: actual <= (mínimo + objetivo) / 2;
+ *   4. `ok`: por encima del punto medio (también por encima del objetivo: no
+ *      es un máximo).
  *
- * El nivel es una propiedad matemática del producto: los productos
- * inactivos conservan su nivel y no se especializa por estado.
+ * El punto medio nunca se redondea ni se divide: se compara
+ * `2 × actual <= mínimo + objetivo`, exacto con decimales (Decimal en
+ * TypeScript, NUMERIC en Postgres). El nivel es una propiedad matemática del
+ * producto: los inactivos conservan su nivel (Compras e Inicio los excluyen).
  */
-export type StockLevel = 'ok' | 'low' | 'critical';
+export type StockLevel = 'ok' | 'low' | 'critical' | 'pending';
+
+export const STOCK_LEVELS: readonly StockLevel[] = ['critical', 'low', 'ok', 'pending'];
+
+type DecimalInput = string | Prisma.Decimal;
 
 export function computeStockLevel(
-  currentQuantity: string | Prisma.Decimal,
-  minimumQuantity: string | Prisma.Decimal,
+  currentQuantity: DecimalInput,
+  minimumQuantity: DecimalInput,
+  targetQuantity: DecimalInput | null,
 ): StockLevel {
   const current = new Prisma.Decimal(currentQuantity);
   const minimum = new Prisma.Decimal(minimumQuantity);
-  if (current.lte(0)) return 'critical';
-  if (current.lt(minimum)) return 'low';
+  if (current.lte(minimum)) return 'critical';
+  if (targetQuantity === null) return 'pending';
+  const target = new Prisma.Decimal(targetQuantity);
+  if (current.mul(2).lte(minimum.add(target))) return 'low';
   return 'ok';
 }
 
 /** Misma regla que `computeStockLevel`, en forma de predicado (uso del fake). */
 export function matchesStockLevel(
-  currentQuantity: string | Prisma.Decimal,
-  minimumQuantity: string | Prisma.Decimal,
+  currentQuantity: DecimalInput,
+  minimumQuantity: DecimalInput,
+  targetQuantity: DecimalInput | null,
   level: StockLevel,
 ): boolean {
-  return computeStockLevel(currentQuantity, minimumQuantity) === level;
+  return computeStockLevel(currentQuantity, minimumQuantity, targetQuantity) === level;
+}
+
+/**
+ * Cantidad sugerida de Compras: `objetivo − actual`, exacta (Decimal, dos
+ * decimales como el resto de los DTO). `null` sin objetivo: la pantalla pide
+ * «Completar stock objetivo» en vez de inventar una cantidad. Nunca negativa
+ * (por encima del objetivo no hay nada que sugerir). Es una sugerencia: no
+ * registra compras ni modifica el stock.
+ */
+export function computeSuggestedPurchase(
+  currentQuantity: DecimalInput,
+  targetQuantity: DecimalInput | null,
+): string | null {
+  if (targetQuantity === null) return null;
+  const missing = new Prisma.Decimal(targetQuantity).sub(new Prisma.Decimal(currentQuantity));
+  return (missing.lt(0) ? new Prisma.Decimal(0) : missing).toString();
 }
 
 /**
@@ -47,29 +77,27 @@ export function matchesStockLevel(
 export const STOCK_LEVEL_IDS_SQL_PREFIX = 'SELECT "id" FROM "stock_items" WHERE CASE';
 
 /**
- * Prisma no puede expresar una comparación columna-vs-columna
- * (`current_quantity < minimum_quantity`) en el operador `where` del ORM, y
- * el filtro server-side de nivel exige que Postgres evalúe la condición (no
- * cargar el inventario en memoria para filtrar en JavaScript). El SQL es
- * parametrizado: la única entrada es el nivel, elegido por las ramas del
- * `CASE` — sin interpolación de valores.
- */
-/**
- * Misma regla que `computeStockLevel`, como expresión SQL sobre el alias
- * `i` de `stock_items` — la usan las agregaciones de reportes (Etapa 5C.2)
- * para contar niveles en Postgres. Sin parámetros: es texto fijo.
+ * Misma regla que `computeStockLevel`, como expresión SQL sobre el alias `i`
+ * de `stock_items` (comparación columna-vs-columna, que Prisma no expresa en
+ * `where`). La usan el filtro por nivel y las agregaciones de reportes. Sin
+ * parámetros: es texto fijo.
  */
 export const STOCK_LEVEL_CASE_SQL = Prisma.sql`CASE
-      WHEN i."current_quantity" <= 0 THEN 'critical'
-      WHEN i."current_quantity" < i."minimum_quantity" THEN 'low'
+      WHEN i."current_quantity" <= i."minimum_quantity" THEN 'critical'
+      WHEN i."target_quantity" IS NULL THEN 'pending'
+      WHEN i."current_quantity" * 2 <= i."minimum_quantity" + i."target_quantity" THEN 'low'
       ELSE 'ok'
     END`;
 
+/**
+ * Ids de los productos de un nivel, evaluado en Postgres (nunca cargar el
+ * inventario para filtrar en memoria). El nivel es el único parámetro.
+ */
 export function buildStockLevelIdsSql(level: StockLevel): Prisma.Sql {
-  return Prisma.sql`SELECT "id" FROM "stock_items" WHERE CASE ${level}
-      WHEN 'critical' THEN "current_quantity" <= 0
-      WHEN 'low' THEN "current_quantity" > 0 AND "current_quantity" < "minimum_quantity"
-      WHEN 'ok' THEN "current_quantity" > 0 AND "current_quantity" >= "minimum_quantity"
-      ELSE false
-    END`;
+  return Prisma.sql`SELECT "id" FROM "stock_items" WHERE CASE
+      WHEN "current_quantity" <= "minimum_quantity" THEN 'critical'
+      WHEN "target_quantity" IS NULL THEN 'pending'
+      WHEN "current_quantity" * 2 <= "minimum_quantity" + "target_quantity" THEN 'low'
+      ELSE 'ok'
+    END = ${level}`;
 }

@@ -41,7 +41,12 @@ import {
   type RecordCreator,
 } from '../lib/userIdentity';
 import { resolveActor, type RequestMeta, type TaskActor } from '../tasks/tasksService';
-import { buildStockLevelIdsSql, computeStockLevel, type StockLevel } from './stockLevel';
+import {
+  buildStockLevelIdsSql,
+  computeStockLevel,
+  computeSuggestedPurchase,
+  type StockLevel,
+} from './stockLevel';
 import {
   IDEMPOTENCY_KEY_PATTERN,
   type createStockMovementBodySchema,
@@ -137,6 +142,7 @@ const itemSelect = {
   area: true,
   unit: true,
   minimumQuantity: true,
+  targetQuantity: true,
   currentQuantity: true,
   active: true,
   category: { select: { id: true, name: true, area: true } },
@@ -202,10 +208,14 @@ function serializeItem(row: ItemRow) {
     area: row.area,
     unit: row.unit,
     minimumQuantity: row.minimumQuantity.toString(),
+    /** `null` = «Stock objetivo pendiente» (producto anterior a la columna). */
+    targetQuantity: row.targetQuantity?.toString() ?? null,
     currentQuantity: row.currentQuantity.toString(),
-    // Nivel calculado por el backend (Etapa 5C.1): el frontend solo lo
-    // renderiza; el `barPercent` de la barra sigue siendo calculado allá.
-    stockLevel: computeStockLevel(row.currentQuantity, row.minimumQuantity),
+    // Nivel y cantidad sugerida calculados por el backend (única fuente de la
+    // regla): el frontend solo los renderiza; la barra visual se calcula allá.
+    stockLevel: computeStockLevel(row.currentQuantity, row.minimumQuantity, row.targetQuantity),
+    /** Compras: objetivo − actual; `null` sin objetivo («Completar stock objetivo»). */
+    suggestedPurchaseQuantity: computeSuggestedPurchase(row.currentQuantity, row.targetQuantity),
     active: row.active,
     category: row.category,
   };
@@ -484,6 +494,14 @@ export interface CreateStockItemInput {
   categoryId: string;
   unit: string;
   minimumQuantity: string;
+  targetQuantity: string;
+}
+
+/** El objetivo cargado debe ser mayor que el mínimo (también lo exige un CHECK). */
+function assertTargetAboveMinimum(minimum: Prisma.Decimal, target: Prisma.Decimal): void {
+  if (!target.gt(minimum)) {
+    throw new ValidationError('El stock objetivo debe ser mayor que el stock mínimo.');
+  }
 }
 
 async function requireAssignableCategory(
@@ -514,6 +532,9 @@ export async function createStockItem(
   meta: RequestMeta,
 ) {
   requireAdmin(actor);
+  const minimumQuantity = new Prisma.Decimal(input.minimumQuantity);
+  const targetQuantity = new Prisma.Decimal(input.targetQuantity);
+  assertTargetAboveMinimum(minimumQuantity, targetQuantity);
   try {
     const item = await prisma.$transaction(async (tx) => {
       await requireAssignableCategory(tx, input.categoryId, input.area);
@@ -523,7 +544,8 @@ export async function createStockItem(
           area: input.area,
           categoryId: input.categoryId,
           unit: input.unit,
-          minimumQuantity: new Prisma.Decimal(input.minimumQuantity),
+          minimumQuantity,
+          targetQuantity,
           currentQuantity: new Prisma.Decimal(0),
         },
         select: itemSelect,
@@ -539,6 +561,7 @@ export async function createStockItem(
           categoryId: input.categoryId,
           unit: input.unit,
           minimumQuantity: input.minimumQuantity,
+          targetQuantity: input.targetQuantity,
           currentQuantity: '0',
           active: true,
         },
@@ -560,6 +583,7 @@ export interface UpdateStockItemInput {
   categoryId?: string;
   unit?: string;
   minimumQuantity?: string;
+  targetQuantity?: string;
 }
 
 /**
@@ -578,7 +602,14 @@ export async function updateStockItem(
     await prisma.$transaction(async (tx) => {
       const current = await tx.stockItem.findUnique({
         where: { id: itemId },
-        select: { name: true, area: true, categoryId: true, unit: true, minimumQuantity: true },
+        select: {
+          name: true,
+          area: true,
+          categoryId: true,
+          unit: true,
+          minimumQuantity: true,
+          targetQuantity: true,
+        },
       });
       if (!current) throw new StockItemNotFoundError();
 
@@ -587,6 +618,7 @@ export async function updateStockItem(
         categoryId?: string;
         unit?: string;
         minimumQuantity?: Prisma.Decimal;
+        targetQuantity?: Prisma.Decimal;
       } = {};
       const auditChanges: Record<string, string> = {};
       const auditPrevious: Record<string, string> = {};
@@ -607,6 +639,26 @@ export async function updateStockItem(
         changes.minimumQuantity = new Prisma.Decimal(input.minimumQuantity);
         auditChanges.minimumQuantity = input.minimumQuantity;
         auditPrevious.minimumQuantity = current.minimumQuantity.toString();
+      }
+      if (
+        input.targetQuantity !== undefined &&
+        (current.targetQuantity === null ||
+          !new Prisma.Decimal(input.targetQuantity).equals(current.targetQuantity))
+      ) {
+        changes.targetQuantity = new Prisma.Decimal(input.targetQuantity);
+        auditChanges.targetQuantity = input.targetQuantity;
+        auditPrevious.targetQuantity = current.targetQuantity?.toString() ?? 'null';
+      }
+      // Editar las cantidades de configuración exige un objetivo válido: un
+      // producto anterior sin objetivo puede renombrarse, recategorizarse o
+      // desactivarse, pero no cambiar su mínimo sin completar el objetivo.
+      if (changes.minimumQuantity !== undefined || changes.targetQuantity !== undefined) {
+        const minimum = changes.minimumQuantity ?? current.minimumQuantity;
+        const target = changes.targetQuantity ?? current.targetQuantity;
+        if (target === null) {
+          throw new ValidationError('Completá el stock objetivo para cambiar el stock mínimo.');
+        }
+        assertTargetAboveMinimum(new Prisma.Decimal(minimum), new Prisma.Decimal(target));
       }
       if (input.categoryId !== undefined && input.categoryId !== current.categoryId) {
         const category = await requireAssignableCategory(tx, input.categoryId, current.area);
@@ -1247,6 +1299,7 @@ export async function deleteStockItem(
           categoryId: true,
           unit: true,
           minimumQuantity: true,
+          targetQuantity: true,
           currentQuantity: true,
           active: true,
         },
@@ -1262,6 +1315,7 @@ export async function deleteStockItem(
         previousState: {
           ...item,
           minimumQuantity: item.minimumQuantity.toString(),
+          targetQuantity: item.targetQuantity?.toString() ?? null,
           currentQuantity: item.currentQuantity.toString(),
         },
         ...meta,

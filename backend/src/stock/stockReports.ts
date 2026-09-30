@@ -358,13 +358,13 @@ export async function getStockReportSummary(
   // Nivel actual por área (no depende del período ni del tipo/persona/destino).
   const areas = new Map<'HOUSE' | 'GARDEN', Record<StockLevel, number>>();
   for (const row of levelRows) {
-    const entry = areas.get(row.area) ?? { critical: 0, low: 0, ok: 0 };
+    const entry = areas.get(row.area) ?? { critical: 0, low: 0, ok: 0, pending: 0 };
     entry[row.level] += row.count;
     areas.set(row.area, entry);
   }
   const byArea = (['HOUSE', 'GARDEN'] as const)
     .filter((area) => !filters.area || filters.area === area)
-    .map((area) => ({ area, ...(areas.get(area) ?? { critical: 0, low: 0, ok: 0 }) }));
+    .map((area) => ({ area, ...(areas.get(area) ?? { critical: 0, low: 0, ok: 0, pending: 0 }) }));
   const sumLevel = (level: StockLevel) => byArea.reduce((sum, row) => sum + row[level], 0);
 
   const productDto = (row: ProductRow) => ({
@@ -491,6 +491,8 @@ export async function getStockReportSummary(
       critical: sumLevel('critical'),
       low: sumLevel('low'),
       ok: sumLevel('ok'),
+      /** Fuera de crítico y sin stock objetivo: nivel neutral de configuración pendiente. */
+      pending: sumLevel('pending'),
       byArea,
     },
     products: {
