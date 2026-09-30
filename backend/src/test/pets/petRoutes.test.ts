@@ -49,7 +49,7 @@ describe('router de mascotas — superficie', () => {
     const mutations = [...source.matchAll(/petsRouter\.(post|patch)\(([^)]*)\)/g)].map(
       (m) => m[2] ?? '',
     );
-    expect(mutations).toHaveLength(9);
+    expect(mutations).toHaveLength(10);
     for (const args of mutations) {
       expect(args).toMatch(
         args.includes("'/:id/photo',") ? /parsePetPhotoBody/ : /requireJsonContentType/,

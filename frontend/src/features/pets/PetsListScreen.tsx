@@ -15,8 +15,10 @@ import { PetFormDialog } from './PetFormDialog';
 import { PetPhoto } from './PetPhoto';
 import { PetTypesDialog } from './PetTypesDialog';
 import { errorMessageOf, isSessionExpired } from './petErrors';
-import { birthdayNotice, formatKg, petSummary } from './petLabels';
+import { birthdayNotice, dueSummaryText, formatKg, petSummary } from './petLabels';
+import { PetsSubnav } from './PetsSubnav';
 import { usePetsModuleState } from './petsModuleState';
+import { useBusinessDayRefresh } from './useBusinessDayRefresh';
 
 const PAGE_SIZE = 24;
 
@@ -62,6 +64,8 @@ export function PetsListScreen() {
     if (expired) handleSessionExpired();
   }, [expired, handleSessionExpired]);
 
+  useBusinessDayRefresh(listQuery.data?.pages[0]?.refreshAt);
+
   const types = typesQuery.data?.types ?? [];
   const chipTypes = types.filter((type) => type.activeAnimalCount > 0 || type.id === typeFilter);
   const seen = new Set<string>();
@@ -99,6 +103,7 @@ export function PetsListScreen() {
           ) : undefined
         }
       />
+      <PetsSubnav />
 
       {isAdmin ? (
         <div className="filter-scroller" role="group" aria-label="Filtrar por estado">
@@ -163,6 +168,12 @@ export function PetsListScreen() {
             <ul className="pets__list" aria-label="Mascotas">
               {pets.map((pet) => {
                 const notice = birthdayNotice(pet.daysToBirthday);
+                const due = dueSummaryText(pet.dueSummary);
+                const dueTone = pet.dueSummary?.overdue
+                  ? 'overdue'
+                  : pet.dueSummary?.dueToday
+                    ? 'due_today'
+                    : 'upcoming';
                 return (
                   <li key={pet.id}>
                     <Link to={`/pets/${pet.id}`} className="pet-card">
@@ -183,6 +194,13 @@ export function PetsListScreen() {
                           </span>
                         ) : null}
                         {notice ? <span className="pet-card__birthday">{notice}</span> : null}
+                        {due ? (
+                          <span className={`pet-card__due pet-card__due--${dueTone}`}>
+                            <span aria-hidden="true">📅 </span>
+                            <span className="visually-hidden">Atenciones programadas: </span>
+                            {due}
+                          </span>
+                        ) : null}
                       </span>
                       <ChevronRightIcon className="pet-card__chevron" />
                     </Link>

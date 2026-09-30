@@ -434,3 +434,87 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
+
+/* ── Próximas atenciones y 📅 Vencimientos ──────────────────────────────── */
+
+.pets-subnav {
+  margin-bottom: var(--space-3);
+}
+
+.pet-card__due {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-info);
+}
+
+.pet-card__due--overdue {
+  color: var(--color-danger);
+}
+
+.pet-card__due--due_today {
+  color: var(--color-warning);
+}
+
+.pet-due {
+  padding-block: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.pet-due:last-child {
+  border-bottom: 0;
+}
+
+.pet-due__pet {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-action);
+  text-decoration: none;
+}
+
+.pet-due__dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-1) 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.pet-due__relative {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.pet-due--overdue .pet-due__relative {
+  color: var(--color-danger);
+}
+
+.pet-due--due_today .pet-due__relative {
+  color: var(--color-warning);
+}
+
+.pet-due__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.pet-due__field {
+  display: block;
+  margin-top: var(--space-3);
+}
+
+.pet-history__due {
+  margin: var(--space-1) 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.pet-record-form__fulfilling {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}

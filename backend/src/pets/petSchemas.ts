@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { normalizeStockText } from '../stock/stockSchemas';
 import { MEDICAL_RECORD_TYPES, PET_TYPE_ICON_OPTIONS } from './petCatalog';
+import { DUE_STATUSES } from './petDue';
 
 /**
  * Contrato HTTP de 🐾 Mascotas (Etapa 5M). Todo `.strict()`: el cliente
@@ -123,8 +124,10 @@ export const listPetRecordsQuerySchema = z
 
 /**
  * "Nuevo registro": tipo, fecha (hoy o pasada: todos son hechos ya
- * ocurridos, no hay campo de próximo control en el prototipo), peso en kg
- * solo para ⚖️ Peso y descripción opcional.
+ * ocurridos), peso en kg solo para ⚖️ Peso y descripción opcional. Opcionales:
+ * «Fecha de próxima aplicación o control» (nunca en Peso; el servicio exige
+ * que sea posterior a la atención) y `fulfillsRecordId`, el pendiente que esta
+ * atención cumple («Registrar aplicación / control»).
  */
 export const createPetRecordBodySchema = z
   .object({
@@ -136,9 +139,18 @@ export const createPetRecordBodySchema = z
       .refine((value) => !/^0(\.0+)?$/.test(value), 'El peso debe ser mayor a cero.')
       .optional(),
     description: plainText('La descripción', 1, PET_RECORD_DESCRIPTION_MAX).optional(),
+    nextDueDate: dateSchema.optional(),
+    fulfillsRecordId: uuidSchema.optional(),
   })
   .strict()
   .superRefine((body, context) => {
+    if (body.type === 'WEIGHT' && body.nextDueDate !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'El peso no lleva fecha de próxima aplicación o control.',
+        path: ['nextDueDate'],
+      });
+    }
     if (body.type === 'WEIGHT' && body.weightKg === undefined) {
       context.addIssue({ code: 'custom', message: 'Ingresá el peso.', path: ['weightKg'] });
     }
@@ -150,3 +162,17 @@ export const createPetRecordBodySchema = z
       });
     }
   });
+
+/** Completar o corregir la próxima fecha de un registro (ADMIN): solo ese dato. */
+export const updatePetRecordNextDueBodySchema = z.object({ nextDueDate: dateSchema }).strict();
+
+/** 📅 Vencimientos: filtros por mascota, tipo y estado, paginados en el backend. */
+export const listPetDueQuerySchema = z
+  .object({
+    petId: uuidSchema.optional(),
+    type: z.enum(MEDICAL_RECORD_TYPES, { message: 'Tipo de registro inválido.' }).optional(),
+    status: z.enum(DUE_STATUSES, { message: 'Estado inválido.' }).optional(),
+    page: pageSchema,
+    pageSize: pageSizeSchema(50, 20),
+  })
+  .strict();

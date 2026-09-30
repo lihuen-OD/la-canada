@@ -1197,12 +1197,35 @@ model AnimalMedicalRecord {
   voidedByUserId String?   @map("voided_by_user_id") @db.Uuid
   voidedBy       User?     @relation("AnimalMedicalRecordVoidedBy", fields: [voidedByUserId], references: [id])
 
+  /// Fecha de la próxima aplicación o control, cargada a mano según la
+  /// indicación veterinaria (nunca calculada). Fecha de calendario de
+  /// `BUSINESS_TIME_ZONE`, posterior a `recordDate` (puede estar vencida si se
+  /// registra una atención histórica). Nula en los registros anteriores: no
+  /// generan pendientes ni se consideran vencidos. Nunca en ⚖️ Peso.
+  nextDueDate DateTime? @map("next_due_date") @db.Date
+
+  /// Registro cuyo pendiente cumple ESTE registro («Registrar aplicación /
+  /// control»): vínculo explícito, nunca deducido por tipo, texto o fecha. Un
+  /// pendiente queda cumplido mientras exista un registro VIGENTE que lo
+  /// cumpla; si se anula, vuelve a estar pendiente (el vínculo se conserva
+  /// como antecedente). El índice único parcial impide que dos registros
+  /// vigentes cumplan el mismo pendiente.
+  fulfillsRecordId String?               @map("fulfills_record_id") @db.Uuid
+  fulfills         AnimalMedicalRecord?  @relation("MedicalRecordFulfillment", fields: [fulfillsRecordId], references: [id], onDelete: Restrict)
+  fulfillments     AnimalMedicalRecord[] @relation("MedicalRecordFulfillment")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  /// Un pendiente se cumple una sola vez entre registros vigentes.
+  @@unique([fulfillsRecordId], where: raw("voided_at IS NULL"), map: "animal_medical_records_active_fulfillment_key")
   @@index([animalId])
   /// Etapa 5M — historial paginado por fecha dentro de cada mascota.
   @@index([animalId, recordDate])
+  /// Vencimientos: pendientes de todas las mascotas en orden de fecha.
+  @@index([nextDueDate])
+  /// Próximas atenciones de una mascota e indicadores del listado.
+  @@index([animalId, nextDueDate])
   @@map("animal_medical_records")
 }
 

@@ -20,6 +20,7 @@ import {
   makePet,
   recordsResponse,
   typesResponse,
+  dueResponse,
 } from './fixtures/pets';
 import { eventsResponse, gardenResponse, newsResponse, summaryResponse } from './fixtures/more';
 
@@ -104,6 +105,7 @@ function body(path: string): unknown {
     return path.includes('?') ? historyResponse() : { collection: makeCollection() };
   }
   if (path.startsWith('/pets/types')) return typesResponse();
+  if (path.startsWith('/pets/due')) return dueResponse();
   if (/^\/pets\/[^/?]+\/records/.test(path)) return recordsResponse();
   if (/^\/pets\/[^/?]+$/.test(path)) return detailResponse();
   if (path.startsWith('/pets')) return petsListResponse();
@@ -473,6 +475,7 @@ describe('🐾 Mascotas (Etapa 5M)', () => {
     await user.click(card);
     await screen.findByRole('list', { name: 'Registros clínicos' });
     expect(count(`/pets/${makePet().id}`)).toBe(2); // ficha + historial, una vez cada uno
+    expect(count('/pets/due')).toBe(1); // «Próximas atenciones» de la ficha
     // "Mascotas" sigue marcado como destino activo dentro de la ficha.
     expect(within(mainNav()).getByRole('link', { name: 'Mascotas' })).toHaveAttribute(
       'aria-current',

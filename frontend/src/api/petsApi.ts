@@ -2,6 +2,8 @@ import { apiRequest } from './httpClient';
 import type {
   CreatePetRecordRequest,
   PetDetailResponse,
+  PetDueFilters,
+  PetDueResponse,
   PetFormRequest,
   PetRecord,
   PetRecordsResponse,
@@ -49,6 +51,33 @@ export async function fetchPetRecords(
   });
   if (params.type) search.set('type', params.type);
   return apiRequest<PetRecordsResponse>(`/pets/${petId}/records?${search.toString()}`, {
+    authenticated: true,
+  });
+}
+
+/** 📅 Vencimientos (todo usuario autenticado): filtros y paginación en el backend. */
+export async function fetchPetDue(
+  filters: PetDueFilters & { page: number; pageSize: number },
+): Promise<PetDueResponse> {
+  const search = new URLSearchParams({
+    page: String(filters.page),
+    pageSize: String(filters.pageSize),
+  });
+  if (filters.petId) search.set('petId', filters.petId);
+  if (filters.type) search.set('type', filters.type);
+  if (filters.status) search.set('status', filters.status);
+  return apiRequest<PetDueResponse>(`/pets/due?${search.toString()}`, { authenticated: true });
+}
+
+/** Completar o corregir la próxima fecha de un registro (solo ADMIN). */
+export async function updatePetRecordNextDue(
+  petId: string,
+  recordId: string,
+  nextDueDate: string,
+): Promise<{ record: PetRecord }> {
+  return apiRequest<{ record: PetRecord }>(`/pets/${petId}/records/${recordId}/next-due`, {
+    method: 'PATCH',
+    body: { nextDueDate },
     authenticated: true,
   });
 }

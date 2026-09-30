@@ -1,6 +1,6 @@
 import type { ChickenCoopPeriodDays } from './chickenCoopTypes';
 import type { EventType, GalleryCategory, TeamFilter } from './moreTypes';
-import type { MedicalRecordType } from './petTypes';
+import type { MedicalRecordType, PetDueFilters } from './petTypes';
 import type {
   ListStockItemsParams,
   StockCategoryStatusFilter,
@@ -98,6 +98,17 @@ export const queryKeys = {
       type === undefined
         ? ([...scope(userId), 'pets', 'records', petId] as const)
         : ([...scope(userId), 'pets', 'records', petId, type] as const),
+    /** 📅 Vencimientos y «Próximas atenciones» por filtros; el prefijo invalida todos. */
+    due: (userId: string, filters: PetDueFilters) =>
+      [
+        ...scope(userId),
+        'pets',
+        'due',
+        filters.petId ?? 'all',
+        filters.type ?? 'all',
+        filters.status ?? 'open',
+      ] as const,
+    dueAll: (userId: string) => [...scope(userId), 'pets', 'due'] as const,
     /** Imagen por id de archivo: inmutable (una foto nueva es otro id). */
     photo: (userId: string, fileId: string) => [...scope(userId), 'pets', 'photo', fileId] as const,
   },
