@@ -999,7 +999,7 @@ Neon Object Storage **sigue siendo el almacenamiento principal**: la app sube, c
 | Variable | Valor |
 | --- | --- |
 | `DRIVE_BACKUP_ENABLED` | `true` para activar (vacío/`false` = desactivada) |
-| `DRIVE_BACKUP_DESTINATION_ID` | ID del destino. Proporcionado: `0AKPasFkRa2CPUk9PVA` (el prefijo `0A…` es el de una unidad compartida; confirmarlo con `npm run drive:check`) |
+| `DRIVE_BACKUP_DESTINATION_ID` | ID del destino. Proporcionado: `0AKPasFkRa2CPUk9PVA` — confirmado por la API: raíz de la unidad compartida «La Cañada» |
 | `DRIVE_BACKUP_ENVIRONMENT` | exactamente `demo` o `production`. **Nunca se deduce de `NODE_ENV`** |
 | `DRIVE_BACKUP_CREDENTIALS_FILE` | ruta **absoluta** del JSON de la cuenta de servicio |
 
@@ -1009,6 +1009,8 @@ Neon Object Storage **sigue siendo el almacenamiento principal**: la app sube, c
 - Cuenta de servicio `la-canada-fotos@la-canada-510410.iam.gserviceaccount.com`, rol Colaborador en la unidad compartida; alcance OAuth `https://www.googleapis.com/auth/drive` (la unidad no la creó la app, así que `drive.file` no alcanza). La app nunca cambia permisos ni borra.
 
 **Verificación real** (manual, solo `demo`): `npm run drive:check -w backend` informa si el destino es la raíz de una unidad compartida o una carpeta y sus permisos (`canAddChildren`, `canListChildren`, `canDeleteChildren`); con `-- --synthetic-upload` además sube **una** imagen PNG sintética generada en memoria a `demo/verificacion/<AAAA>/<MM>`, repite la creación con el mismo ID para comprobar el `409` y muestra el ID del archivo y de la carpeta. Nunca copia fotos reales, nunca escribe en `production` (se rechaza) y nunca borra.
+
+**Verificación real ejecutada el 2026-10-02** (`npm run drive:check -w backend -- --synthetic-upload`, solo `demo`): el destino `0AKPasFkRa2CPUk9PVA` es la **raíz de la unidad compartida** «La Cañada» (`drives.get`), con `canAddChildren: true`, `canListChildren: true` y `canDeleteChildren: false` (lo esperado para Colaborador). Se creó la carpeta `demo/verificacion/2026/10` (`1o6kzRM4Afe3wei2UGzwF_uV4oxgXr7cb`) y el PNG sintético `verificacion-sintetica_verificacion-03e4744f-394a-4705-89b2-7713181f4c3d.png` (`1QhE2Cp-zhlu04-a7o5On8Q21tSVZTHC2`, 8831 bytes); la repetición con el mismo ID respondió **409** y quedó **1** copia con la marca. No se borró nada; las filas de esas carpetas quedan en `drive_backup_folders` de `demo`.
 
 **Sin carga histórica**: solo se copian fotos confirmadas con la copia ya activada. Para incorporar el historial más adelante bastaría un script con la misma guarda que inserte trabajos `PENDING` para los `file_assets` `AVAILABLE` de `MEMORY`/`TASK_EVIDENCE`/`ANIMAL_PROFILE` sin fila en `drive_backup_jobs` (`INSERT … SELECT … ON CONFLICT (file_asset_id) DO NOTHING`), en lotes; el trabajador los procesaría con el mismo ritmo y las mismas garantías.
 
