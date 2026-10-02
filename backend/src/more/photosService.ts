@@ -4,6 +4,7 @@ import type { Prisma } from '../generated/prisma/client';
 import type { PhotoCategory } from '../generated/prisma/enums';
 import { config } from '../config';
 import { recordAuditLog } from '../auth/auditLog';
+import { enqueueDriveBackup, notifyDriveBackup } from '../driveBackup';
 import {
   EmployeeInvalidError,
   ForbiddenError,
@@ -253,6 +254,9 @@ export async function uploadPhoto(
       data: { status: 'AVAILABLE', etag: etag ?? null },
     });
     if (count === 0) throw new PhotoNotFoundError();
+    // Copia adicional en Drive (si está activada): el trabajo se confirma junto
+    // con la foto; la llamada a Google ocurre después, fuera de la transacción.
+    await enqueueDriveBackup(tx, file.id, 'fotos');
     const row = await tx.fileAsset.findUniqueOrThrow({
       where: { id: file.id },
       select: photoSelect,
@@ -276,7 +280,9 @@ export async function uploadPhoto(
 
   try {
     if (idempotencyKey === undefined) {
-      return { kind: 'created', body: await prisma.$transaction(confirm) };
+      const body = await prisma.$transaction(confirm);
+      notifyDriveBackup();
+      return { kind: 'created', body };
     }
     const result = await executeIdempotent({
       actorUserId: actor.userId,
@@ -288,6 +294,7 @@ export async function uploadPhoto(
     });
     // Otra solicitud con la misma clave ganó la carrera: este objeto sobra.
     if (result.kind === 'replay') await discardUpload(storage, { id: file.id, objectKey }, now);
+    else notifyDriveBackup();
     return result;
   } catch (error) {
     await discardUpload(storage, { id: file.id, objectKey }, now);

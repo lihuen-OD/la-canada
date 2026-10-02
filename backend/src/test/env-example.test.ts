@@ -10,12 +10,23 @@ import { describe, expect, it } from 'vitest';
 
 const ENV_EXAMPLE = readFileSync(resolve(__dirname, '../../../.env.example'), 'utf-8');
 
-describe('.env.example — Object Storage reemplaza a Google Drive', () => {
-  it('no contiene ninguna variable ni mención de Google Drive', () => {
+describe('.env.example — Object Storage principal y copia opcional en Drive', () => {
+  it('no contiene credenciales de Google ni las variables del diseño descartado', () => {
     expect(ENV_EXAMPLE).not.toMatch(/GOOGLE_DRIVE_FOLDER_ID/);
     expect(ENV_EXAMPLE).not.toMatch(/GOOGLE_SERVICE_ACCOUNT_EMAIL/);
     expect(ENV_EXAMPLE).not.toMatch(/GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY/);
-    expect(ENV_EXAMPLE.toLowerCase()).not.toMatch(/google/);
+    expect(ENV_EXAMPLE).not.toMatch(/PRIVATE KEY|private_key|gserviceaccount\.com/);
+    expect(ENV_EXAMPLE).not.toMatch(/VITE_DRIVE/);
+  });
+
+  it('declara la copia en Drive (Etapa 5Z) desactivada y sin valores reales', () => {
+    const lines = ENV_EXAMPLE.split('\n').filter((line) => line.startsWith('DRIVE_BACKUP_'));
+    expect(lines).toEqual([
+      'DRIVE_BACKUP_ENABLED=false',
+      'DRIVE_BACKUP_DESTINATION_ID=',
+      'DRIVE_BACKUP_ENVIRONMENT=',
+      'DRIVE_BACKUP_CREDENTIALS_FILE=',
+    ]);
   });
 
   it('contiene las 5 variables conceptuales de Object Storage', () => {

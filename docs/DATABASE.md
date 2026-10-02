@@ -520,6 +520,12 @@ Migración `20260928100000_garden_plan_versions` (offline con `prisma migrate di
 
 Verificación contra `demo` después de aplicar (misma receta que las etapas anteriores): `SELECT version_number FROM garden_plan_versions` sin filas, `\d garden_plan_versions` con los dos índices únicos y las dos FK `RESTRICT`, `\dT+` con `GARDEN_PLAN` en `PhotoCategory`, y la integración de 5Y (12 pruebas) que duplica a mano `version_number` y `file_asset_id` para comprobar que **Postgres** los rechaza.
 
+### Etapa 5Z — Copia de fotos en Drive (`20261002120000_drive_photo_backup`, aplicada a `demo`)
+
+- **`drive_backup_jobs`**: un trabajo por foto (`file_asset_id` único, FK `RESTRICT` a `file_assets`), `environment` (`DriveBackupEnvironment`: `DEMO`/`PRODUCTION`), `module` (`CHECK IN ('fotos','mascotas')`), `status` (`DriveBackupStatus`: `PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`, `SOURCE_MISSING`), `attempts` (`CHECK >= 0`), `next_attempt_at`, `claim_token`/`claim_expires_at` (`CHECK`: obligatorios en `IN_PROGRESS`), `remote_file_id` (único; `CHECK`: obligatorio con `completed_at` en `COMPLETED`), `remote_folder_id`, `last_error_kind`/`last_error_message` (saneados), timestamps. Índice `(status, next_attempt_at)`.
+- **`drive_backup_folders`**: `path` (clave primaria, p. ej. `demo/fotos/2026/10`) → `remote_folder_id` (único).
+- Aditiva: no toca tablas ni datos existentes; arranca vacía (sin carga histórica). Para `production`: `db:migrate:deploy` con la guarda, sin backfill. Detalle en `docs/ARCHITECTURE.md` §37.
+
 ### Perfil y Familia — `UserProfile` y `EmployeeProfile`/`EmployeeChild` son complementarias
 
 `demo` (la base de Neon configurada en `.env`; desde este entorno no hay conexión a `production`) tiene **11** migraciones aplicadas y esta rama tiene **10**: la adicional es `20260928120000_personal_profile_family`, que pertenece al **trabajo paralelo de Claude en el worktree principal**. No es una migración faltante ni un conflicto: los dos modelos conviven y se complementan.

@@ -96,6 +96,8 @@ No existe `JWT_REFRESH_SECRET`: el refresh token es un valor opaco generado con 
 
 Variables previstas para una etapa futura (Object Storage — no se usan todavía, no hace falta completarlas para correr el health check local): `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_REGION`, `OBJECT_STORAGE_BUCKET`, `OBJECT_STORAGE_ACCESS_KEY_ID`, `OBJECT_STORAGE_SECRET_ACCESS_KEY` (Neon Object Storage, reemplaza a Google Drive — ver `docs/ARCHITECTURE.md`).
 
+Copia adicional opcional de fotos en Google Drive (Etapa 5Z, desactivada por defecto): `DRIVE_BACKUP_ENABLED`, `DRIVE_BACKUP_DESTINATION_ID`, `DRIVE_BACKUP_ENVIRONMENT` (`demo`\|`production`, explícito) y `DRIVE_BACKUP_CREDENTIALS_FILE` (ruta absoluta del JSON, fuera del repo; en Render, un Secret File en `/etc/secrets/`). Verificación: `npm run drive:check -w backend`. Ver `docs/ARCHITECTURE.md` §37.
+
 Ninguna de estas variables tiene valores reales en `.env.example` ni en el código.
 
 ## Ejecución

@@ -144,6 +144,7 @@ Puntos que la migración debe resolver — **no se decide en este documento**, s
 
 - No implementado en el prototipo (las fotos son base64 en Postgres/Supabase).
 - **Historial**: la arquitectura objetivo original (Etapa 0-2) prevía Google Drive vía backend con credenciales de servicio. Se evaluó y se descartó en esta revisión — ninguna instrucción activa de este documento propone Google Drive; se deja esta mención solo por trazabilidad.
+- **Actualización Etapa 5Z**: Neon sigue siendo el único almacenamiento principal. Se agregó una **copia adicional e independiente** de fotografías en Google Drive, opcional y desactivada por defecto, que nunca condiciona la subida ni la lectura — ver §37.
 
 ### 9.1 Proveedor y modelo de datos
 
@@ -241,7 +242,7 @@ Implementado y verificado en la Etapa 1 (no es solo un plan): hay un único `.en
 
 | Servicio | Variables que usa hoy | Origen en producción |
 |---|---|---|
-| Backend (Render) | `NODE_ENV`, `PORT`, `FRONTEND_URL`, `DATABASE_URL`, `JWT_ACCESS_SECRET` (todas obligatorias, misma fuente de verdad en `config/env.ts` — sin cualquiera de ellas el backend no arranca, ver sección 13.7 y 14.2); `DIRECT_URL`, `DATABASE_TARGET` (opcionales, solo scripts locales); `ACCESS_TOKEN_TTL`/`REFRESH_TOKEN_TTL`/`COOKIE_SAME_SITE` (opcionales, con default); `OBJECT_STORAGE_*` (previstas para una etapa futura) | Variables de entorno configuradas en el dashboard de Render para ese servicio — inyectadas directamente en `process.env` del proceso Node, sin ningún archivo |
+| Backend (Render) | `NODE_ENV`, `PORT`, `FRONTEND_URL`, `DATABASE_URL`, `JWT_ACCESS_SECRET` (todas obligatorias, misma fuente de verdad en `config/env.ts` — sin cualquiera de ellas el backend no arranca, ver sección 13.7 y 14.2); `DIRECT_URL`, `DATABASE_TARGET` (opcionales, solo scripts locales); `ACCESS_TOKEN_TTL`/`REFRESH_TOKEN_TTL`/`COOKIE_SAME_SITE` (opcionales, con default); `OBJECT_STORAGE_*` (previstas para una etapa futura); `DRIVE_BACKUP_*` (opcionales, copia en Drive, §37 — el JSON como Secret File) | Variables de entorno configuradas en el dashboard de Render para ese servicio — inyectadas directamente en `process.env` del proceso Node, sin ningún archivo |
 | Frontend (Netlify) | Ninguna — **Actualización Etapa 3C**: `VITE_API_URL` se eliminó; el frontend usa rutas relativas bajo `/api`, resueltas por el proxy de Netlify en producción (sección 14.14), nunca una variable `VITE_*` con la URL del backend | — |
 
 **Por qué esto funciona sin un `.env` en producción — comprobado, no solo asumido:**
@@ -964,3 +965,53 @@ Un ADMIN puede elegir como persona que realizó una actividad a cualquier emplea
 - **API** (`/api/v1/pets`): `POST /:id/records` acepta `nextDueDate` y `fulfillsRecordId` (misma transacción e idempotencia; P2002 del índice parcial → 409 `PET_DUE_ALREADY_FULFILLED`). `PATCH /:id/records/:recordId/next-due` (ADMIN). `GET /due?petId&type&status&page&pageSize` (todos): conteo + página + relaciones de la página. El historial agrega `nextDue` y `fulfills`; el listado agrega `dueSummary` con **una** consulta para toda la página (nunca una por animal). Las respuestas incluyen `today` y `refreshAt` (inicio del próximo día de negocio).
 - **Frontend**: pestaña «📅 Vencimientos» (`/pets/due`, pestañas `pill-nav` como Stock); tarjeta «Próximas atenciones» en la ficha (mismo endpoint, filtrado por mascota); «Registrar aplicación/control» usa el formulario de siempre en modo cumplimiento (desde Vencimientos llega con `?cumplir=<id>`). Caché: `queryKeys.pets.due`/`dueAll`. Registrar, anular o corregir invalidan ficha, historial, listado y Vencimientos; activar o desactivar una mascota, también Vencimientos. `useBusinessDayRefresh` revalida la familia de Mascotas a la hora de `refreshAt` (un temporizador) y al volver a la pestaña si ya pasó, sin sondeo.
 - **Requests**: la ficha pasa de 2 a 3 (se suma «Próximas atenciones»). El listado sigue con 2 (+1 sentencia en el backend para los indicadores). Vencimientos: 2 (lista + opciones de mascota). Revisitas dentro de la frescura: 0.
+
+## 37. Copia adicional de fotografías en Google Drive (Etapa 5Z)
+
+Neon Object Storage **sigue siendo el almacenamiento principal**: la app sube, consulta y muestra las fotos solo desde Neon (§9, §25, §26). Drive es un **archivo adicional e independiente**, procesado en segundo plano por el backend. Un fallo, demora o falta de configuración de Drive nunca impide subir, consultar ni mostrar fotos. Código en `backend/src/driveBackup/` (`config`, `googleAuth`, `driveClient`, `store`, `worker`, `index`), sin SDK nuevo: REST de Drive v3 sobre `fetch` y firma RS256 con `node:crypto`.
+
+**Qué se copia**: solo fotografías nuevas confirmadas y vinculadas a un registro válido — 📸 Fotos (`MEMORY`, `TASK_EVIDENCE`; módulo `fotos`) y la foto de la ficha de 🐾 Mascotas (`ANIMAL_PROFILE`; módulo `mascotas`). **No** se copia el plano del 🌳 Jardín (`GARDEN_PLAN`: es un documento, no una fotografía), ni uploads abandonados o fallidos (`PENDING_UPLOAD`/`UPLOAD_FAILED` nunca generan trabajo), ni archivos temporales. La base lo refuerza: `CHECK module IN ('fotos','mascotas')`.
+
+**Alta durable**: `enqueueDriveBackup(tx, fileAssetId, módulo)` inserta la fila de `drive_backup_jobs` **dentro de la misma transacción** que deja la foto `AVAILABLE` (en Fotos, también dentro de la de idempotencia): si la confirmación se revierte, el trabajo tampoco existe; si el proceso se reinicia después del commit, el trabajo sigue ahí. Ninguna llamada a Google ocurre dentro de una transacción; después del commit `notifyDriveBackup()` solo despierta al trabajador del proceso. Con la copia desactivada no se crea nada.
+
+**Cola** (`drive_backup_jobs`, PostgreSQL, sin infraestructura extra): `status` (`PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`, `SOURCE_MISSING`), `attempts`, `next_attempt_at`, `claim_token` + `claim_expires_at`, `remote_file_id`, `remote_folder_id`, `last_error_kind`/`last_error_message` (saneados), `completed_at`. Reclamo atómico: `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED LIMIT n) RETURNING`, con un token aleatorio por fila y vencimiento de 10 min; el reclamo cuenta un intento. Toda escritura posterior exige el token: un trabajador cuyo reclamo venció ya no puede cerrar ni pisar el trabajo. Un `IN_PROGRESS` vencido (proceso caído) lo retoma cualquier trabajador.
+
+**Procesamiento**: lotes de 5, concurrencia 2, timeouts por llamada (metadatos 20 s, subida 120 s, lectura de Neon 150 s). El planificador corre al arrancar (retoma pendientes y reclamos vencidos), sigue mientras los lotes salgan llenos y después **duerme hasta el próximo vencimiento conocido** (un timer `unref`); si no hay trabajos, solo revisa cada 30 min. No hay sondeo frecuente, keep-alive ni cron externo. **Render gratuito puede dormir**: las copias pendientes se retoman cuando el backend vuelve a estar activo (al arrancar, o a la siguiente revisión).
+
+**Contra duplicados y reinicios** (verificado en la documentación oficial de Drive, "Upload file data" → *pre-generated IDs*: «You can safely retry uploads with pre-generated IDs if there's an indeterminate server error or timeout. If the file action is successful, subsequent retries return a 409 Conflict and duplicate files aren't created»):
+
+1. Antes de subir, el trabajador pide un ID con `files.generateIds` y lo **guarda en `remote_file_id`** (condicionado a su token). Recién después sube con ese `id` en los metadatos.
+2. En cualquier reintento con `remote_file_id`, primero `files.get(id)`: si existe y su `appProperties.laCanadaFileAssetId` coincide, se cierra `COMPLETED` sin volver a leer Neon ni subir (respuesta perdida, proceso caído, timeout).
+3. Si no existe, se sube **con el mismo ID**; un `409` se resuelve con otro `files.get` que confirme que es esta copia.
+4. Defensa adicional: si un reintento no tiene ID guardado (nunca se llegó a subir), se busca por `appProperties has { key='laCanadaFileAssetId' and value='<fileAssetId>' }` en la unidad. La identidad nunca se deduce del nombre.
+5. `remote_file_id` es único en la base y `file_asset_id` también (una copia por foto).
+
+**Subida**: reanudable (`uploadType=resumable`, necesaria porque las fotos de la galería pueden pesar hasta 10 MB y la multiparte admite 5 MB), con `supportsAllDrives=true` en toda llamada y `corpora=drive`/`driveId`/`includeItemsFromAllDrives` en las búsquedas. El contenido se transfiere **por streaming** desde Neon (`getObjectStream`) a Drive con `Content-Length` exacto; se verifica que el largo de Neon coincida con `FileAsset.sizeBytes` (≤ 10 MB) y se corta el stream si trae más. La URL de la sesión de subida nunca se registra ni se persiste.
+
+**Organización**: `<destino>/demo|production/<módulo>/<AAAA>/<MM>`, con el año/mes de la **fecha original de carga** (`FileAsset.createdAt`) en `BUSINESS_TIME_ZONE`. Nombre: `AAAA-MM-DD_<recuerdo|evidencia|mascota>_<fileAssetId>.<ext>`; sin títulos, nombres de personas ni URLs. Metadatos: solo `appProperties` privadas de la app (`laCanadaFileAssetId`, `laCanadaEnv`; en carpetas, `laCanadaFolder` = ruta lógica). Las carpetas se reutilizan: `drive_backup_folders` (`path` clave primaria → `remote_folder_id` único) y una caché en memoria; para crearla, el ID se pre-genera y se inserta con `ON CONFLICT DO NOTHING` (gana el primero), y la carpeta se crea en Drive con ese ID (un segundo intento da `409`). Si la base perdiera la fila, se reutiliza la carpeta existente encontrada por `laCanadaFolder`. Nada se publica ni recibe permisos.
+
+**Eliminación**: borrar una foto en la app (o reemplazar la foto de una mascota) **no toca Drive**: una copia `COMPLETED` se conserva. Carrera con una copia pendiente: si al procesar la foto ya no está `AVAILABLE` (o el objeto ya no existe en Neon), el trabajo queda `SOURCE_MISSING` (terminal, sin reintentos) y **no** hay copia — no se promete conservar algo que nunca llegó. Excepción a favor de conservar: si la copia ya había llegado (respuesta perdida) y la foto se borra después, el paso 2 la encuentra y el trabajo queda `COMPLETED`.
+
+**Errores**: `transient` (red, timeout, 429, 5xx, cuotas de Google, 401 con renovación del token) → backoff exponencial 1 min → 1 h con ±20 % de jitter; `config` (credenciales ilegibles o rechazadas, 403 de permisos, destino inaccesible, Neon sin configurar) → reintento cada 30 min; `invalid` (400 u otro error no reintentable) → `FAILED`. Máximo 12 intentos → `FAILED`. Los mensajes guardados y registrados salen de plantillas fijas con el código HTTP y un `reason` de Google filtrado a `[A-Za-z_]`: nunca cuerpos de respuesta, URLs (de sesión o firmadas), tokens, la clave ni el JSON.
+
+**Configuración** (backend; desactivada por defecto; nunca bloquea el arranque — activada pero incompleta = desactivada con un aviso sin valores):
+
+| Variable | Valor |
+| --- | --- |
+| `DRIVE_BACKUP_ENABLED` | `true` para activar (vacío/`false` = desactivada) |
+| `DRIVE_BACKUP_DESTINATION_ID` | ID del destino. Proporcionado: `0AKPasFkRa2CPUk9PVA` (el prefijo `0A…` es el de una unidad compartida; confirmarlo con `npm run drive:check`) |
+| `DRIVE_BACKUP_ENVIRONMENT` | exactamente `demo` o `production`. **Nunca se deduce de `NODE_ENV`** |
+| `DRIVE_BACKUP_CREDENTIALS_FILE` | ruta **absoluta** del JSON de la cuenta de servicio |
+
+- **Local**: JSON fuera del repositorio (p. ej. `~/secretos/la-canada-drive.json`) y `DRIVE_BACKUP_ENVIRONMENT=demo`.
+- **Render**: subir el JSON como *Secret File* del servicio (Render lo monta en `/etc/secrets/<nombre>`), p. ej. `/etc/secrets/la-canada-drive.json`, y `DRIVE_BACKUP_CREDENTIALS_FILE=/etc/secrets/la-canada-drive.json`. El servicio de `demo` usa `demo` y el de producción `production`.
+- **Netlify**: ninguna credencial ni variable de esta integración.
+- Cuenta de servicio `la-canada-fotos@la-canada-510410.iam.gserviceaccount.com`, rol Colaborador en la unidad compartida; alcance OAuth `https://www.googleapis.com/auth/drive` (la unidad no la creó la app, así que `drive.file` no alcanza). La app nunca cambia permisos ni borra.
+
+**Verificación real** (manual, solo `demo`): `npm run drive:check -w backend` informa si el destino es la raíz de una unidad compartida o una carpeta y sus permisos (`canAddChildren`, `canListChildren`, `canDeleteChildren`); con `-- --synthetic-upload` además sube **una** imagen PNG sintética generada en memoria a `demo/verificacion/<AAAA>/<MM>`, repite la creación con el mismo ID para comprobar el `409` y muestra el ID del archivo y de la carpeta. Nunca copia fotos reales, nunca escribe en `production` (se rechaza) y nunca borra.
+
+**Sin carga histórica**: solo se copian fotos confirmadas con la copia ya activada. Para incorporar el historial más adelante bastaría un script con la misma guarda que inserte trabajos `PENDING` para los `file_assets` `AVAILABLE` de `MEMORY`/`TASK_EVIDENCE`/`ANIMAL_PROFILE` sin fila en `drive_backup_jobs` (`INSERT … SELECT … ON CONFLICT (file_asset_id) DO NOTHING`), en lotes; el trabajador los procesaría con el mismo ritmo y las mismas garantías.
+
+**Operación**: trabajos `FAILED` quedan para revisión (`last_error_kind`/`last_error_message`); para reintentarlos tras corregir la causa, volver a `PENDING` con `attempts = 0` y `next_attempt_at = now()`. Impacto: 0 requests nuevas del frontend y 0 sentencias extra al leer fotos; al subir, 1 `INSERT` en la transacción existente; por copia, ~6–8 sentencias pequeñas y 3–4 llamadas a Google (más 2 por carpeta nueva por proceso). Sin cambios de interfaz.
+
+**Pruebas**: `src/test/driveBackup/` (desactivada, Neon sin Drive, persistencia y retoma tras reinicio, exclusión, respuesta perdida sin duplicar, `409`, backoff y clasificación, demo/production, conservación al eliminar, fuente eliminada antes de copiar, streaming, sin secretos en errores, JWT RS256) e integración real `driveBackup.integration.test.ts` contra `demo` (alta y rollback en la transacción, `SKIP LOCKED` concurrente, retoma de reclamo vencido, token viejo sin efecto, carpeta única concurrente).

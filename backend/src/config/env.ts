@@ -147,6 +147,18 @@ const envSchema = z.object({
   OBJECT_STORAGE_BUCKET: z.string().optional(),
   OBJECT_STORAGE_ACCESS_KEY_ID: z.string().optional(),
   OBJECT_STORAGE_SECRET_ACCESS_KEY: z.string().optional(),
+
+  /**
+   * Etapa 5Z — copia adicional de fotos en Google Drive (docs/ARCHITECTURE.md
+   * §37). Desactivada por defecto. Nunca bloquea el arranque: si está
+   * activada pero incompleta, se informa y se trata como desactivada (ver
+   * `driveBackup/config.ts`). El entorno de archivo es explícito: nunca se
+   * deduce de `NODE_ENV` (demo también puede correr con `production`).
+   */
+  DRIVE_BACKUP_ENABLED: z.preprocess(emptyStringToUndefined, z.string().optional()),
+  DRIVE_BACKUP_DESTINATION_ID: z.string().optional(),
+  DRIVE_BACKUP_ENVIRONMENT: z.string().optional(),
+  DRIVE_BACKUP_CREDENTIALS_FILE: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

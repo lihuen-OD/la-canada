@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Prisma } from '../generated/prisma/client';
 import { recordAuditLog } from '../auth/auditLog';
+import { enqueueDriveBackup, notifyDriveBackup } from '../driveBackup';
 import {
   ForbiddenError,
   ObjectStorageNotConfiguredError,
@@ -196,6 +197,8 @@ export async function uploadPetPhoto(
         where: { id: file.id },
         data: { status: 'AVAILABLE', etag: etag ?? null },
       });
+      // Copia adicional en Drive (si está activada), confirmada con la foto.
+      await enqueueDriveBackup(tx, file.id, 'mascotas');
       await recordAuditLog(tx, {
         actorUserId: actor.userId,
         action: 'pet.photo_updated',
@@ -217,6 +220,7 @@ export async function uploadPetPhoto(
     await purgeObjects(storage, [{ id: file.id, objectKey }]);
     throw error;
   }
+  notifyDriveBackup();
   await purgeObjects(storage, retired);
   return { photo: { id: file.id } };
 }
