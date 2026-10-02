@@ -35,6 +35,13 @@ export interface ObjectStorageClient {
   readonly bucket: string;
   putObject(key: string, body: Buffer, contentType: string): Promise<{ etag: string | null }>;
   getObject(key: string): Promise<StoredObject | null>;
+  /**
+   * Etapa 5Z — lectura por streaming (copia en Drive), sin cargar el objeto en
+   * memoria. Opcional: si un cliente no la implementa se usa `getObject`.
+   */
+  getObjectStream?(
+    key: string,
+  ): Promise<{ body: ReadableStream<Uint8Array>; contentLength: number | null } | null>;
   deleteObject(key: string): Promise<void>;
 }
 
@@ -150,6 +157,7 @@ export function signRequest(request: SignableRequest): Record<string, string> {
 const amzDateOf = (now: Date): string => now.toISOString().replace(/[-:]|\.\d{3}/g, '');
 
 const REQUEST_TIMEOUT_MS = 15_000;
+const STREAM_TIMEOUT_MS = 150_000;
 
 /** Cliente real sobre `fetch` nativo. */
 export function createObjectStorageClient(
@@ -165,6 +173,7 @@ export function createObjectStorageClient(
     key: string,
     body?: Buffer,
     contentType?: string,
+    timeoutMs = REQUEST_TIMEOUT_MS,
   ): Promise<Response> {
     const path = `${basePath}/${storageConfig.bucket}/${key}`;
     const payload = body ?? Buffer.alloc(0);
@@ -185,7 +194,7 @@ export function createObjectStorageClient(
         method,
         headers,
         body: body ? new Uint8Array(body) : undefined,
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {
       throw new ObjectStorageRequestError(operation, null);
@@ -207,6 +216,20 @@ export function createObjectStorageClient(
         body: Buffer.from(await response.arrayBuffer()),
         contentType: response.headers.get('content-type'),
         etag: response.headers.get('etag'),
+      };
+    },
+    async getObjectStream(key) {
+      // El cuerpo se consume al ritmo de la subida a Drive: el plazo cubre toda la transferencia.
+      const response = await send('GET', 'GET', key, undefined, undefined, STREAM_TIMEOUT_MS);
+      if (response.status === 404) return null;
+      if (!response.ok || !response.body) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new ObjectStorageRequestError('GET', response.status);
+      }
+      const length = Number(response.headers.get('content-length'));
+      return {
+        body: response.body,
+        contentLength: Number.isFinite(length) && length >= 0 ? length : null,
       };
     },
     async deleteObject(key) {

@@ -20,6 +20,7 @@
     "db:seed": "tsx src/scripts/guardDbCommand.ts --require DATABASE_URL --shape pooled --gate-target && prisma db seed",
     "auth:bootstrap-admin": "tsx src/scripts/bootstrapAdmin.ts",
     "family:backfill-admin": "tsx src/scripts/guardDbCommand.ts --require DATABASE_URL --shape pooled --gate-target && tsx src/scripts/backfillAdminFamily.ts",
+    "drive:check": "tsx src/scripts/guardDbCommand.ts --require DATABASE_URL --shape pooled --gate-target && tsx src/scripts/checkDriveBackup.ts",
     "storage:reconcile": "tsx src/scripts/guardDbCommand.ts --require DATABASE_URL --shape pooled --gate-target && tsx src/scripts/reconcileStorage.ts"
   },
   "dependencies": {

@@ -972,6 +972,11 @@ model FileAsset {
   /// desde la versión (`ON DELETE RESTRICT`).
   gardenPlanVersion GardenPlanVersion?
 
+  /// Etapa 5Z — copia adicional en Google Drive (lado inverso de
+  /// `DriveBackupJob.fileAssetId`, 1 a 1). Solo existe para fotos nuevas
+  /// confirmadas mientras la copia estaba activada.
+  driveBackupJob DriveBackupJob?
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -1039,6 +1044,92 @@ model GardenPlanVersion {
   /// que Postgres puede recorrer en reverso para el historial (más reciente
   /// primero), así que un segundo índice sería redundante.
   @@map("garden_plan_versions")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// COPIA ADICIONAL DE FOTOGRAFÍAS EN GOOGLE DRIVE
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Estado de la copia de una foto en Google Drive (docs/ARCHITECTURE.md §37).
+enum DriveBackupStatus {
+  /// Esperando su turno (primer intento o reintento con `nextAttemptAt`).
+  PENDING
+  /// Reclamado por un trabajador hasta `claimExpiresAt`. Si el proceso se
+  /// cae, al vencer el reclamo cualquier trabajador lo retoma.
+  IN_PROGRESS
+  /// La copia existe en Drive (`remoteFileId`). Terminal: nunca se borra ni
+  /// se modifica, aunque la foto se elimine en la app.
+  COMPLETED
+  /// Se agotaron los intentos o el error no es reintentable. Terminal.
+  FAILED
+  /// La foto se eliminó (o el objeto desapareció de Neon) antes de copiarse:
+  /// no hay nada que copiar. Terminal.
+  SOURCE_MISSING
+}
+
+/// Entorno de archivo en Drive, elegido explícitamente por
+/// `DRIVE_BACKUP_ENVIRONMENT` (nunca deducido de `NODE_ENV`).
+enum DriveBackupEnvironment {
+  DEMO
+  PRODUCTION
+}
+
+/// Trabajo pendiente de copia de una foto a Google Drive. Se inserta en la
+/// MISMA transacción que confirma la foto (`AVAILABLE`), así que sobrevive a
+/// un reinicio; la llamada a Google ocurre después, fuera de toda transacción.
+/// Neon sigue siendo el almacenamiento principal: esta tabla nunca condiciona
+/// la subida ni la lectura de una foto.
+model DriveBackupJob {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// Una sola copia por archivo (único). `RESTRICT`: los archivos nunca se
+  /// borran físicamente de la base.
+  fileAssetId String    @unique @map("file_asset_id") @db.Uuid
+  fileAsset   FileAsset @relation(fields: [fileAssetId], references: [id])
+
+  environment DriveBackupEnvironment
+  /// Carpeta de módulo dentro del entorno (`fotos`, `mascotas`).
+  module      String
+
+  status        DriveBackupStatus @default(PENDING)
+  attempts      Int               @default(0)
+  nextAttemptAt DateTime          @default(now()) @map("next_attempt_at")
+
+  /// Reclamo atómico con vencimiento: solo quien tiene el token puede cerrar
+  /// el trabajo; un reclamo vencido se puede volver a tomar.
+  claimToken     String?   @map("claim_token") @db.Uuid
+  claimExpiresAt DateTime? @map("claim_expires_at")
+
+  /// ID de Drive PRE-GENERADO (`files.generateIds`) y guardado ANTES de
+  /// subir: la identidad estable de la copia. Reintentar con el mismo ID
+  /// nunca duplica (Drive responde 409 si ya existe).
+  remoteFileId   String? @unique @map("remote_file_id")
+  remoteFolderId String? @map("remote_folder_id")
+
+  /// Solo una categoría y un mensaje saneados (sin tokens, claves, URLs
+  /// firmadas ni contenido del JSON de credenciales).
+  lastErrorKind    String?   @map("last_error_kind")
+  lastErrorMessage String?   @map("last_error_message")
+  completedAt      DateTime? @map("completed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  /// Reclamo de trabajos vencidos y cálculo del próximo despertar.
+  @@index([status, nextAttemptAt])
+  @@map("drive_backup_jobs")
+}
+
+/// Carpeta ya creada en Drive para una ruta lógica (`demo/fotos/2026/10`).
+/// La clave primaria es la ruta: dos trabajadores que necesitan la misma
+/// carpeta a la vez coinciden en UN solo ID (el primero que lo inserta), y
+/// ese ID se crea en Drive con un ID pre-generado, así que nunca se duplica.
+model DriveBackupFolder {
+  path           String   @id
+  remoteFolderId String   @unique @map("remote_folder_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@map("drive_backup_folders")
 }
 
 // ═══════════════════════════════════════════════════════════════════════

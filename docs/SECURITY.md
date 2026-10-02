@@ -259,3 +259,10 @@ Solo un ADMIN autenticado crea otro ADMIN (el backend lo exige; EMPLOYEE → 403
 - **Health mínimo.** `GET /api/v1/health` responde solo `{ "status": "ok" }`: sin versión, entorno, hora, hostname, memoria ni uptime; sin autenticación y sin consultar la base. Cupo propio de rate limit (300 / 15 min por IP), separado del general.
 - **No existe keep-alive.** No hay cron ni ping periódico; el health solo se consulta mientras una falla real está abierta, con backoff y pausas (pestaña oculta, sin Internet).
 - Nada nuevo en storage. `production` no se tocó; no hubo migraciones.
+
+## Actualización — Copia de fotos en Google Drive (Etapa 5Z)
+
+- La clave de la cuenta de servicio es un **archivo** fuera del repositorio (local) o un *Secret File* de Render; el backend solo conoce su ruta (`DRIVE_BACKUP_CREDENTIALS_FILE`). Su contenido nunca se pega en variables, `.env.example`, logs ni en la base. Netlify no recibe nada de esta integración.
+- El token se pide con un JWT RS256 firmado en el backend (`node:crypto`), se guarda solo en memoria y se renueva antes de vencer. Los errores guardados o registrados se arman con plantillas fijas: nunca incluyen tokens, la clave, el JSON, cuerpos de Google ni URLs (la URL de una sesión de subida reanudable permite subir sin token, así que tampoco se registra).
+- La app nunca publica archivos ni crea permisos en Drive y nunca borra: la copia hereda el acceso de la unidad compartida. Los nombres y metadatos no llevan datos personales (fecha, tipo e ID técnico; sin títulos ni personas etiquetadas). Las fotos pueden incluir menores (§7): el acceso a la unidad compartida debe limitarse a quienes ya pueden ver las fotos en la app.
+- Entornos separados por carpeta (`demo/`, `production/`) con selección explícita; el script de verificación solo sube imágenes sintéticas y se niega a hacerlo fuera de `demo`.

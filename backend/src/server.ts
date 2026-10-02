@@ -1,5 +1,6 @@
 import { createApp } from './app';
 import { config } from './config';
+import { startDriveBackup } from './driveBackup';
 import { disconnectPrisma } from './lib/prisma';
 
 const app = createApp();
@@ -17,6 +18,10 @@ const server = app.listen(config.port, () => {
   console.log(`La Cañada API escuchando en el puerto ${config.port} (${config.nodeEnv})`);
 });
 
+// Copia adicional de fotos en Google Drive (opcional, desactivada por defecto).
+// Retoma al arrancar lo que quedó pendiente; nunca condiciona el servidor.
+const stopDriveBackup = startDriveBackup();
+
 /**
  * Cierre ordenado: deja de aceptar conexiones HTTP nuevas y recién después
  * desconecta el cliente Prisma único (`lib/prisma.ts`) — ningún endpoint lo
@@ -27,13 +32,21 @@ function shutdown(signal: string): void {
   // eslint-disable-next-line no-console -- log de apagado intencional
   console.log(`Señal ${signal} recibida. Cerrando servidor...`);
   server.close((err) => {
-    void disconnectPrisma().finally(() => {
-      if (err) {
-        console.error('Error al cerrar el servidor:', err);
-        process.exit(1);
-      }
-      process.exit(0);
-    });
+    // Se espera poco a la copia en curso: si no termina, su reclamo vence y
+    // se retoma en el próximo arranque (nunca se duplica en Drive).
+    void Promise.race([
+      stopDriveBackup?.(),
+      new Promise((resolveWait) => setTimeout(resolveWait, 5_000).unref()),
+    ])
+      .catch(() => undefined)
+      .then(() => disconnectPrisma())
+      .finally(() => {
+        if (err) {
+          console.error('Error al cerrar el servidor:', err);
+          process.exit(1);
+        }
+        process.exit(0);
+      });
   });
 }
 
