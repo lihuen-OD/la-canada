@@ -111,6 +111,159 @@ describe('performanceCalculator', () => {
     expect(build([plan()], new Date('2026-09-25T02:30:00Z')).at(-1)?.periodKey).toBe('2026-09-24'));
 });
 
+describe('performanceCalculator — SEMI_MONTHLY (quincenal)', () => {
+  const buildRange = (
+    plans: PlanningRow[],
+    range: { from: string; to: string; now: string },
+    executions: ExecutionRow[] = [],
+  ) =>
+    buildRecurringOccurrences({
+      plans,
+      executions,
+      from: date(range.from),
+      to: date(range.to),
+      today: date(range.to),
+      now: new Date(range.now),
+      timeZone: zone,
+    });
+  const SEPTEMBER = { from: '2026-08-26', to: '2026-09-24', now: '2026-09-24T15:00:00Z' }; // 30 días
+  const semiMonthly = (overrides: Partial<PlanningRow> = {}) =>
+    plan({ frequency: 'SEMI_MONTHLY', validFrom: new Date('2026-08-01T03:00:00Z'), ...overrides });
+  const execution = (periodKey: string, completedAt: string): ExecutionRow => ({
+    id: `execution-${periodKey}`,
+    taskId: 'task-1',
+    periodKey,
+    assignedEmployeeId: 'employee-1',
+    completedByEmployeeId: 'employee-1',
+    completedAt: new Date(completedAt),
+  });
+
+  it('una obligación por cada quincena que empieza en el rango (el 1 y el 16), nunca cada 14 días', () =>
+    expect(buildRange([semiMonthly()], SEPTEMBER).map((x) => x.periodKey)).toEqual([
+      '2026-09-Q1',
+      '2026-09-Q2',
+    ]));
+
+  it('una ejecución cumple solo su quincena: la siguiente queda pendiente', () => {
+    const rows = buildRange([semiMonthly()], SEPTEMBER, [
+      execution('2026-09-Q1', '2026-09-10T15:00:00Z'),
+    ]);
+    expect(rows.map((x) => [x.periodKey, x.completed])).toEqual([
+      ['2026-09-Q1', true],
+      ['2026-09-Q2', false],
+    ]);
+  });
+
+  it('creada a mitad de quincena: esa quincena cuenta, igual que una mensual creada a mitad de mes', () => {
+    const rows = buildRange(
+      [semiMonthly({ validFrom: new Date('2026-09-10T15:00:00Z') })],
+      SEPTEMBER,
+    );
+    expect(rows.map((x) => x.periodKey)).toEqual(['2026-09-Q1', '2026-09-Q2']);
+    const monthly = buildRange(
+      [plan({ frequency: 'MONTHLY', validFrom: new Date('2026-09-10T15:00:00Z') })],
+      SEPTEMBER,
+    );
+    expect(monthly.map((x) => x.periodKey)).toEqual(['2026-09-01']);
+  });
+
+  it('pasar de MONTHLY a SEMI_MONTHLY no reinterpreta la ejecución mensual como quincenal', () => {
+    const rows = buildRange(
+      [
+        plan({
+          frequency: 'MONTHLY',
+          validFrom: new Date('2026-08-01T03:00:00Z'),
+          validTo: new Date('2026-09-10T15:00:00Z'),
+        }),
+        semiMonthly({ id: 'plan-2', validFrom: new Date('2026-09-10T15:00:00Z') }),
+      ],
+      SEPTEMBER,
+      [execution('2026-09-01', '2026-09-05T15:00:00Z')],
+    );
+    expect(rows.map((x) => [x.frequency, x.periodKey, x.completed])).toEqual([
+      ['SEMI_MONTHLY', '2026-09-Q1', false],
+      ['SEMI_MONTHLY', '2026-09-Q2', false],
+    ]);
+  });
+
+  it('pasar de SEMI_MONTHLY a DAILY dentro de la quincena no duplica ni toma la ejecución quincenal', () => {
+    const rows = buildRange(
+      [
+        semiMonthly({ validTo: new Date('2026-09-20T15:00:00Z') }),
+        plan({ id: 'plan-2', validFrom: new Date('2026-09-20T15:00:00Z') }),
+      ],
+      SEPTEMBER,
+      [execution('2026-09-Q2', '2026-09-18T15:00:00Z')],
+    );
+    expect(rows.find((x) => x.periodKey === '2026-09-Q2')).toBeUndefined();
+    expect(rows.find((x) => x.periodKey === '2026-09-Q1')).toMatchObject({ completed: false });
+    expect(rows.filter((x) => x.frequency === 'DAILY').map((x) => x.periodKey)).toEqual([
+      '2026-09-20',
+      '2026-09-21',
+      '2026-09-22',
+      '2026-09-23',
+      '2026-09-24',
+    ]);
+    expect(rows.every((x) => !x.completed)).toBe(true);
+  });
+
+  it('respeta la reasignación: el responsable de una quincena cerrada es el vigente al cierre', () => {
+    const rows = buildRange(
+      [
+        semiMonthly({ validTo: new Date('2026-09-12T15:00:00Z') }),
+        semiMonthly({
+          id: 'plan-2',
+          employeeId: 'employee-2',
+          validFrom: new Date('2026-09-12T15:00:00Z'),
+        }),
+      ],
+      SEPTEMBER,
+    );
+    expect(rows.map((x) => [x.periodKey, x.assignedEmployeeId])).toEqual([
+      ['2026-09-Q1', 'employee-2'],
+      ['2026-09-Q2', 'employee-2'],
+    ]);
+  });
+
+  it('cambio de año: la segunda quincena de diciembre y la primera de enero', () =>
+    expect(
+      buildRange([semiMonthly()], {
+        from: '2026-12-14',
+        to: '2027-01-12',
+        now: '2027-01-12T15:00:00Z',
+      }).map((x) => x.periodKey),
+    ).toEqual(['2026-12-Q2', '2027-01-Q1']));
+
+  it('febrero bisiesto: la segunda quincena cierra el 29 y la siguiente empieza el 1/3', () =>
+    expect(
+      buildRange([semiMonthly({ validFrom: new Date('2028-01-01T03:00:00Z') })], {
+        from: '2028-02-16',
+        to: '2028-03-16',
+        now: '2028-03-16T15:00:00Z',
+      }).map((x) => x.periodKey),
+    ).toEqual(['2028-02-Q2', '2028-03-Q1', '2028-03-Q2']));
+
+  it('ordena por el primer día del período, no por el texto de la clave', () => {
+    const rows = buildRange(
+      [
+        semiMonthly(),
+        plan({
+          taskId: 'task-2',
+          id: 'plan-2',
+          description: 'Diaria',
+          validFrom: new Date('2026-09-01T03:00:00Z'),
+        }),
+      ],
+      { from: '2026-09-15', to: '2026-09-21', now: '2026-09-21T15:00:00Z' },
+    );
+    expect(rows.map((x) => x.periodKey).slice(0, 3)).toEqual([
+      '2026-09-15',
+      '2026-09-16',
+      '2026-09-Q2',
+    ]);
+  });
+});
+
 // ── Regla definitiva: cumplimiento personal + coberturas (Etapa 5D) ────────
 
 const JUAN = 'employee-juan';

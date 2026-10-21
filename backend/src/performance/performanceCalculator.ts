@@ -1,10 +1,13 @@
 import type { TaskFrequency } from '../generated/prisma/enums';
 import {
   ONE_TIME_PERIOD_KEY,
+  SECOND_HALF_FIRST_DAY,
   URGENT_PERIOD_KEY,
   addDays,
   compareLocalDates,
   formatLocalDate,
+  nextSemiMonthStart,
+  semiMonthlyPeriodKey,
   startOfLocalDay,
   startOfWeek,
   type LocalDate,
@@ -30,7 +33,7 @@ export interface ExecutionRow {
 }
 
 /**
- * Una obligación de una persona. Recurrentes: una por día/semana/mes
+ * Una obligación de una persona. Recurrentes: una por día/semana/quincena/mes
  * planificado. URGENT y ONE_TIME: una sola por tarea (`periodKey` fijo
  * `URGENT`/`ONE_TIME`, el mismo que usa la ejecución).
  */
@@ -46,7 +49,10 @@ export interface Occurrence {
 }
 
 const recurring = (frequency: TaskFrequency): frequency is Occurrence['frequency'] =>
-  frequency === 'DAILY' || frequency === 'WEEKLY' || frequency === 'MONTHLY';
+  frequency === 'DAILY' ||
+  frequency === 'WEEKLY' ||
+  frequency === 'SEMI_MONTHLY' ||
+  frequency === 'MONTHLY';
 
 function periodStarts(from: LocalDate, to: LocalDate): LocalDate[] {
   const dates: LocalDate[] = [];
@@ -59,6 +65,9 @@ function periodStarts(from: LocalDate, to: LocalDate): LocalDate[] {
  * sola versión de planificación. En el período actual usa `now`; en uno
  * cerrado usa el primer instante del período siguiente. Esto evita duplicar
  * una tarea cuando cambia responsable o frecuencia dentro del período.
+ * Cada período entra si su primer día cae en el rango (la quincena, el 1 o
+ * el 16, igual que la mensual el 1); las quincenales usan su propia clave
+ * `YYYY-MM-Q1/Q2`, así que nunca toman una ejecución de otra frecuencia.
  */
 export function buildRecurringOccurrences(input: {
   plans: PlanningRow[];
@@ -81,13 +90,17 @@ export function buildRecurringOccurrences(input: {
   const executionByKey = new Map(
     input.executions.map((execution) => [`${execution.taskId}:${execution.periodKey}`, execution]),
   );
-  const result: Occurrence[] = [];
+  // `start` ordena por el primer día del período (una clave `YYYY-MM-Q2`
+  // quedaría, como texto, después de todas las fechas de su mes).
+  const result: { start: string; occurrence: Occurrence }[] = [];
   const seen = new Set<string>();
 
   for (const day of periodStarts(input.from, input.to)) {
     for (const rows of byTask.values()) {
-      for (const frequency of ['DAILY', 'WEEKLY', 'MONTHLY'] as const) {
+      for (const frequency of ['DAILY', 'WEEKLY', 'SEMI_MONTHLY', 'MONTHLY'] as const) {
         if (frequency === 'WEEKLY' && compareLocalDates(day, startOfWeek(day)) !== 0) continue;
+        if (frequency === 'SEMI_MONTHLY' && day.day !== 1 && day.day !== SECOND_HALF_FIRST_DAY)
+          continue;
         if (frequency === 'MONTHLY' && day.day !== 1) continue;
 
         const next =
@@ -95,11 +108,13 @@ export function buildRecurringOccurrences(input: {
             ? addDays(day, 1)
             : frequency === 'WEEKLY'
               ? addDays(day, 7)
-              : {
-                  year: day.month === 12 ? day.year + 1 : day.year,
-                  month: (day.month % 12) + 1,
-                  day: 1,
-                };
+              : frequency === 'SEMI_MONTHLY'
+                ? nextSemiMonthStart(day)
+                : {
+                    year: day.month === 12 ? day.year + 1 : day.year,
+                    month: (day.month % 12) + 1,
+                    day: 1,
+                  };
         const current =
           compareLocalDates(day, input.today) <= 0 && compareLocalDates(input.today, next) < 0;
         const cutoff = current ? input.now : startOfLocalDay(next, input.timeZone);
@@ -113,28 +128,35 @@ export function buildRecurringOccurrences(input: {
         const plan = candidates.at(-1);
         if (!plan || !recurring(plan.frequency) || plan.frequency !== frequency) continue;
 
-        const periodKey = formatLocalDate(day);
+        const start = formatLocalDate(day);
+        const periodKey = frequency === 'SEMI_MONTHLY' ? semiMonthlyPeriodKey(day) : start;
         const key = `${plan.taskId}:${periodKey}`;
         if (seen.has(key)) continue;
         seen.add(key);
         const execution = executionByKey.get(key);
         result.push({
-          taskId: plan.taskId,
-          description: plan.description,
-          frequency,
-          periodKey,
-          assignedEmployeeId: execution?.assignedEmployeeId ?? plan.employeeId,
-          completed: Boolean(execution),
-          completedByEmployeeId: execution?.completedByEmployeeId ?? null,
-          completedAt: execution?.completedAt ?? null,
+          start,
+          occurrence: {
+            taskId: plan.taskId,
+            description: plan.description,
+            frequency,
+            periodKey,
+            assignedEmployeeId: execution?.assignedEmployeeId ?? plan.employeeId,
+            completed: Boolean(execution),
+            completedByEmployeeId: execution?.completedByEmployeeId ?? null,
+            completedAt: execution?.completedAt ?? null,
+          },
         });
       }
     }
   }
-  return result.sort(
-    (a, b) =>
-      a.periodKey.localeCompare(b.periodKey) || a.description.localeCompare(b.description, 'es'),
-  );
+  return result
+    .sort(
+      (a, b) =>
+        a.start.localeCompare(b.start) ||
+        a.occurrence.description.localeCompare(b.occurrence.description, 'es'),
+    )
+    .map((row) => row.occurrence);
 }
 
 const SINGLE_KEYS = [

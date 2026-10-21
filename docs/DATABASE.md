@@ -285,7 +285,7 @@ Todos los modelos usan `@@map`/`@map` para nombres de tabla/columna en snake_cas
 |---|---|---|
 | `SystemRole` | `ADMIN`, `EMPLOYEE` | Roles actuales del prototipo |
 | `UserStatus` | `PENDING_ACTIVATION`, `ACTIVE`, `SUSPENDED`, `DEACTIVATED` | Nuevo — ciclo de vida de `User` |
-| `TaskFrequency` | `DAILY`, `WEEKLY`, `MONTHLY`, `URGENT`, `ONE_TIME` | `tareas.frecuencia` (diaria/semanal/mensual/urgente/unica) |
+| `TaskFrequency` | `DAILY`, `WEEKLY`, `SEMI_MONTHLY`, `MONTHLY`, `URGENT`, `ONE_TIME` | `tareas.frecuencia` (diaria/semanal/mensual/urgente/unica); `SEMI_MONTHLY` (quincenal) es nueva — migración `20261021120000_task_frequency_semi_monthly` |
 | `StockArea` | `HOUSE`, `GARDEN`, `BOTH` | `stock.area` / `categorias_stock.area` (casa/jardin/ambas) |
 | `StockMovementType` | `OPENING_BALANCE`, `INCOME`, `CONSUMPTION`, `ADJUSTMENT_INCREASE`, `ADJUSTMENT_DECREASE` | Reemplaza los prefijos de texto en `consumos.motivo` |
 | `DestinationType` | `VEHICLE`, `SECTOR` | `destinos_consumo.tipo` |
@@ -342,6 +342,7 @@ Sin este snapshot, una consulta que solo mirara `Task.employeeId` reinterpretar�
 - `DAILY` → fecha del día, `'YYYY-MM-DD'`.
 - `WEEKLY` → fecha del lunes de esa semana, `'YYYY-MM-DD'`.
 - `MONTHLY` → primer día del mes, `'YYYY-MM-01'`.
+- `SEMI_MONTHLY` (quincenal) → año, mes y quincena: `'YYYY-MM-Q1'` (días 1–15) o `'YYYY-MM-Q2'` (16–último día del mes). Deliberadamente **no** es una fecha: si una tarea cambia de frecuencia dentro del período, ninguna ejecución diaria/semanal/mensual (`YYYY-MM-DD`) coincide con la clave quincenal ni la "cumple". No hay fecha inicial ni de referencia: las quincenas son del calendario.
 - `URGENT` / `ONE_TIME` → el string fijo `'URGENT'` / `'ONE_TIME'` (no recurren; solo puede existir una ejecución en toda la vida de la tarea).
 
 `@@unique([taskId, periodKey])` impide duplicar una ejecución del mismo período, y para urgente/única impide más de una ejecución en total (porque `periodKey` es constante).

@@ -33,6 +33,21 @@ describe('taskSchemas', () => {
     ).toBe(false);
   });
 
+  it('acepta SEMI_MONTHLY al crear, editar y filtrar; rechaza sinónimos que no son el enum', () => {
+    const base = { description: 'Limpiar canaletas', employeeId: EMPLOYEE_ID };
+    expect(createTaskBodySchema.parse({ ...base, frequency: 'SEMI_MONTHLY' }).frequency).toBe(
+      'SEMI_MONTHLY',
+    );
+    expect(updateTaskBodySchema.parse({ frequency: 'SEMI_MONTHLY' })).toEqual({
+      frequency: 'SEMI_MONTHLY',
+    });
+    expect(listTasksQuerySchema.parse({ frequency: 'SEMI_MONTHLY' }).frequency).toBe(
+      'SEMI_MONTHLY',
+    );
+    for (const frequency of ['BIWEEKLY', 'quincenal', 'FORTNIGHTLY'])
+      expect(createTaskBodySchema.safeParse({ ...base, frequency }).success).toBe(false);
+  });
+
   it('rechaza frecuencias fuera del enum real y UUID inválidos', () => {
     expect(
       createTaskBodySchema.safeParse({

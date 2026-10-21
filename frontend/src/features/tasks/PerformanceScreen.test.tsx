@@ -179,6 +179,12 @@ describe('PerformanceScreen', () => {
           frequency: 'DAILY' as const,
           periodKey: '2026-09-22',
         },
+        {
+          ...occurrence('pending'),
+          taskId: 't-semi-monthly',
+          frequency: 'SEMI_MONTHLY' as const,
+          periodKey: '2026-09-Q2',
+        },
       ],
     });
     const user = userEvent.setup();
@@ -196,13 +202,15 @@ describe('PerformanceScreen', () => {
     await user.click(screen.getByRole('button', { name: /Persona sintética/ }));
     expect(await screen.findAllByText('✅ Propia')).toHaveLength(2);
     expect(screen.getByText('🤝 Le cubrieron')).toBeInTheDocument();
-    expect(screen.getByText('Sin completar')).toBeInTheDocument();
+    expect(screen.getAllByText('Sin completar')).toHaveLength(2);
     expect(screen.getByText('🤝 Cubrió a otros')).toBeInTheDocument();
     const detail = screen
       .getByRole('heading', { name: 'Detalle' })
       .closest('section') as HTMLElement;
     expect(detail).toHaveTextContent('22/09/2026 · Diaria');
-    expect(detail.textContent).not.toMatch(/\b\d{4}-\d{2}-\d{2}\b/);
+    // La quincena se muestra como rango real, hasta el último día del mes (30 en septiembre).
+    expect(detail).toHaveTextContent('16/09/2026 al 30/09/2026 · Quincenal');
+    expect(detail.textContent).not.toMatch(/\b\d{4}-\d{2}-(\d{2}|Q[12])\b/);
   });
 
   it('rangos públicos exactamente 7, 14 y 30 días; abre en 7 y cada uno es una consulta distinta', async () => {
