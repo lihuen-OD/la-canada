@@ -8,13 +8,16 @@ import {
 import { prisma } from '../lib/prisma';
 import {
   ONE_TIME_PERIOD_KEY,
+  SECOND_HALF_FIRST_DAY,
   URGENT_PERIOD_KEY,
   addDays,
   compareLocalDates,
   formatLocalDate,
   parseLocalDate,
+  semiMonthlyPeriodKey,
   startOfLocalDay,
   toLocalDate,
+  type LocalDate,
 } from '../lib/businessTime';
 import type { TaskActor } from '../tasks/tasksService';
 import {
@@ -59,6 +62,19 @@ function rangeOrThrow(fromText: string, toText: string, now: Date) {
     throw new ValidationError('El rango debe ser de 7, 14 o 30 días.');
   const to = compareLocalDates(requestedTo, today) > 0 ? today : requestedTo;
   return { from, to, today };
+}
+
+/**
+ * Claves `YYYY-MM-Q1/Q2` de las quincenas que empiezan (día 1 o 16) dentro
+ * del rango — las mismas que genera `buildRecurringOccurrences`. No son
+ * fechas, así que no entran en el filtro `gte/lte` de las claves diarias.
+ */
+function semiMonthlyKeysInRange(from: LocalDate, to: LocalDate): string[] {
+  const keys: string[] = [];
+  for (let day = from; compareLocalDates(day, to) <= 0; day = addDays(day, 1)) {
+    if (day.day === 1 || day.day === SECOND_HALF_FIRST_DAY) keys.push(semiMonthlyPeriodKey(day));
+  }
+  return keys;
 }
 
 const employeeSelect = { id: true, displayName: true, role: true, colorHex: true } as const;
@@ -110,9 +126,9 @@ export async function getPerformance(
       orderBy: { validFrom: 'asc' },
     }),
     // Una sola sentencia: las ejecuciones vigentes de los períodos del rango
-    // y, para URGENT/ONE_TIME, la finalización vigente (a lo sumo una por
-    // tarea) de las tareas planificadas en el rango — hace falta aunque sea
-    // anterior al rango, para saber que ya no estaba pendiente.
+    // (fechas y quincenas) y, para URGENT/ONE_TIME, la finalización vigente
+    // (a lo sumo una por tarea) de las tareas planificadas en el rango — hace
+    // falta aunque sea anterior al rango, para saber que ya no estaba pendiente.
     prisma.taskExecution.findMany({
       where: {
         revertedAt: null,
@@ -126,6 +142,7 @@ export async function getPerformance(
               },
             },
           },
+          { periodKey: { in: semiMonthlyKeysInRange(from, to) } },
         ],
       },
       select: {

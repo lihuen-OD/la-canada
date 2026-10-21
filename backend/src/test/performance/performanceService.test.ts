@@ -148,6 +148,40 @@ describe('getPerformance — regla personal y permisos', () => {
     expect(where.OR[1].task.planningIntervals.some.frequency).toEqual({
       in: ['URGENT', 'ONE_TIME'],
     });
+    // Quincenas que EMPIEZAN en el rango (11–24/09: solo la del 16), con su clave propia.
+    expect(where.OR[2].periodKey).toEqual({ in: ['2026-09-Q2'] });
+  });
+
+  it('SEMI_MONTHLY: una obligación por quincena que empieza en el rango, con su propia clave', async () => {
+    mocks.plans.mockResolvedValue([
+      {
+        id: 'pq',
+        taskId: 't-q',
+        employeeId: JUAN,
+        frequency: 'SEMI_MONTHLY',
+        validFrom: new Date('2026-08-20T12:00:00Z'),
+        validTo: null,
+        task: { description: 'Quincenal (sintética)' },
+      },
+    ]);
+    mocks.executions.mockResolvedValue([
+      {
+        id: 'xq',
+        taskId: 't-q',
+        periodKey: '2026-09-Q2',
+        assignedEmployeeId: JUAN,
+        completedByEmployeeId: JUAN,
+        completedAt: new Date('2026-09-20T12:00:00Z'),
+      },
+    ]);
+    const result = await getPerformance(admin, RANGE, JUAN, NOW);
+    expect(result.occurrences!.map((o) => [o.periodKey, o.status])).toEqual([
+      ['2026-09-Q2', 'personal'],
+    ]);
+    expect(result.employees[0]).toMatchObject({ assigned: 1, completedPersonally: 1 });
+    expect(result.trend).toEqual([
+      { periodKey: '2026-09-Q2', assigned: 1, completedPersonally: 1, percentage: 100 },
+    ]);
   });
 
   it('URGENT y ONE_TIME entran al porcentaje una sola vez, con cobertura', async () => {

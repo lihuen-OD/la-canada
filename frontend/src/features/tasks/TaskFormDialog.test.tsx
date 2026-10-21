@@ -77,6 +77,52 @@ describe('TaskFormDialog', () => {
     await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(task.id, { frequency: 'MONTHLY' }));
   });
 
+  it('ofrece «Quincenal» entre Semanal y Mensual, con su ayuda al elegirla', async () => {
+    const { onCreate } = renderForm();
+    const user = userEvent.setup();
+    const select = screen.getByLabelText('Frecuencia') as HTMLSelectElement;
+    expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
+      'Elegí una frecuencia',
+      'Urgente',
+      'Una vez',
+      'Diaria',
+      'Semanal',
+      'Quincenal',
+      'Mensual',
+    ]);
+    expect(screen.queryByText(/del 1 al 15/)).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Descripción'), 'Tarea sintética quincenal');
+    await user.selectOptions(screen.getByLabelText('Responsable'), PERSON_A.id);
+    await user.selectOptions(select, 'SEMI_MONTHLY');
+    expect(select).toHaveAccessibleDescription(
+      'Una vez del 1 al 15 y otra del 16 al último día del mes',
+    );
+    await user.click(screen.getByRole('button', { name: 'Crear tarea' }));
+    await waitFor(() =>
+      expect(onCreate).toHaveBeenCalledWith({
+        description: 'Tarea sintética quincenal',
+        employeeId: PERSON_A.id,
+        frequency: 'SEMI_MONTHLY',
+      }),
+    );
+
+    await user.selectOptions(select, 'MONTHLY');
+    expect(screen.queryByText(/del 1 al 15/)).not.toBeInTheDocument();
+    expect(select).not.toHaveAttribute('aria-describedby');
+  });
+
+  it('editar una quincenal la muestra elegida y permite pasarla a otra frecuencia', async () => {
+    const task = makeTask({ frequency: 'SEMI_MONTHLY', periodKey: '2026-09-Q2' });
+    const { onUpdate } = renderForm({ task });
+    const user = userEvent.setup();
+    expect(screen.getByLabelText('Frecuencia')).toHaveValue('SEMI_MONTHLY');
+    expect(screen.getByText(/del 16 al último día del mes/)).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('Frecuencia'), 'WEEKLY');
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(task.id, { frequency: 'WEEKLY' }));
+  });
+
   it('bloquea el doble envío', async () => {
     const onCreate = vi.fn().mockReturnValue(new Promise(() => {}));
     renderForm({ onCreate });

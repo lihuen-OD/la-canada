@@ -45,6 +45,13 @@ const URGENT_A = makeTask({
   frequency: 'URGENT',
   periodKey: 'URGENT',
 });
+const SEMI_MONTHLY_B = makeTask({
+  id: '00000000-0000-4000-8000-0000000000t4',
+  description: 'Tarea sintética quincenal',
+  frequency: 'SEMI_MONTHLY',
+  assignee: { ...PERSON_B, active: true },
+  periodKey: '2026-09-Q2',
+});
 
 function asEmployee() {
   useAuthMock.mockReturnValue({
@@ -183,6 +190,28 @@ describe('TasksScreen — filtros', () => {
     await userEvent.setup().keyboard('{Enter}');
     expect(chip).toHaveAttribute('aria-pressed', 'true');
   });
+
+  it('«Quincenales» va entre Semanales y Mensuales y filtra las quincenales', async () => {
+    await renderLoaded([DAILY_A, WEEKLY_B, URGENT_A, SEMI_MONTHLY_B]);
+    const chips = within(screen.getByRole('group', { name: 'Filtrar por frecuencia' }))
+      .getAllByRole('button')
+      .map((chip) => chip.textContent);
+    expect(chips).toEqual([
+      'Todas',
+      'Diarias',
+      'Semanales',
+      'Quincenales',
+      'Mensuales',
+      'Urgentes',
+      'Una vez',
+    ]);
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Quincenales' }));
+    const list = screen.getByRole('list', { name: 'Tareas del período' });
+    expect(within(list).getAllByRole('listitem')).toHaveLength(1);
+    expect(within(list).getByText(SEMI_MONTHLY_B.description)).toBeInTheDocument();
+    expect(within(list).getByText('Quincenal', { selector: '.badge' })).toBeInTheDocument();
+  });
 });
 
 describe('TasksScreen — permisos visibles', () => {
@@ -254,6 +283,18 @@ describe('TasksScreen — completar', () => {
     await user.click(button);
     await user.click(button);
     expect(api.completeTask).toHaveBeenCalledTimes(1);
+  });
+
+  it('una quincenal se completa igual (sin período del navegador) y bloquea el doble clic', async () => {
+    api.completeTask.mockReturnValue(new Promise(() => {}));
+    await renderLoaded([SEMI_MONTHLY_B]);
+    const user = userEvent.setup();
+    const button = screen.getByRole('button', {
+      name: `Marcar como completada: ${SEMI_MONTHLY_B.description}`,
+    });
+    await user.click(button);
+    await user.click(button);
+    expect(api.completeTask.mock.calls).toEqual([[SEMI_MONTHLY_B.id]]);
   });
 
   it('conflicto concurrente (409): mensaje claro y refresco de la lista', async () => {

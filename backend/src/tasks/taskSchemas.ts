@@ -1,6 +1,13 @@
 import { z } from 'zod';
 
-export const TASK_FREQUENCIES = ['DAILY', 'WEEKLY', 'MONTHLY', 'URGENT', 'ONE_TIME'] as const;
+export const TASK_FREQUENCIES = [
+  'DAILY',
+  'WEEKLY',
+  'SEMI_MONTHLY',
+  'MONTHLY',
+  'URGENT',
+  'ONE_TIME',
+] as const;
 
 export const TASK_DESCRIPTION_MAX_LENGTH = 200;
 export const REVERT_REASON_MAX_LENGTH = 300;

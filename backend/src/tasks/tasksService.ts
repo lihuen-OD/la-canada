@@ -47,13 +47,14 @@ export interface TaskActor {
   employeeId: string | null;
 }
 
-/** Orden operativo del prototipo: urgente → única → diaria → semanal → mensual. */
+/** Orden operativo del prototipo: urgente → única → diaria → semanal → mensual (quincenal, entre semanal y mensual). */
 const FREQUENCY_ORDER: Record<TaskFrequency, number> = {
   URGENT: 0,
   ONE_TIME: 1,
   DAILY: 2,
   WEEKLY: 3,
-  MONTHLY: 4,
+  SEMI_MONTHLY: 4,
+  MONTHLY: 5,
 };
 
 const employeeSummarySelect = { id: true, displayName: true, colorHex: true } as const;
@@ -655,8 +656,10 @@ const historyTaskSelect = {
  * Semana lunes-domingo en la zona de negocio. Diarias y semanales: un slot
  * por período esperado; "esperado" = la tarea está activa hoy, el período ya
  * empezó y la tarea ya existía. Así `completed / expected` es correcto y
- * nunca el 0% fijo del prototipo. Mensuales, urgentes y únicas: las
- * finalizaciones cuya fecha local cae en la semana. Solo ejecuciones
+ * nunca el 0% fijo del prototipo. Quincenales, mensuales, urgentes y únicas:
+ * las finalizaciones cuya fecha local cae en la semana — una quincena no
+ * entra en una grilla de lunes a domingo, así que (como la mensual) no suma
+ * slots al denominador realizadas/esperadas. Solo ejecuciones
  * vigentes (las revertidas quedan en la base y en la auditoría). Incluye
  * tareas hoy desactivadas si tuvieron ejecuciones esa semana.
  *
@@ -720,7 +723,7 @@ export async function getWeeklyHistory(
     where: {
       revertedAt: null,
       completedAt: { gte: rangeStart, lt: rangeEnd },
-      task: { frequency: { in: ['MONTHLY', 'URGENT', 'ONE_TIME'] } },
+      task: { frequency: { in: ['SEMI_MONTHLY', 'MONTHLY', 'URGENT', 'ONE_TIME'] } },
     },
     select: { ...executionSelect, task: { select: historyTaskSelect } },
     orderBy: { completedAt: 'asc' },

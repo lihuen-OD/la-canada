@@ -50,10 +50,14 @@ enum UserStatus {
 }
 
 /// Frecuencia de una tarea. Traducción directa de los 5 valores literales
-/// usados en el prototipo (diaria/semanal/mensual/urgente/unica).
+/// usados en el prototipo (diaria/semanal/mensual/urgente/unica), más
+/// `SEMI_MONTHLY` (quincenal): dos períodos por mes calendario, del 1 al 15 y
+/// del 16 al último día — NO una recurrencia cada 14 días (ver
+/// `computePeriodKey`).
 enum TaskFrequency {
   DAILY
   WEEKLY
+  SEMI_MONTHLY
   MONTHLY
   URGENT
   ONE_TIME
@@ -494,6 +498,10 @@ model TaskPlanningInterval {
 ///  - DAILY:   periodKey = fecha del día,           'YYYY-MM-DD'
 ///  - WEEKLY:  periodKey = fecha del lunes de esa semana, 'YYYY-MM-DD'
 ///  - MONTHLY: periodKey = primer día del mes,       'YYYY-MM-01'
+///  - SEMI_MONTHLY: periodKey = año, mes y quincena, 'YYYY-MM-Q1' (días
+///    1–15) o 'YYYY-MM-Q2' (16–último día) — nunca una fecha, para que no
+///    coincida con la clave de otra frecuencia si la tarea cambia de
+///    frecuencia dentro del período.
 ///  - URGENT / ONE_TIME: no recurren — periodKey es el string fijo
 ///    'URGENT' / 'ONE_TIME' (una sola ejecución VIGENTE en toda la vida de
 ///    la tarea, igual que en el prototipo).

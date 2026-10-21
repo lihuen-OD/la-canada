@@ -906,4 +906,12 @@ describe('reglas de presentación del prototipo', () => {
     expect(tasksForDay(tasks, 2026, 8, 6).map((t) => t.id)).toEqual(['d']);
     expect(tasksForDay(tasks, 2026, 8, 7).map((t) => t.id)).toEqual(['d', 'w']);
   });
+
+  it('calendario: quincenales el primer día de cada quincena (1 y 16)', () => {
+    const tasks = [{ id: 'q', frequency: 'SEMI_MONTHLY' } as TaskItem];
+    expect(tasksForDay(tasks, 2026, 8, 1)).toHaveLength(1);
+    expect(tasksForDay(tasks, 2026, 8, 15)).toHaveLength(0);
+    expect(tasksForDay(tasks, 2026, 8, 16)).toHaveLength(1);
+    expect(tasksForDay(tasks, 2026, 8, 30)).toHaveLength(0);
+  });
 });

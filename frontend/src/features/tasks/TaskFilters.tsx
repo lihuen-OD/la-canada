@@ -90,7 +90,7 @@ interface FrequencyFilterBarProps {
   onSelect: (value: FrequencyFilter) => void;
 }
 
-/** Las cinco frecuencias reales del enum del backend, con las etiquetas y el orden de los chips del prototipo. */
+/** Todas las frecuencias reales del enum del backend, con las etiquetas y el orden de los chips del prototipo (Quincenales entre Semanales y Mensuales). */
 export function FrequencyFilterBar({ selected, onSelect }: FrequencyFilterBarProps) {
   return (
     <div className="filter-scroller" role="group" aria-label="Filtrar por frecuencia">

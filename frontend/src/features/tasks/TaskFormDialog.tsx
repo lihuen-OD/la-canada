@@ -11,7 +11,7 @@ import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { AlertIcon } from '../../components/ui/icons';
 import { errorMessageOf } from './dialogErrors';
-import { FREQUENCY_LABEL, FREQUENCY_ORDER } from './taskLabels';
+import { FREQUENCY_LABEL, FREQUENCY_ORDER, SEMI_MONTHLY_HINT } from './taskLabels';
 import { useSubmitGuard } from './useSubmitGuard';
 
 const DESCRIPTION_MAX = 200;
@@ -156,6 +156,9 @@ export function TaskFormDialog({
             className="field__input"
             value={frequency}
             disabled={isSubmitting}
+            aria-describedby={
+              frequency === 'SEMI_MONTHLY' ? `${titleId}-frequency-hint` : undefined
+            }
             onChange={(event) => {
               setFrequency(event.target.value as TaskFrequency | '');
               setErrorMessage(null);
@@ -168,6 +171,11 @@ export function TaskFormDialog({
               </option>
             ))}
           </select>
+          {frequency === 'SEMI_MONTHLY' ? (
+            <p className="field__hint" id={`${titleId}-frequency-hint`}>
+              {SEMI_MONTHLY_HINT}
+            </p>
+          ) : null}
         </div>
 
         <div aria-live="assertive" className="live-status live-status--start">

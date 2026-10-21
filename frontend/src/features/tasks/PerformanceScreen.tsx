@@ -10,9 +10,9 @@ import { Card } from '../../components/ui/Card';
 import { Chip } from '../../components/ui/Chip';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
-import { formatDate, formatPercentage } from '../../utils/dateFormat';
+import { formatPercentage } from '../../utils/dateFormat';
 import { TasksSubnav } from './TasksSubnav';
-import { FREQUENCY_LABEL } from './taskLabels';
+import { FREQUENCY_LABEL, formatPeriodKey } from './taskLabels';
 import type { PerformanceOccurrence } from '../../api/performanceTypes';
 
 /** Rótulo del estado que ya calculó el backend, visto desde la persona del detalle. */
@@ -252,7 +252,7 @@ export function PerformanceScreen() {
                       <small>
                         {item.frequency === 'URGENT' || item.frequency === 'ONE_TIME'
                           ? FREQUENCY_LABEL[item.frequency]
-                          : `${formatDate(item.periodKey)} · ${FREQUENCY_LABEL[item.frequency]}`}{' '}
+                          : `${formatPeriodKey(item.periodKey)} · ${FREQUENCY_LABEL[item.frequency]}`}{' '}
                         · asignada a {item.assignedEmployee?.displayName ?? 'Sin responsable'}
                         {item.completedByEmployee
                           ? ` · realizada por ${item.completedByEmployee.displayName}`

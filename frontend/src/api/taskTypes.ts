@@ -5,7 +5,7 @@
  * de negocio.
  */
 
-export type TaskFrequency = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'URGENT' | 'ONE_TIME';
+export type TaskFrequency = 'DAILY' | 'WEEKLY' | 'SEMI_MONTHLY' | 'MONTHLY' | 'URGENT' | 'ONE_TIME';
 
 export interface TaskEmployee {
   id: string;

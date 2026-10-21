@@ -125,6 +125,32 @@ export function startOfLocalDay(date: LocalDate, timeZone: string): Date {
   return new Date(result);
 }
 
+/**
+ * Quincenas: dos por mes calendario, del 1 al 15 y del 16 al último día
+ * (28, 29, 30 o 31). No es "cada 14 días": no depende de la creación de la
+ * tarea ni de su última ejecución.
+ */
+export const SECOND_HALF_FIRST_DAY = 16;
+
+/** Primer día de la quincena siguiente: el 16 del mismo mes o el 1 del mes siguiente. */
+export function nextSemiMonthStart(date: LocalDate): LocalDate {
+  if (date.day < SECOND_HALF_FIRST_DAY) return { ...date, day: SECOND_HALF_FIRST_DAY };
+  return date.month === 12
+    ? { year: date.year + 1, month: 1, day: 1 }
+    : { year: date.year, month: date.month + 1, day: 1 };
+}
+
+/**
+ * `YYYY-MM-Q1` (días 1–15) o `YYYY-MM-Q2` (16–último día). Deliberadamente
+ * NO es una fecha: si una tarea cambia de frecuencia dentro del período, una
+ * ejecución diaria, semanal o mensual anterior (`YYYY-MM-DD`) nunca coincide
+ * con la clave quincenal ni se reinterpreta como cumplimiento de la quincena.
+ */
+export function semiMonthlyPeriodKey(date: LocalDate): string {
+  const half = date.day < SECOND_HALF_FIRST_DAY ? 1 : 2;
+  return `${pad(date.year, 4)}-${pad(date.month)}-Q${half}`;
+}
+
 /** Claves fijas de las frecuencias no recurrentes (una sola ejecución vigente). */
 export const URGENT_PERIOD_KEY = 'URGENT';
 export const ONE_TIME_PERIOD_KEY = 'ONE_TIME';
@@ -132,11 +158,12 @@ export const ONE_TIME_PERIOD_KEY = 'ONE_TIME';
 /**
  * `periodKey` de una finalización — el backend es la única autoridad (el
  * navegador nunca lo envía):
- *  - DAILY:    fecha local del día          `YYYY-MM-DD`
- *  - WEEKLY:   lunes de la semana local     `YYYY-MM-DD`
- *  - MONTHLY:  primer día del mes local     `YYYY-MM-01`
- *  - URGENT:   `URGENT` (vigente hasta que se revierta)
- *  - ONE_TIME: `ONE_TIME` (vigente hasta que se revierta)
+ *  - DAILY:        fecha local del día          `YYYY-MM-DD`
+ *  - WEEKLY:       lunes de la semana local     `YYYY-MM-DD`
+ *  - SEMI_MONTHLY: quincena del mes local       `YYYY-MM-Q1` / `YYYY-MM-Q2`
+ *  - MONTHLY:      primer día del mes local     `YYYY-MM-01`
+ *  - URGENT:       `URGENT` (vigente hasta que se revierta)
+ *  - ONE_TIME:     `ONE_TIME` (vigente hasta que se revierta)
  */
 export function computePeriodKey(
   frequency: TaskFrequency,
@@ -149,6 +176,8 @@ export function computePeriodKey(
       return formatLocalDate(today);
     case 'WEEKLY':
       return formatLocalDate(startOfWeek(today));
+    case 'SEMI_MONTHLY':
+      return semiMonthlyPeriodKey(today);
     case 'MONTHLY':
       return formatLocalDate({ ...today, day: 1 });
     case 'URGENT':
