@@ -9,6 +9,7 @@ import { HomeIcon, UsersIcon } from '../components/ui/icons';
 import { LogoutButton } from '../features/auth/LogoutButton';
 import { APP_ROUTES, getVisibleNavigation } from '../routes/navigation';
 import type { NavIconName } from '../routes/navigation';
+import { BusinessDayRefresh } from './BusinessDayRefresh';
 
 /** Emoji del prototipo — decorativo; el nombre accesible es siempre la etiqueta de texto. */
 function TasksNavEmoji() {
@@ -158,6 +159,8 @@ export function AppShell() {
 
       {/* Etapa 5R: aviso flotante de conectividad; nunca reemplaza ni desmonta la ruta. */}
       <ConnectionBanner />
+      {/* Cambio de día de negocio: un solo reloj para toda el área autenticada. */}
+      <BusinessDayRefresh />
     </div>
   );
 }

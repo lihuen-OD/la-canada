@@ -89,6 +89,8 @@ describe('TaskFormDialog', () => {
       'Semanal',
       'Quincenal',
       'Mensual',
+      'Bimestral',
+      'Anual',
     ]);
     expect(screen.queryByText(/del 1 al 15/)).not.toBeInTheDocument();
 
@@ -161,5 +163,148 @@ describe('TaskFormDialog', () => {
     const { onCancel } = renderForm();
     await userEvent.setup().keyboard('{Escape}');
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('TaskFormDialog — Bimestral, Anual y fecha para «Una vez»', () => {
+  async function fillBasics(user: ReturnType<typeof userEvent.setup>, frequency: string) {
+    await user.type(screen.getByLabelText('Descripción'), 'Tarea sintética');
+    await user.selectOptions(screen.getByLabelText('Responsable'), PERSON_A.id);
+    await user.selectOptions(screen.getByLabelText('Frecuencia'), frequency);
+  }
+
+  it.each([
+    ['BIMONTHLY', 'Una vez por bimestre calendario: ene–feb, mar–abr…'],
+    ['ANNUAL', 'Una vez por año calendario'],
+  ])('%s muestra su ayuda y no pide fecha', async (frequency, hint) => {
+    const { onCreate } = renderForm();
+    const user = userEvent.setup();
+    await fillBasics(user, frequency);
+    expect(screen.getByLabelText('Frecuencia')).toHaveAccessibleDescription(hint);
+    expect(screen.queryByLabelText('Fecha para realizar')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Crear tarea' }));
+    await waitFor(() =>
+      expect(onCreate).toHaveBeenCalledWith({
+        description: 'Tarea sintética',
+        employeeId: PERSON_A.id,
+        frequency,
+      }),
+    );
+  });
+
+  it('la fecha solo aparece en «Una vez», muestra el día de la semana y viaja como fecha ISO', async () => {
+    const { onCreate } = renderForm();
+    const user = userEvent.setup();
+    expect(screen.queryByLabelText('Fecha para realizar')).not.toBeInTheDocument();
+    await fillBasics(user, 'ONE_TIME');
+    const date = screen.getByLabelText('Fecha para realizar');
+    expect(date).toHaveAttribute('type', 'date');
+    expect(date).toHaveAccessibleDescription(/Opcional/);
+    await user.type(date, '2026-10-26');
+    expect(date).toHaveAccessibleDescription('Lunes 26/10/2026');
+    await user.click(screen.getByRole('button', { name: 'Crear tarea' }));
+    await waitFor(() =>
+      expect(onCreate).toHaveBeenCalledWith({
+        description: 'Tarea sintética',
+        employeeId: PERSON_A.id,
+        frequency: 'ONE_TIME',
+        scheduledDate: '2026-10-26',
+      }),
+    );
+  });
+
+  it('«Una vez» sin fecha: no envía el campo (comportamiento de siempre)', async () => {
+    const { onCreate } = renderForm();
+    const user = userEvent.setup();
+    await fillBasics(user, 'ONE_TIME');
+    await user.click(screen.getByRole('button', { name: 'Crear tarea' }));
+    await waitFor(() =>
+      expect(onCreate).toHaveBeenCalledWith({
+        description: 'Tarea sintética',
+        employeeId: PERSON_A.id,
+        frequency: 'ONE_TIME',
+      }),
+    );
+  });
+
+  it('elegir otra frecuencia oculta la fecha y no la envía', async () => {
+    const { onCreate } = renderForm();
+    const user = userEvent.setup();
+    await fillBasics(user, 'ONE_TIME');
+    await user.type(screen.getByLabelText('Fecha para realizar'), '2026-10-26');
+    await user.selectOptions(screen.getByLabelText('Frecuencia'), 'DAILY');
+    expect(screen.queryByLabelText('Fecha para realizar')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Crear tarea' }));
+    await waitFor(() =>
+      expect(onCreate).toHaveBeenCalledWith({
+        description: 'Tarea sintética',
+        employeeId: PERSON_A.id,
+        frequency: 'DAILY',
+      }),
+    );
+  });
+
+  const dated = makeTask({
+    frequency: 'ONE_TIME',
+    periodKey: 'ONE_TIME',
+    scheduledDate: '2026-10-26',
+    scheduleStatus: 'SCHEDULED',
+  });
+
+  it('editar: reprogramar envía solo la fecha nueva', async () => {
+    const { onUpdate } = renderForm({ task: dated });
+    const user = userEvent.setup();
+    const date = screen.getByLabelText('Fecha para realizar');
+    expect(date).toHaveValue('2026-10-26');
+    expect(date).toHaveAccessibleDescription('Lunes 26/10/2026');
+    await user.clear(date);
+    await user.type(date, '2026-10-30');
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() =>
+      expect(onUpdate).toHaveBeenCalledWith(dated.id, { scheduledDate: '2026-10-30' }),
+    );
+  });
+
+  it('editar: quitar la fecha envía null', async () => {
+    const { onUpdate } = renderForm({ task: dated });
+    const user = userEvent.setup();
+    await user.clear(screen.getByLabelText('Fecha para realizar'));
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(dated.id, { scheduledDate: null }));
+  });
+
+  it('editar otra cosa: la fecha sin tocar no se envía', async () => {
+    const { onUpdate } = renderForm({ task: dated });
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Descripción'), ' revisada');
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() =>
+      expect(onUpdate).toHaveBeenCalledWith(dated.id, {
+        description: `${dated.description} revisada`,
+      }),
+    );
+  });
+
+  it('editar: pasar de «Una vez» a otra frecuencia no envía la fecha (el backend la quita)', async () => {
+    const { onUpdate } = renderForm({ task: dated });
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText('Frecuencia'), 'ANNUAL');
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(dated.id, { frequency: 'ANNUAL' }));
+  });
+
+  it('muestra el rechazo del backend para una fecha inválida y conserva lo cargado', async () => {
+    const onCreate = vi
+      .fn()
+      .mockRejectedValue(
+        new ApiError(400, 'La fecha para realizar no existe.', 'VALIDATION_ERROR'),
+      );
+    renderForm({ onCreate });
+    const user = userEvent.setup();
+    await fillBasics(user, 'ONE_TIME');
+    await user.type(screen.getByLabelText('Fecha para realizar'), '2026-10-26');
+    await user.click(screen.getByRole('button', { name: 'Crear tarea' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('La fecha para realizar no existe.');
+    expect(screen.getByLabelText('Fecha para realizar')).toHaveValue('2026-10-26');
   });
 });

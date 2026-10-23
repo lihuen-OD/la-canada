@@ -1,13 +1,20 @@
 import { z } from 'zod';
+import { parseLocalDate } from '../lib/businessTime';
 
 export const TASK_FREQUENCIES = [
   'DAILY',
   'WEEKLY',
   'SEMI_MONTHLY',
   'MONTHLY',
+  'BIMONTHLY',
+  'ANNUAL',
   'URGENT',
   'ONE_TIME',
 ] as const;
+
+/** Años aceptados en «Fecha para realizar»: atrasadas o futuras, pero fechas reales. */
+export const SCHEDULED_DATE_MIN_YEAR = 2000;
+export const SCHEDULED_DATE_MAX_YEAR = 2100;
 
 export const TASK_DESCRIPTION_MAX_LENGTH = 200;
 export const REVERT_REASON_MAX_LENGTH = 300;
@@ -48,6 +55,22 @@ const descriptionSchema = plainText('La descripción', 3, TASK_DESCRIPTION_MAX_L
 const frequencySchema = z.enum(TASK_FREQUENCIES, { message: 'Frecuencia inválida.' });
 const uuidSchema = z.string().uuid('Identificador inválido.');
 
+/**
+ * «Fecha para realizar» (solo «Una vez»): fecha de calendario `YYYY-MM-DD`,
+ * sin hora, en `BUSINESS_TIME_ZONE`. Puede ser pasada (una pendiente
+ * atrasada). `null` = sin fecha; que la frecuencia la admita lo decide el
+ * servicio (`assertScheduledDateFits`), que conoce la frecuencia resultante.
+ */
+const scheduledDateSchema = z
+  .string({ message: 'La fecha para realizar debe tener formato YYYY-MM-DD.' })
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha para realizar debe tener formato YYYY-MM-DD.')
+  .refine((value) => parseLocalDate(value) !== null, 'La fecha para realizar no existe.')
+  .refine((value) => {
+    const year = Number(value.slice(0, 4));
+    return year >= SCHEDULED_DATE_MIN_YEAR && year <= SCHEDULED_DATE_MAX_YEAR;
+  }, `La fecha para realizar debe estar entre ${SCHEDULED_DATE_MIN_YEAR} y ${SCHEDULED_DATE_MAX_YEAR}.`)
+  .nullable();
+
 export const taskIdParamSchema = uuidSchema;
 
 export const createTaskBodySchema = z
@@ -55,14 +78,17 @@ export const createTaskBodySchema = z
     description: descriptionSchema,
     employeeId: uuidSchema,
     frequency: frequencySchema,
+    scheduledDate: scheduledDateSchema.optional(),
   })
   .strict();
 
+/** `scheduledDate`: omitida = sin cambios; `null` = quitar la fecha. */
 export const updateTaskBodySchema = z
   .object({
     description: descriptionSchema.optional(),
     employeeId: uuidSchema.optional(),
     frequency: frequencySchema.optional(),
+    scheduledDate: scheduledDateSchema.optional(),
   })
   .strict()
   .refine((body) => Object.values(body).some((value) => value !== undefined), {

@@ -42,6 +42,8 @@ export function makeTask(overrides: Partial<TaskItem> = {}): TaskItem {
     active: true,
     assignee: { ...PERSON_A, active: true },
     periodKey: '2026-09-24',
+    scheduledDate: null,
+    scheduleStatus: null,
     currentExecution: null,
     canComplete: true,
     ...overrides,

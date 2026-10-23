@@ -52,6 +52,7 @@ Función `getPeriodo(frec)` (línea 1115) — determina a qué "instancia" de la
 - **Semanal** → el período es la fecha del **lunes** de la semana actual (semana definida lunes a domingo). Se resetea cada lunes.
 - **Mensual** → el período es el primer día del mes actual (`YYYY-MM-01`). Se resetea el día 1 de cada mes.
 - **Quincenal** (nueva, no existía en el prototipo; ver "Tareas quincenales" más abajo) → dos períodos por mes calendario: del 1 al 15 y del 16 al último día, inclusive (`YYYY-MM-Q1` / `YYYY-MM-Q2`). Se resetea el 16 y el 1 de cada mes. No es "cada 15 días" desde la creación ni desde la última ejecución.
+- **Bimestral** y **Anual** (nuevas; ver "Fecha para realizar y tareas bimestrales/anuales" más abajo) → bimestres de calendario ene–feb, mar–abr, may–jun, jul–ago, sep–oct, nov–dic (`YYYY-B1` … `YYYY-B6`) y año calendario del 1/1 al 31/12 (`YYYY-A`). No son "dos meses / un año desde la última ejecución".
 - **Urgente** → no tiene período variable; usa el string fijo `'urgente'`. Una vez completada, permanece completada indefinidamente (no hay lógica de reseteo visible) salvo que se destilde manualmente o se elimine la tarea.
 - **Única** → string fijo `'unica'`; comportamiento de completado permanente igual que urgente.
 
@@ -313,7 +314,7 @@ Repetido aquí por completitud del pedido original — el detalle completo y el 
 ## Actualización Etapa 5D — Regla definitiva de Desempeño (reemplaza lo anterior donde difiera)
 
 - **Cumplimiento personal** = obligaciones propias realizadas por la misma persona / obligaciones asignadas. Si Coke completa una tarea asignada a Juan, la ejecución conserva `assignedEmployeeId = Juan` y `completedByEmployeeId = Coke`: la tarea queda terminada, sigue en el denominador de Juan, no suma a su numerador y no altera el porcentaje de Coke; se informa como **cobertura recibida** (Juan) y **cobertura realizada** (Coke). Ejemplo: 10 asignadas, 8 propias, 1 cubierta, 1 pendiente → 80%.
-- **Los cinco tipos cuentan** (seis desde las quincenales: `SEMI_MONTHLY` cuenta con el mismo criterio que `MONTHLY`, una obligación por quincena planificada). DAILY/WEEKLY/MONTHLY: una obligación por día/semana/mes planificado según `TaskPlanningInterval` (altas, bajas, reasignaciones y cambios de frecuencia), nunca fuera de lo planificado. URGENT/ONE_TIME: **una sola** obligación por tarea, si su ventana (desde la planificación hasta la finalización vigente, o hasta el cierre de la planificación si sigue pendiente) se superpone con el rango: completada antes del rango o creada después → no entra; completada durante el rango → entra; completada después del fin del rango → entra como pendiente.
+- **Los cinco tipos cuentan** (seis desde las quincenales: `SEMI_MONTHLY` cuenta con el mismo criterio que `MONTHLY`, una obligación por quincena planificada; ocho desde `BIMONTHLY`/`ANNUAL`, con el mismo criterio; y una `ONE_TIME` con fecha para realizar solo cuenta desde esa fecha — ver "Fecha para realizar y tareas bimestrales/anuales"). DAILY/WEEKLY/MONTHLY: una obligación por día/semana/mes planificado según `TaskPlanningInterval` (altas, bajas, reasignaciones y cambios de frecuencia), nunca fuera de lo planificado. URGENT/ONE_TIME: **una sola** obligación por tarea, si su ventana (desde la planificación hasta la finalización vigente, o hasta el cierre de la planificación si sigue pendiente) se superpone con el rango: completada antes del rango o creada después → no entra; completada durante el rango → entra; completada después del fin del rango → entra como pendiente.
 - Responsable: siempre el snapshot `assignedEmployeeId` de la ejecución; si está pendiente, el de la planificación vigente al cierre. Nunca se deduce por nombres ni por el responsable actual, y ninguna ejecución histórica se modifica.
 - Métricas del DTO: `assigned`, `completedPersonally`, `percentage`, `pending`, `coverageReceived`, `coverageGiven` y `operationalCompleted` (trabajo terminado por la persona, propio + coberturas, fuera del porcentaje). Reversiones no suman ni cuentan como cobertura. Sin puntos, premios ni ponderaciones.
 - **Simplificación (5D.2)**: sin racha (se retiró del cálculo, del DTO y de la pantalla). Etiquetas visibles: **Sin completar** (asignadas que nadie terminó), **Le cubrieron** (propias hechas por otra persona) y **Cubrió a otros** (ajenas hechas por la persona); el porcentaje sigue siendo realizadas personalmente / asignadas (Cami: 2 asignadas, 1 propia, 1 cubierta → 50%, Sin completar 0, Le cubrieron 1). Rangos públicos: 7, 14 y 30 días (predeterminado e Inicio: 7). Con 0 obligaciones asignadas no hay denominador: se muestra «Sin tareas en el período» (nunca «0%» ni «Sin datos») con barra neutra; con asignadas y ninguna realizada sí es «0%».
@@ -395,3 +396,33 @@ Toda eliminación: `DELETE` explícito, `204`/`403`/`404`/`409 *_IN_USE`, transa
 - **Desempeño e Inicio**: cuentan como las mensuales — una obligación por cada quincena planificada que **empieza** (día 1 o 16) dentro del rango (7/14/30 días), con el responsable vigente al cierre o el snapshot de la ejecución. Inicio usa exactamente la misma función.
 - **Historial semanal**: igual que las mensuales, aparecen en «Finalizaciones de la semana» por fecha de finalización y **no** suman slots al conteo realizadas/esperadas (ese conteo solo contempla diarias y semanales: una quincena no entra en una grilla de lunes a domingo).
 - **Calendario de Configuración** (indicador aproximado, §5): marca las quincenales el primer día de cada quincena (1 y 16), como marca las mensuales el día 1.
+
+## Fecha para realizar y tareas bimestrales/anuales (2026-10-23)
+
+Función nueva pedida explícitamente por el usuario. El prototipo no tenía fecha en las «Una vez» ni estas frecuencias: no hay datos que migrar ni tareas existentes que convertir. Permisos sin cambios: crear, editar, reprogramar y quitar la fecha = solo `ADMIN`; completar y revertir según §4/§5.
+
+**«Fecha para realizar» (solo `ONE_TIME`, opcional)**
+
+- Fecha de calendario sin hora en `BUSINESS_TIME_ZONE`; identifica un día concreto (se muestra con el día de la semana: «Lunes 26/10/2026»). Puede ser pasada, para registrar una pendiente atrasada (años 2000–2100).
+- Estado de una tarea con fecha y sin completar, calculado por el backend: **Programada** (fecha futura), **Para hoy** (es hoy) y **Vencida** (ya pasó). Sin fecha: la presentación de siempre.
+- Se puede completar **antes** de la fecha. Completada, conserva auditoría e historial y sale del listado operativo como cualquier «Una vez»; revertida, vuelve a pendiente con el estado que corresponda.
+- La clave sigue siendo `ONE_TIME`: cambiar la fecha nunca crea otra obligación ni permite completarla otra vez si tiene una ejecución vigente.
+- Editar: omitir la fecha la deja igual; `null` la quita; una fecha para otra frecuencia se rechaza (400). Pasar de «Una vez» a otra frecuencia quita la fecha en la misma transacción; queda como antecedente en la planificación cerrada y en la auditoría (valor anterior y nuevo). Cada reprogramación es una versión nueva de la planificación.
+- Tareas: el filtro «Una vez» muestra todas (también las programadas para más adelante y las sin fecha) y suma los accesos «Hoy» y «Vencidas», combinables con la persona. La burbuja de pendientes de cada persona no cuenta las programadas para más adelante. Configuración → Calendario marca la tarea en su fecha.
+
+**Bimestral y Anual**
+
+- Bimestres de calendario (ene–feb, mar–abr, may–jun, jul–ago, sep–oct, nov–dic) y año calendario (1/1–31/12), en `BUSINESS_TIME_ZONE`, sin fecha inicial. Una ejecución vigente por tarea y período (mismo índice único parcial), con claves propias (`YYYY-B1…B6`, `YYYY-A`): una ejecución de otra frecuencia nunca "cumple" el bimestre ni el año al cambiar la frecuencia, ni al revés.
+- Creada a mitad de bimestre o de año: ese período ya corre (pendiente), igual que una mensual creada a mitad de mes. Un `EMPLOYEE` deshace lo propio solo dentro del período vigente; un `ADMIN` corrige con motivo.
+- Ayudas del formulario: «Una vez por bimestre calendario: ene–feb, mar–abr…» y «Una vez por año calendario». Calendario de Configuración: el 1 de cada bimestre y el 1 de enero.
+
+**Inicio y Desempeño** (una sola función, `getPerformance`; el frontend no calcula nada)
+
+- Bimestral y Anual: el criterio de las mensuales — una obligación por cada período planificado que **empieza** (1 de ene/mar/may/jul/sep/nov; 1/1) dentro del rango (7/14/30 días), con el responsable vigente al cierre o el snapshot de la ejecución.
+- «Una vez» con fecha: sigue siendo **una** obligación por tarea, pero solo cuenta como pendiente donde ya era exigible según la versión de planificación de cada momento: programada para después → no entra; para hoy o vencida → entra; completada (antes, el día o después de la fecha) → entra en el rango de su finalización. Reprogramar no reescribe lo esperado antes: un rango en que estuvo vencida la sigue contando, con el responsable de entonces. Sin fecha: exactamente la regla anterior.
+- KPI operativo de Inicio («Tareas completadas»): no cuenta las «Una vez» programadas para después de hoy.
+- Historial semanal: bimestrales, anuales y «Una vez» en «Finalizaciones de la semana», fuera del conteo realizadas/esperadas (solo diarias y semanales).
+
+**Ejemplo con resultado concreto** (rango de Inicio 16–22/10/2026, visto el jueves 22): Juan tiene una «Una vez» para el 30/10 (no cuenta), una para hoy y una vencida el 12/10 (pendientes), una que vencía el 30/10 y completó el 20/10 (propia), una que vencía el 14/10 y el 20/10 se reprogramó al 05/11 y se reasignó a Coke (pendiente de Juan: estuvo vencida del 16 al 20) y una del 18/10 que hizo Coke (cubierta) → 5 asignadas, 1 realizada personalmente, 3 sin completar, 1 cobertura recibida: **20%**. Coke: 1 cobertura realizada. Una semana después (23–29/10) la reprogramada no cuenta para nadie: recién vence el 05/11.
+
+**Mascotas, sin cambios**: vacunas y desparasitaciones siguen con su «Fecha de próxima aplicación o control» y 📅 Vencimientos. Completar una tarea no crea registros clínicos, no hay recurrencias veterinarias automáticas ni vínculos entre Tareas y Mascotas.

@@ -243,7 +243,8 @@ La implementación React actual debe reconciliarse visualmente con esta referenc
 Desempeño se integra mediante navegación secundaria en chips `📋 Tareas | 🏆 Desempeño` (emojis exactos del prototipo; el destino principal también usa 📋), sin destino principal nuevo. Reutiliza tarjetas blancas, cifras Fraunces, avatares, chips desplazables y barras; apila a 360 px y usa grilla desde 768 px.
 
 - Filtro horizontal por persona con avatar y cantidad pendiente.
-- Filtros por frecuencia mediante chips.
+- Filtros por frecuencia mediante chips (Bimestrales y Anuales después de Mensuales). Dentro de «Una vez», una segunda fila de chips con los accesos «Hoy» y «Vencidas» (con su cantidad, combinables con la persona; tocar el elegido vuelve a todas).
+- «Una vez» con fecha para realizar: después de la etiqueta de frecuencia, una etiqueta de estado con punto (`Programada` neutral, `Para hoy` warning, `Vencida` danger) y la fecha con el día de la semana («📅 Lunes 26/10/2026») como metadato secundario. Sin fecha: sin cambios. Bimestral y Anual usan el tono `warning` de la mensual.
 - Lista de tareas dentro de tarjetas.
 - Casilla cuadrada del prototipo (`.tck`, 22 px visibles dentro de 44 px táctiles); ✏️/✕ del ADMIN como botones de icono a la derecha.
 - Frecuencia y responsable como metadatos secundarios.

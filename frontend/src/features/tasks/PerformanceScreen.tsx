@@ -10,7 +10,8 @@ import { Card } from '../../components/ui/Card';
 import { Chip } from '../../components/ui/Chip';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
-import { formatPercentage } from '../../utils/dateFormat';
+import { useBusinessToday } from '../../connectivity/useBusinessToday';
+import { formatDateWithWeekday, formatPercentage } from '../../utils/dateFormat';
 import { TasksSubnav } from './TasksSubnav';
 import { FREQUENCY_LABEL, formatPeriodKey } from './taskLabels';
 import type { PerformanceOccurrence } from '../../api/performanceTypes';
@@ -50,18 +51,26 @@ function Kpi({ tone, value, label }: { tone: Tone; value: string | number; label
     </div>
   );
 }
-const localDate = (date: Date) => {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+/**
+ * Últimos `days` días hasta hoy en la zona de negocio (aritmética de
+ * calendario, nunca la fecha local del navegador). Al empezar otro día de
+ * negocio cambia `today`, cambia la clave y el resumen se pide una sola vez.
+ */
+const presetRange = (days: Preset, today: string) => {
+  const [year, month, day] = today.split('-').map(Number) as [number, number, number];
+  const from = new Date(Date.UTC(year, month - 1, day - days + 1)).toISOString().slice(0, 10);
+  return { from, to: today };
 };
-const presetRange = (days: Preset) => {
-  const to = new Date();
-  const from = new Date(to);
-  from.setDate(from.getDate() - days + 1);
-  return { from: localDate(from), to: localDate(to) };
-};
+
+/** Período de una obligación: fechas del período, o la fecha para realizar de una «Una vez». */
+function occurrencePeriod(item: PerformanceOccurrence): string {
+  if (item.frequency === 'ONE_TIME' && item.scheduledDate) {
+    return `${FREQUENCY_LABEL.ONE_TIME} · para el ${formatDateWithWeekday(item.scheduledDate)}`;
+  }
+  return item.frequency === 'URGENT' || item.frequency === 'ONE_TIME'
+    ? FREQUENCY_LABEL[item.frequency]
+    : `${formatPeriodKey(item.periodKey)} · ${FREQUENCY_LABEL[item.frequency]}`;
+}
 const percentageLabel = formatPercentage;
 
 const isUnauthorized = (reason: unknown) =>
@@ -78,7 +87,8 @@ export function PerformanceScreen() {
   const { userId, enabled } = useSessionScope();
   const [preset, setPreset] = useState<Preset>(7);
   const [selected, setSelected] = useState<string | null>(null);
-  const range = presetRange(preset);
+  const today = useBusinessToday();
+  const range = presetRange(preset, today);
 
   const summary = useQuery({
     queryKey: queryKeys.performance.summary(userId, range.from, range.to),
@@ -250,10 +260,8 @@ export function PerformanceScreen() {
                     <span>
                       <strong>{item.description}</strong>
                       <small>
-                        {item.frequency === 'URGENT' || item.frequency === 'ONE_TIME'
-                          ? FREQUENCY_LABEL[item.frequency]
-                          : `${formatPeriodKey(item.periodKey)} · ${FREQUENCY_LABEL[item.frequency]}`}{' '}
-                        · asignada a {item.assignedEmployee?.displayName ?? 'Sin responsable'}
+                        {occurrencePeriod(item)} · asignada a{' '}
+                        {item.assignedEmployee?.displayName ?? 'Sin responsable'}
                         {item.completedByEmployee
                           ? ` · realizada por ${item.completedByEmployee.displayName}`
                           : ''}

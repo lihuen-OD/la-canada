@@ -5,7 +5,15 @@
  * de negocio.
  */
 
-export type TaskFrequency = 'DAILY' | 'WEEKLY' | 'SEMI_MONTHLY' | 'MONTHLY' | 'URGENT' | 'ONE_TIME';
+export type TaskFrequency =
+  'DAILY' | 'WEEKLY' | 'SEMI_MONTHLY' | 'MONTHLY' | 'BIMONTHLY' | 'ANNUAL' | 'URGENT' | 'ONE_TIME';
+
+/**
+ * Estado de una «Una vez» con fecha y sin completar, calculado por el backend
+ * con las fechas de `BUSINESS_TIME_ZONE`: programada (futura), para hoy o
+ * vencida. `null` sin fecha o ya completada.
+ */
+export type TaskScheduleStatus = 'SCHEDULED' | 'DUE_TODAY' | 'OVERDUE';
 
 export interface TaskEmployee {
   id: string;
@@ -32,6 +40,9 @@ export interface TaskItem {
   active: boolean;
   assignee: TaskEmployee & { active: boolean };
   periodKey: string;
+  /** «Fecha para realizar» (`YYYY-MM-DD`), solo de una «Una vez»; `null` sin fecha. */
+  scheduledDate: string | null;
+  scheduleStatus: TaskScheduleStatus | null;
   currentExecution: TaskExecution | null;
   canComplete: boolean;
 }
@@ -55,6 +66,8 @@ export interface CreateTaskRequest {
   description: string;
   employeeId: string;
   frequency: TaskFrequency;
+  /** Solo «Una vez». Al editar: omitida = sin cambios; `null` = quitar la fecha. */
+  scheduledDate?: string | null;
 }
 
 export type UpdateTaskRequest = Partial<CreateTaskRequest>;
@@ -65,6 +78,7 @@ export interface HistoryTask {
   frequency: TaskFrequency;
   active: boolean;
   assignee: TaskEmployee;
+  scheduledDate: string | null;
 }
 
 export interface HistorySlot {

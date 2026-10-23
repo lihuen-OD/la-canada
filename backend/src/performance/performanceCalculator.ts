@@ -4,8 +4,12 @@ import {
   SECOND_HALF_FIRST_DAY,
   URGENT_PERIOD_KEY,
   addDays,
+  annualPeriodKey,
+  bimonthlyPeriodKey,
   compareLocalDates,
   formatLocalDate,
+  isBimesterStart,
+  nextBimesterStart,
   nextSemiMonthStart,
   semiMonthlyPeriodKey,
   startOfLocalDay,
@@ -21,6 +25,13 @@ export interface PlanningRow {
   frequency: TaskFrequency;
   validFrom: Date;
   validTo: Date | null;
+  /**
+   * Solo `ONE_TIME` con fecha para realizar en esta versión: la fecha
+   * (`YYYY-MM-DD`) y el primer instante de ese día de negocio. Antes de
+   * `dueFrom` la tarea no es exigible (no cuenta como pendiente ni vencida).
+   */
+  scheduledDate?: string | null;
+  dueFrom?: Date | null;
 }
 
 export interface ExecutionRow {
@@ -33,9 +44,9 @@ export interface ExecutionRow {
 }
 
 /**
- * Una obligación de una persona. Recurrentes: una por día/semana/quincena/mes
- * planificado. URGENT y ONE_TIME: una sola por tarea (`periodKey` fijo
- * `URGENT`/`ONE_TIME`, el mismo que usa la ejecución).
+ * Una obligación de una persona. Recurrentes: una por día/semana/quincena/
+ * mes/bimestre/año planificado. URGENT y ONE_TIME: una sola por tarea
+ * (`periodKey` fijo `URGENT`/`ONE_TIME`, el mismo que usa la ejecución).
  */
 export interface Occurrence {
   taskId: string;
@@ -46,13 +57,70 @@ export interface Occurrence {
   completed: boolean;
   completedByEmployeeId: string | null;
   completedAt: Date | null;
+  /** Solo una `ONE_TIME` con fecha: la de la versión de planificación que se usó. */
+  scheduledDate?: string;
 }
 
-const recurring = (frequency: TaskFrequency): frequency is Occurrence['frequency'] =>
-  frequency === 'DAILY' ||
-  frequency === 'WEEKLY' ||
-  frequency === 'SEMI_MONTHLY' ||
-  frequency === 'MONTHLY';
+const RECURRING_FREQUENCIES = [
+  'DAILY',
+  'WEEKLY',
+  'SEMI_MONTHLY',
+  'MONTHLY',
+  'BIMONTHLY',
+  'ANNUAL',
+] as const;
+type RecurringFrequency = (typeof RECURRING_FREQUENCIES)[number];
+
+const recurring = (frequency: TaskFrequency): frequency is RecurringFrequency =>
+  (RECURRING_FREQUENCIES as readonly TaskFrequency[]).includes(frequency);
+
+/** ¿Empieza en `day` un período de `frequency`? Semana: lunes; quincena: 1 y 16; bimestre: el 1 de cada mes impar; año: 1/1. */
+function startsPeriod(frequency: RecurringFrequency, day: LocalDate): boolean {
+  switch (frequency) {
+    case 'DAILY':
+      return true;
+    case 'WEEKLY':
+      return compareLocalDates(day, startOfWeek(day)) === 0;
+    case 'SEMI_MONTHLY':
+      return day.day === 1 || day.day === SECOND_HALF_FIRST_DAY;
+    case 'MONTHLY':
+      return day.day === 1;
+    case 'BIMONTHLY':
+      return isBimesterStart(day);
+    case 'ANNUAL':
+      return day.day === 1 && day.month === 1;
+  }
+}
+
+/** Primer día del período siguiente al que empieza en `day`. */
+function nextPeriodStart(frequency: RecurringFrequency, day: LocalDate): LocalDate {
+  switch (frequency) {
+    case 'DAILY':
+      return addDays(day, 1);
+    case 'WEEKLY':
+      return addDays(day, 7);
+    case 'SEMI_MONTHLY':
+      return nextSemiMonthStart(day);
+    case 'MONTHLY':
+      return {
+        year: day.month === 12 ? day.year + 1 : day.year,
+        month: (day.month % 12) + 1,
+        day: 1,
+      };
+    case 'BIMONTHLY':
+      return nextBimesterStart(day);
+    case 'ANNUAL':
+      return { year: day.year + 1, month: 1, day: 1 };
+  }
+}
+
+/** Clave del período que empieza en `day`: la fecha, o la propia de quincena/bimestre/año (nunca una fecha). */
+function periodKeyAt(frequency: RecurringFrequency, day: LocalDate): string {
+  if (frequency === 'SEMI_MONTHLY') return semiMonthlyPeriodKey(day);
+  if (frequency === 'BIMONTHLY') return bimonthlyPeriodKey(day);
+  if (frequency === 'ANNUAL') return annualPeriodKey(day);
+  return formatLocalDate(day);
+}
 
 function periodStarts(from: LocalDate, to: LocalDate): LocalDate[] {
   const dates: LocalDate[] = [];
@@ -66,8 +134,10 @@ function periodStarts(from: LocalDate, to: LocalDate): LocalDate[] {
  * cerrado usa el primer instante del período siguiente. Esto evita duplicar
  * una tarea cuando cambia responsable o frecuencia dentro del período.
  * Cada período entra si su primer día cae en el rango (la quincena, el 1 o
- * el 16, igual que la mensual el 1); las quincenales usan su propia clave
- * `YYYY-MM-Q1/Q2`, así que nunca toman una ejecución de otra frecuencia.
+ * el 16; el bimestre, el 1 de ene/mar/may/jul/sep/nov; el año, el 1/1 —
+ * igual que la mensual el 1); quincenales, bimestrales y anuales usan su
+ * propia clave (`YYYY-MM-Q1/Q2`, `YYYY-B1…B6`, `YYYY-A`), así que nunca toman
+ * una ejecución de otra frecuencia.
  */
 export function buildRecurringOccurrences(input: {
   plans: PlanningRow[];
@@ -97,24 +167,10 @@ export function buildRecurringOccurrences(input: {
 
   for (const day of periodStarts(input.from, input.to)) {
     for (const rows of byTask.values()) {
-      for (const frequency of ['DAILY', 'WEEKLY', 'SEMI_MONTHLY', 'MONTHLY'] as const) {
-        if (frequency === 'WEEKLY' && compareLocalDates(day, startOfWeek(day)) !== 0) continue;
-        if (frequency === 'SEMI_MONTHLY' && day.day !== 1 && day.day !== SECOND_HALF_FIRST_DAY)
-          continue;
-        if (frequency === 'MONTHLY' && day.day !== 1) continue;
+      for (const frequency of RECURRING_FREQUENCIES) {
+        if (!startsPeriod(frequency, day)) continue;
 
-        const next =
-          frequency === 'DAILY'
-            ? addDays(day, 1)
-            : frequency === 'WEEKLY'
-              ? addDays(day, 7)
-              : frequency === 'SEMI_MONTHLY'
-                ? nextSemiMonthStart(day)
-                : {
-                    year: day.month === 12 ? day.year + 1 : day.year,
-                    month: (day.month % 12) + 1,
-                    day: 1,
-                  };
+        const next = nextPeriodStart(frequency, day);
         const current =
           compareLocalDates(day, input.today) <= 0 && compareLocalDates(input.today, next) < 0;
         const cutoff = current ? input.now : startOfLocalDay(next, input.timeZone);
@@ -129,7 +185,7 @@ export function buildRecurringOccurrences(input: {
         if (!plan || !recurring(plan.frequency) || plan.frequency !== frequency) continue;
 
         const start = formatLocalDate(day);
-        const periodKey = frequency === 'SEMI_MONTHLY' ? semiMonthlyPeriodKey(day) : start;
+        const periodKey = periodKeyAt(frequency, day);
         const key = `${plan.taskId}:${periodKey}`;
         if (seen.has(key)) continue;
         seen.add(key);
@@ -165,6 +221,38 @@ const SINGLE_KEYS = [
 ] as const;
 
 /**
+ * ¿Es exigible en `at` una `ONE_TIME`? Manda la última versión de su
+ * planificación que ya había empezado (también en un hueco, p. ej. mientras
+ * estuvo desactivada): con fecha, recién desde el primer instante de ese día.
+ */
+function exigibleAt(plans: PlanningRow[], at: number): boolean {
+  const plan = plans.filter((row) => row.validFrom.getTime() <= at).at(-1);
+  return !plan?.dueFrom || plan.dueFrom.getTime() <= at;
+}
+
+/**
+ * Último instante de `[from, to]` en que la tarea estuvo pendiente y ya era
+ * exigible, o `null` si nunca lo fue. La exigibilidad solo cambia al empezar
+ * una versión de planificación o al llegar una fecha para realizar, así que
+ * alcanza con mirar esos puntos.
+ */
+function lastExigibleInstant(plans: PlanningRow[], from: number, to: number): number | null {
+  if (from > to) return null;
+  const points = plans.flatMap((plan) =>
+    plan.dueFrom ? [plan.validFrom.getTime(), plan.dueFrom.getTime()] : [plan.validFrom.getTime()],
+  );
+  const starts = Array.from(
+    new Set([from, ...points.filter((point) => point > from && point <= to)]),
+  ).sort((a, b) => a - b);
+  for (let index = starts.length - 1; index >= 0; index -= 1) {
+    if (exigibleAt(plans, starts[index]!)) {
+      return index === starts.length - 1 ? to : starts[index + 1]! - 1;
+    }
+  }
+  return null;
+}
+
+/**
  * URGENT y ONE_TIME: cada tarea es UNA obligación, nunca una por día/semana.
  * Su ventana va desde la primera planificación con esa frecuencia hasta la
  * finalización vigente (o, si sigue pendiente, hasta el cierre de la última
@@ -173,6 +261,14 @@ const SINGLE_KEYS = [
  * durante el rango o pendiente en alguna parte → entra una sola vez. El
  * responsable es el snapshot de la ejecución; si sigue pendiente, el de la
  * planificación vigente al cierre de la ventana dentro del rango.
+ *
+ * Una `ONE_TIME` con fecha para realizar solo cuenta como pendiente donde ya
+ * era exigible según la versión de planificación de cada momento: programada
+ * para más adelante no entra; vencida, sí. Reprogramarla abre otra versión,
+ * así que lo esperado en rangos anteriores no cambia, y sigue siendo UNA sola
+ * obligación. Completada (antes, el día o después de la fecha) entra en el
+ * rango de su finalización, igual que sin fecha. Sin fecha: exactamente la
+ * regla de siempre.
  */
 export function buildSingleOccurrences(input: {
   plans: PlanningRow[];
@@ -204,15 +300,24 @@ export function buildSingleOccurrences(input: {
         continue;
       if (end !== null && end.getTime() < input.rangeStart.getTime()) continue;
 
-      const cutoff = Math.min(
+      let cutoff = Math.min(
         end?.getTime() ?? Infinity,
         input.rangeEnd.getTime(),
         input.now.getTime(),
       );
-      const plan = plans.filter((row) => row.validFrom.getTime() <= cutoff).at(-1) ?? plans.at(-1)!;
       // Completada después de terminar el rango: dentro del rango seguía pendiente.
       const done =
         execution && execution.completedAt.getTime() < input.rangeEnd.getTime() ? execution : null;
+      if (!done && plans.some((row) => row.dueFrom)) {
+        const lastDue = lastExigibleInstant(
+          plans,
+          Math.max(start.getTime(), input.rangeStart.getTime()),
+          Math.min(end?.getTime() ?? Infinity, input.rangeEnd.getTime() - 1, input.now.getTime()),
+        );
+        if (lastDue === null) continue;
+        cutoff = lastDue;
+      }
+      const plan = plans.filter((row) => row.validFrom.getTime() <= cutoff).at(-1) ?? plans.at(-1)!;
       result.push({
         taskId,
         description: plan.description,
@@ -222,6 +327,7 @@ export function buildSingleOccurrences(input: {
         completed: Boolean(done),
         completedByEmployeeId: done?.completedByEmployeeId ?? null,
         completedAt: done?.completedAt ?? null,
+        ...(plan.scheduledDate ? { scheduledDate: plan.scheduledDate } : {}),
       });
     }
   }

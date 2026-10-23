@@ -202,6 +202,8 @@ describe('TasksScreen — filtros', () => {
       'Semanales',
       'Quincenales',
       'Mensuales',
+      'Bimestrales',
+      'Anuales',
       'Urgentes',
       'Una vez',
     ]);
@@ -450,6 +452,7 @@ describe('TasksScreen — historial semanal', () => {
               frequency: 'DAILY',
               active: false,
               assignee: PERSON_A,
+              scheduledDate: null,
             },
             slots: [
               { periodKey: '2026-09-22', expected: false, execution: makeExecution({ id: 'x2' }) },
@@ -464,6 +467,7 @@ describe('TasksScreen — historial semanal', () => {
               frequency: 'ONE_TIME',
               active: true,
               assignee: PERSON_A,
+              scheduledDate: null,
             },
             execution,
           },
@@ -665,5 +669,169 @@ describe('TasksScreen — eliminar (ADMIN, solo sin historia)', () => {
       'Desactivala para conservar el historial',
     );
     expect(screen.getByRole('dialog', { name: 'Eliminar «Tarea sintética diaria»' })).toBe(dialog);
+  });
+});
+
+describe('TasksScreen — «Una vez» con fecha y frecuencias nuevas', () => {
+  const oneTime = (suffix: string, overrides: Parameters<typeof makeTask>[0]) =>
+    makeTask({
+      id: `00000000-0000-4000-8000-0000000000${suffix}`,
+      frequency: 'ONE_TIME',
+      periodKey: 'ONE_TIME',
+      ...overrides,
+    });
+  const FUTURE_A = oneTime('a1', {
+    description: 'Única sintética programada',
+    scheduledDate: '2026-10-30',
+    scheduleStatus: 'SCHEDULED',
+  });
+  const TODAY_A = oneTime('a2', {
+    description: 'Única sintética para hoy',
+    scheduledDate: '2026-09-24',
+    scheduleStatus: 'DUE_TODAY',
+  });
+  const OVERDUE_B = oneTime('b1', {
+    description: 'Única sintética vencida',
+    assignee: { ...PERSON_B, active: true },
+    scheduledDate: '2026-09-20',
+    scheduleStatus: 'OVERDUE',
+  });
+  const UNDATED_A = oneTime('a3', { description: 'Única sintética sin fecha' });
+  const BIMONTHLY_A = makeTask({
+    id: '00000000-0000-4000-8000-0000000000a4',
+    description: 'Tarea sintética bimestral',
+    frequency: 'BIMONTHLY',
+    periodKey: '2026-B5',
+  });
+  const ANNUAL_B = makeTask({
+    id: '00000000-0000-4000-8000-0000000000b2',
+    description: 'Tarea sintética anual',
+    frequency: 'ANNUAL',
+    assignee: { ...PERSON_B, active: true },
+    periodKey: '2026-A',
+  });
+  const ALL = [TODAY_A, FUTURE_A, OVERDUE_B, UNDATED_A, DAILY_A, BIMONTHLY_A, ANNUAL_B];
+
+  beforeEach(() => asEmployee());
+
+  it('muestra la fecha con el día de la semana y el estado que decide el backend', async () => {
+    await renderLoaded(ALL);
+    const list = screen.getByRole('list', { name: 'Tareas del período' });
+    const row = (text: string) => within(list).getByText(text).closest('li') as HTMLElement;
+    expect(within(row(FUTURE_A.description)).getByText('Programada')).toBeInTheDocument();
+    expect(within(row(FUTURE_A.description)).getByText(/Viernes 30\/10\/2026/)).toBeInTheDocument();
+    expect(within(row(TODAY_A.description)).getByText('Para hoy')).toBeInTheDocument();
+    expect(within(row(OVERDUE_B.description)).getByText('Vencida')).toBeInTheDocument();
+    expect(
+      within(row(OVERDUE_B.description)).getByText(/Domingo 20\/09\/2026/),
+    ).toBeInTheDocument();
+    // Sin fecha: la presentación de siempre (sin estado ni fecha).
+    const undated = row(UNDATED_A.description);
+    expect(within(undated).queryByText(/Programada|Para hoy|Vencida/)).not.toBeInTheDocument();
+    expect(within(undated).queryByText(/Fecha para realizar/)).not.toBeInTheDocument();
+    // Completar ANTES de la fecha está permitido.
+    expect(
+      within(row(FUTURE_A.description)).getByRole('button', {
+        name: `Marcar como completada: ${FUTURE_A.description}`,
+      }),
+    ).toBeEnabled();
+    expect(within(list).getByText('Bimestral', { selector: '.badge' })).toBeInTheDocument();
+    expect(within(list).getByText('Anual', { selector: '.badge' })).toBeInTheDocument();
+  });
+
+  it('una programada a futuro no suma a los pendientes de la persona; la de hoy y la vencida sí', async () => {
+    await renderLoaded(ALL);
+    const people = screen.getByRole('group', { name: 'Filtrar por persona' });
+    // A: para hoy + sin fecha + diaria + bimestral = 4 (la programada no cuenta).
+    expect(
+      within(people).getByRole('button', { name: 'Persona sintética A, 4 pendientes' }),
+    ).toBeInTheDocument();
+    expect(
+      within(people).getByRole('button', { name: 'Persona sintética B, 2 pendientes' }),
+    ).toBeInTheDocument();
+  });
+
+  it('«Hoy» y «Vencidas» solo dentro de «Una vez», combinables con la persona; las futuras siguen consultables', async () => {
+    await renderLoaded(ALL);
+    const user = userEvent.setup();
+    expect(screen.queryByRole('group', { name: 'Filtrar «Una vez» por fecha' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Una vez' }));
+    const list = () => screen.getByRole('list', { name: 'Tareas del período' });
+    const names = () =>
+      within(list())
+        .getAllByRole('listitem')
+        .map((item) => item.querySelector('.task-item__description')?.textContent);
+    // Todas las «Una vez», también la programada y la sin fecha (en el orden del backend).
+    expect(names()).toEqual([
+      TODAY_A.description,
+      FUTURE_A.description,
+      OVERDUE_B.description,
+      UNDATED_A.description,
+    ]);
+
+    const access = screen.getByRole('group', { name: 'Filtrar «Una vez» por fecha' });
+    await user.click(within(access).getByRole('button', { name: 'Hoy, 1 tarea' }));
+    expect(names()).toEqual([TODAY_A.description]);
+    await user.click(within(access).getByRole('button', { name: 'Vencidas, 1 tarea' }));
+    expect(names()).toEqual([OVERDUE_B.description]);
+
+    // Combinado con la persona: A no tiene vencidas.
+    const people = screen.getByRole('group', { name: 'Filtrar por persona' });
+    await user.click(within(people).getByRole('button', { name: /Persona sintética A/ }));
+    expect(screen.getByText('No hay tareas con estos filtros.')).toBeInTheDocument();
+    expect(within(access).getByRole('button', { name: 'Vencidas, 0 tareas' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    // Tocar el acceso elegido vuelve a todas las «Una vez» de A.
+    await user.click(within(access).getByRole('button', { name: 'Vencidas, 0 tareas' }));
+    expect(names()).toEqual([TODAY_A.description, FUTURE_A.description, UNDATED_A.description]);
+
+    // Otra frecuencia: desaparecen los accesos y su selección no queda pegada.
+    await user.click(within(access).getByRole('button', { name: 'Hoy, 1 tarea' }));
+    await user.click(screen.getByRole('button', { name: 'Diarias' }));
+    expect(screen.queryByRole('group', { name: 'Filtrar «Una vez» por fecha' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Una vez' }));
+    expect(names()).toHaveLength(3);
+  });
+
+  it('chips nuevos «Bimestrales» y «Anuales» filtran por su frecuencia', async () => {
+    await renderLoaded(ALL);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Bimestrales' }));
+    const list = screen.getByRole('list', { name: 'Tareas del período' });
+    expect(within(list).getAllByRole('listitem')).toHaveLength(1);
+    expect(within(list).getByText(BIMONTHLY_A.description)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Anuales' }));
+    expect(
+      within(screen.getByRole('list', { name: 'Tareas del período' })).getByText(
+        ANNUAL_B.description,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('el historial muestra la fecha de una «Una vez» completada', async () => {
+    api.fetchTaskHistory.mockResolvedValue(
+      emptyHistory({
+        others: [
+          {
+            task: {
+              id: 'hist-o',
+              description: 'Única sintética completada antes de fecha',
+              frequency: 'ONE_TIME',
+              active: true,
+              assignee: PERSON_A,
+              scheduledDate: '2026-10-30',
+            },
+            execution: makeExecution({ periodKey: 'ONE_TIME', canRevert: false }),
+          },
+        ],
+      }),
+    );
+    await renderLoaded([DAILY_A]);
+    const line = (await screen.findByText('Única sintética completada antes de fecha')).closest(
+      'li',
+    ) as HTMLElement;
+    expect(within(line).getByText(/Viernes 30\/10\/2026/)).toBeInTheDocument();
   });
 });

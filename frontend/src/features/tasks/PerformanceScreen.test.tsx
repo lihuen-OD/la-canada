@@ -236,6 +236,58 @@ describe('PerformanceScreen', () => {
     expect(fetchPerformance.mock.calls.map(([from, to]) => span(from, to))).toEqual([7, 14, 30]);
   });
 
+  it('detalle: «Una vez» con su fecha para realizar y bimestre/año como rango de fechas', async () => {
+    const person = response.employees[0]!.employee;
+    const occurrence = (overrides: Record<string, unknown>) => ({
+      taskId: 't',
+      description: 'Sintética',
+      status: 'pending',
+      assignedEmployeeId: person.id,
+      completed: false,
+      completedByEmployeeId: null,
+      assignedEmployee: person,
+      completedByEmployee: null,
+      completedAt: null,
+      ...overrides,
+    });
+    fetchEmployeePerformance.mockResolvedValue({
+      ...response,
+      occurrences: [
+        occurrence({
+          taskId: 'o',
+          description: 'Única sintética vencida',
+          frequency: 'ONE_TIME',
+          periodKey: 'ONE_TIME',
+          scheduledDate: '2026-10-26',
+        }),
+        occurrence({
+          taskId: 'n',
+          description: 'Única sintética sin fecha',
+          frequency: 'ONE_TIME',
+          periodKey: 'ONE_TIME',
+        }),
+        occurrence({ taskId: 'b', frequency: 'BIMONTHLY', periodKey: '2026-B5' }),
+        occurrence({ taskId: 'a', frequency: 'ANNUAL', periodKey: '2027-A' }),
+      ],
+    });
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <PerformanceScreen />
+      </MemoryRouter>,
+    );
+    await user.click(await screen.findByRole('button', { name: /Persona sintética/ }));
+    const detail = (await screen.findByRole('heading', { name: 'Detalle' })).closest(
+      'section',
+    ) as HTMLElement;
+    expect(detail).toHaveTextContent('Una vez · para el Lunes 26/10/2026');
+    expect(detail).toHaveTextContent('01/09/2026 al 31/10/2026 · Bimestral');
+    expect(detail).toHaveTextContent('01/01/2027 al 31/12/2027 · Anual');
+    const undated = within(detail).getByText('Única sintética sin fecha').closest('li')!;
+    expect(undated).toHaveTextContent('Una vez · asignada a');
+    expect(detail.textContent).not.toMatch(/\b\d{4}-(B\d|A)\b/);
+  });
+
   it('caso Cami: 1 de 2 hechas por ella y 1 cubierta → 50%, Sin completar 0, Le cubrieron 1', async () => {
     fetchPerformance.mockResolvedValue({
       ...response,

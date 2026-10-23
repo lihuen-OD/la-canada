@@ -285,7 +285,7 @@ Todos los modelos usan `@@map`/`@map` para nombres de tabla/columna en snake_cas
 |---|---|---|
 | `SystemRole` | `ADMIN`, `EMPLOYEE` | Roles actuales del prototipo |
 | `UserStatus` | `PENDING_ACTIVATION`, `ACTIVE`, `SUSPENDED`, `DEACTIVATED` | Nuevo — ciclo de vida de `User` |
-| `TaskFrequency` | `DAILY`, `WEEKLY`, `SEMI_MONTHLY`, `MONTHLY`, `URGENT`, `ONE_TIME` | `tareas.frecuencia` (diaria/semanal/mensual/urgente/unica); `SEMI_MONTHLY` (quincenal) es nueva — migración `20261021120000_task_frequency_semi_monthly` |
+| `TaskFrequency` | `DAILY`, `WEEKLY`, `SEMI_MONTHLY`, `MONTHLY`, `BIMONTHLY`, `ANNUAL`, `URGENT`, `ONE_TIME` | `tareas.frecuencia` (diaria/semanal/mensual/urgente/unica); `SEMI_MONTHLY` (quincenal) es nueva — migración `20261021120000_task_frequency_semi_monthly`; `BIMONTHLY` (bimestral) y `ANNUAL` (anual) también — `20261023120000_task_frequency_bimonthly_annual` |
 | `StockArea` | `HOUSE`, `GARDEN`, `BOTH` | `stock.area` / `categorias_stock.area` (casa/jardin/ambas) |
 | `StockMovementType` | `OPENING_BALANCE`, `INCOME`, `CONSUMPTION`, `ADJUSTMENT_INCREASE`, `ADJUSTMENT_DECREASE` | Reemplaza los prefijos de texto en `consumos.motivo` |
 | `DestinationType` | `VEHICLE`, `SECTOR` | `destinos_consumo.tipo` |
@@ -343,7 +343,8 @@ Sin este snapshot, una consulta que solo mirara `Task.employeeId` reinterpretar�
 - `WEEKLY` → fecha del lunes de esa semana, `'YYYY-MM-DD'`.
 - `MONTHLY` → primer día del mes, `'YYYY-MM-01'`.
 - `SEMI_MONTHLY` (quincenal) → año, mes y quincena: `'YYYY-MM-Q1'` (días 1–15) o `'YYYY-MM-Q2'` (16–último día del mes). Deliberadamente **no** es una fecha: si una tarea cambia de frecuencia dentro del período, ninguna ejecución diaria/semanal/mensual (`YYYY-MM-DD`) coincide con la clave quincenal ni la "cumple". No hay fecha inicial ni de referencia: las quincenas son del calendario.
-- `URGENT` / `ONE_TIME` → el string fijo `'URGENT'` / `'ONE_TIME'` (no recurren; solo puede existir una ejecución en toda la vida de la tarea).
+- `BIMONTHLY` (bimestral) → año y bimestre de calendario: `'YYYY-B1'` (ene–feb) … `'YYYY-B6'` (nov–dic). `ANNUAL` (anual) → `'YYYY-A'` (1/1–31/12). Tampoco son fechas, por el mismo motivo que la quincenal, y no tienen fecha inicial.
+- `URGENT` / `ONE_TIME` → el string fijo `'URGENT'` / `'ONE_TIME'` (no recurren; solo puede existir una ejecución en toda la vida de la tarea). La «Fecha para realizar» opcional de una `ONE_TIME` (`tasks.scheduled_date`, versionada en `task_planning_intervals.scheduled_date`) **no** cambia la clave: reprogramar nunca habilita una segunda ejecución.
 
 `@@unique([taskId, periodKey])` impide duplicar una ejecución del mismo período, y para urgente/única impide más de una ejecución en total (porque `periodKey` es constante).
 
@@ -561,3 +562,12 @@ Lo que esta rama **no** hace, por diseño:
 ### Próximas aplicaciones o controles (`20260930180000_pet_record_next_due`, aplicada a `demo`)
 
 `animal_medical_records.next_due_date DATE NULL` (fecha programada, cargada a mano) y `fulfills_record_id UUID NULL` (FK `RESTRICT` → `animal_medical_records.id`, la atención que cumplió ese pendiente). Índices `(next_due_date)`, `(animal_id, next_due_date)` y único parcial `animal_medical_records_active_fulfillment_key (fulfills_record_id) WHERE voided_at IS NULL`. CHECK `next_due_date > record_date`, `type <> 'WEIGHT'` con fecha, y `fulfills_record_id <> id`. El estado (vigente/próxima/vence hoy/vencida/cumplida) no se persiste: se calcula en `pets/petDue.ts`. Los registros existentes quedan con ambas columnas en NULL (sin pendientes). Pendiente para production: aplicar con `db:migrate:deploy` junto con el resto de las migraciones de `demo`.
+
+### Tareas bimestrales/anuales y fecha de las «Una vez» (`20261023120000_task_frequency_bimonthly_annual` + `20261023120100_task_one_time_scheduled_date`, aplicadas a `demo`)
+
+- **Enum**: `ALTER TYPE "TaskFrequency" ADD VALUE 'BIMONTHLY'` y `'ANNUAL'`, en una migración propia (ningún valor nuevo se usa en la misma transacción en que se agrega). Quedan últimos en el enum de Postgres; el orden visible sale de `FREQUENCY_ORDER`.
+- **`tasks.scheduled_date DATE NULL`**: «Fecha para realizar» vigente de una `ONE_TIME` (fecha de calendario de `BUSINESS_TIME_ZONE`, sin hora).
+- **`task_planning_intervals.scheduled_date DATE NULL`**: la fecha de cada versión de planificación. Reprogramar cierra el intervalo vigente y abre otro (igual que reasignar o cambiar la frecuencia), así que Desempeño evalúa cada momento con la fecha que regía entonces y nunca reescribe lo esperado en rangos anteriores.
+- **CHECKs** (a mano): `tasks_scheduled_date_one_time_check` y `task_planning_intervals_scheduled_date_one_time_check` — `scheduled_date IS NULL OR frequency = 'ONE_TIME'`.
+- **Sin backfill ni fechas inventadas**: columnas nuevas nullable sin DEFAULT (metadato, sin reescribir tablas); todas las filas existentes quedan en NULL. Verificado en `demo` antes/después en `READ ONLY`: 14 tareas, 13 ejecuciones (5 revertidas), 14 intervalos y 22 auditorías de tareas con sumas de verificación idénticas; 0 fechas cargadas.
+- **Compatibilidad**: el código publicado lee columnas explícitas y crea filas con la fecha en NULL (cumple los CHECK). Sin índices nuevos: el listado de tareas ya carga todas las tareas y Desempeño lee los intervalos por rango con los índices existentes.

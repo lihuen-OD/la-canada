@@ -7,16 +7,18 @@ import { Avatar } from '../../components/ui/Avatar';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { ErrorState, LoadingState } from '../../components/ui/StateMessage';
+import { useBusinessToday } from '../../connectivity/useBusinessToday';
 import { FREQUENCY_LABEL, FREQUENCY_TONE } from '../tasks/taskLabels';
 import { tasksForDay } from './calendarDays';
-import { MONTHS_LONG, localToday } from './moreLabels';
+import { MONTHS_LONG } from './moreLabels';
 
 const WEEKDAYS = ['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'];
 
 /** 📅 Calendario de tareas de Configuración, sobre la misma caché que la pantalla de Tareas. */
 export function TaskCalendar() {
   const { userId, enabled } = useSessionScope();
-  const today = localToday();
+  // «Hoy» del día de negocio: se actualiza solo a medianoche, como la lista.
+  const today = useBusinessToday();
   const [todayYear, todayMonth, todayDay] = today.split('-').map(Number) as [
     number,
     number,

@@ -52,13 +52,17 @@ enum UserStatus {
 /// Frecuencia de una tarea. Traducción directa de los 5 valores literales
 /// usados en el prototipo (diaria/semanal/mensual/urgente/unica), más
 /// `SEMI_MONTHLY` (quincenal): dos períodos por mes calendario, del 1 al 15 y
-/// del 16 al último día — NO una recurrencia cada 14 días (ver
-/// `computePeriodKey`).
+/// del 16 al último día — NO una recurrencia cada 14 días —, `BIMONTHLY`
+/// (bimestral): ene–feb, mar–abr, …, nov–dic, y `ANNUAL` (anual): del 1 de
+/// enero al 31 de diciembre. Todos son períodos de calendario, nunca "desde la
+/// última ejecución" (ver `computePeriodKey`).
 enum TaskFrequency {
   DAILY
   WEEKLY
   SEMI_MONTHLY
   MONTHLY
+  BIMONTHLY
+  ANNUAL
   URGENT
   ONE_TIME
 }
@@ -453,12 +457,17 @@ model AuditLog {
 /// `TaskExecution` para el detalle completo de por qué son dos conceptos
 /// separados.
 model Task {
-  id          String        @id @default(uuid()) @db.Uuid
-  description String
-  employeeId  String        @map("employee_id") @db.Uuid
-  employee    Employee      @relation("TaskAssignee", fields: [employeeId], references: [id])
-  frequency   TaskFrequency
-  active      Boolean       @default(true)
+  id            String        @id @default(uuid()) @db.Uuid
+  description   String
+  employeeId    String        @map("employee_id") @db.Uuid
+  employee      Employee      @relation("TaskAssignee", fields: [employeeId], references: [id])
+  frequency     TaskFrequency
+  active        Boolean       @default(true)
+  /// «Fecha para realizar» opcional, SOLO de una tarea `ONE_TIME` (CHECK en la
+  /// migración `task_one_time_scheduled_date`): fecha de calendario sin hora
+  /// en `BUSINESS_TIME_ZONE`. Es la fecha vigente; cada cambio queda versionado
+  /// en `TaskPlanningInterval.scheduledDate`.
+  scheduledDate DateTime?     @map("scheduled_date") @db.Date
 
   executions        TaskExecution[]
   planningIntervals TaskPlanningInterval[]
@@ -475,18 +484,22 @@ model Task {
 }
 
 /// Historial bitemporal simplificado de la planificación operativa. Cada
-/// intervalo representa una asignación/frecuencia activa; `validTo = null`
-/// identifica el único intervalo vigente de una tarea activa.
+/// intervalo representa una asignación/frecuencia (y, en una `ONE_TIME`, su
+/// fecha para realizar) activa; `validTo = null` identifica el único intervalo
+/// vigente de una tarea activa.
 model TaskPlanningInterval {
-  id         String        @id @default(uuid()) @db.Uuid
-  taskId     String        @map("task_id") @db.Uuid
-  task       Task          @relation(fields: [taskId], references: [id])
-  employeeId String        @map("employee_id") @db.Uuid
-  employee   Employee      @relation(fields: [employeeId], references: [id])
-  frequency  TaskFrequency
-  validFrom  DateTime      @map("valid_from")
-  validTo    DateTime?     @map("valid_to")
-  createdAt  DateTime      @default(now()) @map("created_at")
+  id            String        @id @default(uuid()) @db.Uuid
+  taskId        String        @map("task_id") @db.Uuid
+  task          Task          @relation(fields: [taskId], references: [id])
+  employeeId    String        @map("employee_id") @db.Uuid
+  employee      Employee      @relation(fields: [employeeId], references: [id])
+  frequency     TaskFrequency
+  /// Fecha para realizar vigente en este intervalo (solo `ONE_TIME`). Una
+  /// reprogramación abre otro intervalo: lo que se esperaba antes no cambia.
+  scheduledDate DateTime?     @map("scheduled_date") @db.Date
+  validFrom     DateTime      @map("valid_from")
+  validTo       DateTime?     @map("valid_to")
+  createdAt     DateTime      @default(now()) @map("created_at")
 
   @@index([taskId, validFrom])
   @@index([employeeId, validFrom])
@@ -502,6 +515,9 @@ model TaskPlanningInterval {
 ///    1–15) o 'YYYY-MM-Q2' (16–último día) — nunca una fecha, para que no
 ///    coincida con la clave de otra frecuencia si la tarea cambia de
 ///    frecuencia dentro del período.
+///  - BIMONTHLY: periodKey = año y bimestre, 'YYYY-B1' (ene–feb) … 'YYYY-B6'
+///    (nov–dic); ANNUAL: periodKey = 'YYYY-A'. Tampoco son fechas, por el
+///    mismo motivo.
 ///  - URGENT / ONE_TIME: no recurren — periodKey es el string fijo
 ///    'URGENT' / 'ONE_TIME' (una sola ejecución VIGENTE en toda la vida de
 ///    la tarea, igual que en el prototipo).

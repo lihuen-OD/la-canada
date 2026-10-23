@@ -1,7 +1,14 @@
 import type { TaskItem as TaskItemData } from '../../api/taskTypes';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { FREQUENCY_LABEL, FREQUENCY_TONE, formatCompletedAt } from './taskLabels';
+import { formatDateWithWeekday } from '../../utils/dateFormat';
+import {
+  FREQUENCY_LABEL,
+  FREQUENCY_TONE,
+  SCHEDULE_STATUS_LABEL,
+  SCHEDULE_STATUS_TONE,
+  formatCompletedAt,
+} from './taskLabels';
 
 interface TaskItemProps {
   task: TaskItemData;
@@ -83,6 +90,18 @@ export function TaskItem({
         <p className="task-item__description">{task.description}</p>
         <div className="task-item__meta">
           <Badge tone={FREQUENCY_TONE[task.frequency]}>{FREQUENCY_LABEL[task.frequency]}</Badge>
+          {task.scheduleStatus ? (
+            <Badge tone={SCHEDULE_STATUS_TONE[task.scheduleStatus]} dot>
+              {SCHEDULE_STATUS_LABEL[task.scheduleStatus]}
+            </Badge>
+          ) : null}
+          {task.scheduledDate ? (
+            <span className="task-item__schedule">
+              <span className="visually-hidden">Fecha para realizar: </span>
+              <span aria-hidden="true">📅 </span>
+              {formatDateWithWeekday(task.scheduledDate)}
+            </span>
+          ) : null}
           {showAssignee ? (
             <span className="task-item__assignee">
               <span className="visually-hidden">Responsable: </span>

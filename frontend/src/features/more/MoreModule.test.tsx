@@ -914,4 +914,20 @@ describe('reglas de presentación del prototipo', () => {
     expect(tasksForDay(tasks, 2026, 8, 16)).toHaveLength(1);
     expect(tasksForDay(tasks, 2026, 8, 30)).toHaveLength(0);
   });
+
+  it('calendario: bimestrales el 1 de ene/mar/may/jul/sep/nov, anuales el 1/1 y «Una vez» en su fecha', () => {
+    const tasks = [
+      { id: 'b', frequency: 'BIMONTHLY' } as TaskItem,
+      { id: 'a', frequency: 'ANNUAL' } as TaskItem,
+      { id: 'o', frequency: 'ONE_TIME', scheduledDate: '2026-10-26' } as TaskItem,
+      { id: 'n', frequency: 'ONE_TIME', scheduledDate: null } as TaskItem,
+    ];
+    const ids = (year: number, month: number, day: number) =>
+      tasksForDay(tasks, year, month, day).map((t) => t.id);
+    expect(ids(2026, 8, 1)).toEqual(['b']); // 01/09: empieza sep–oct
+    expect(ids(2026, 9, 1)).toEqual([]); // 01/10: sigue sep–oct
+    expect(ids(2027, 0, 1)).toEqual(['b', 'a']);
+    expect(ids(2026, 9, 26)).toEqual(['o']);
+    expect(ids(2026, 9, 27)).toEqual([]);
+  });
 });

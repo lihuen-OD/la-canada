@@ -26,9 +26,12 @@ export const queryKeys = {
     all: (userId: string) => [...scope(userId), 'tasks'] as const,
     list: (userId: string, status: 'active' | 'all') =>
       [...scope(userId), 'tasks', 'list', status] as const,
+    /** Todos los listados (activas / todas): dependen del día de negocio. */
+    listAll: (userId: string) => [...scope(userId), 'tasks', 'list'] as const,
     employees: (userId: string) => [...scope(userId), 'tasks', 'employees'] as const,
     history: (userId: string, week: string | null, employeeId: string | null) =>
       [...scope(userId), 'tasks', 'history', week ?? 'current', employeeId ?? 'all'] as const,
+    historyAll: (userId: string) => [...scope(userId), 'tasks', 'history'] as const,
   },
   performance: {
     all: (userId: string) => [...scope(userId), 'performance'] as const,

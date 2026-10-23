@@ -9,7 +9,7 @@ import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
 import { isSessionExpired } from './dialogErrors';
-import { formatDate } from '../../utils/dateFormat';
+import { formatDate, formatDateWithWeekday } from '../../utils/dateFormat';
 import { FREQUENCY_LABEL, FREQUENCY_TONE, formatCompletedAt, formatLocalDay } from './taskLabels';
 
 const WEEKS_TO_OFFER = 8; // mismas "últimas 8 semanas" que el prototipo
@@ -58,7 +58,11 @@ export function TaskHistory({
 }: TaskHistoryProps) {
   const selectId = useId();
   const weeks = previousMondays(currentWeekStart, WEEKS_TO_OFFER);
-  const [week, setWeek] = useState(currentWeekStart);
+  // `null` = «Esta semana»: sigue a la semana vigente aunque cambie con la
+  // pantalla abierta (el lunes a medianoche). Una semana anterior elegida se
+  // conserva mientras siga entre las ofrecidas.
+  const [pastWeek, setPastWeek] = useState<string | null>(null);
+  const week = pastWeek && weeks.slice(1).includes(pastWeek) ? pastWeek : currentWeekStart;
   const { userId, enabled } = useSessionScope();
   const weekParam = week === currentWeekStart ? null : week;
   const query = useQuery({
@@ -178,6 +182,13 @@ export function TaskHistory({
                             {FREQUENCY_LABEL[task.frequency]}
                           </Badge>
                           {!task.active ? <Badge tone="neutral">Desactivada</Badge> : null}
+                          {task.scheduledDate ? (
+                            <span>
+                              <span className="visually-hidden">Fecha para realizar: </span>
+                              <span aria-hidden="true">📅 </span>
+                              {formatDateWithWeekday(task.scheduledDate)}
+                            </span>
+                          ) : null}
                           <span>
                             {differs
                               ? `Asignada a ${execution.assignedEmployee.displayName} · `
@@ -231,7 +242,9 @@ export function TaskHistory({
           id={selectId}
           className="field__input"
           value={week}
-          onChange={(event) => setWeek(event.target.value)}
+          onChange={(event) =>
+            setPastWeek(event.target.value === currentWeekStart ? null : event.target.value)
+          }
         >
           {weeks.map((monday, index) => (
             <option key={monday} value={monday}>

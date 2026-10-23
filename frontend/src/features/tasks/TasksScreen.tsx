@@ -35,8 +35,8 @@ import { DeleteConfirmDialog } from '../admin/DeleteConfirmDialog';
 import { CompleteTaskDialog } from './CompleteTaskDialog';
 import { errorMessageOf, isSessionExpired } from './dialogErrors';
 import { RevertTaskDialog } from './RevertTaskDialog';
-import { FrequencyFilterBar, PersonFilterBar } from './TaskFilters';
-import type { FrequencyFilter, PersonFilter } from './TaskFilters';
+import { FrequencyFilterBar, PersonFilterBar, ScheduleFilterBar } from './TaskFilters';
+import type { FrequencyFilter, PersonFilter, ScheduleFilter } from './TaskFilters';
 import { TaskFormDialog } from './TaskFormDialog';
 import { TaskHistory } from './TaskHistory';
 import { TaskItem } from './TaskItem';
@@ -83,6 +83,7 @@ export function TasksScreen() {
   const [showAll, setShowAll] = useState(false);
   const [person, setPerson] = useState<PersonFilter>('all');
   const [frequency, setFrequency] = useState<FrequencyFilter>('all');
+  const [schedule, setSchedule] = useState<ScheduleFilter>('all');
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
   const [notice, setNotice] = useState<Notice>(null);
   const [busyTaskIds, setBusyTaskIds] = useState<ReadonlySet<string>>(new Set());
@@ -203,7 +204,8 @@ export function TasksScreen() {
     const counts = new Map<string, number>();
     if (state.status !== 'loaded') return counts;
     for (const task of state.data.tasks) {
-      if (task.active && !task.currentExecution) {
+      // Una «Una vez» programada para más adelante todavía no es exigible.
+      if (task.active && !task.currentExecution && task.scheduleStatus !== 'SCHEDULED') {
         counts.set(task.assignee.id, (counts.get(task.assignee.id) ?? 0) + 1);
       }
     }
@@ -253,11 +255,18 @@ export function TasksScreen() {
   }
 
   const { data, employees } = state;
-  const visible = data.tasks.filter(
+  const ofPerson = data.tasks.filter((task) => person === 'all' || task.assignee.id === person);
+  // «Hoy» y «Vencidas» solo existen dentro de «Una vez»; el estado lo decide el backend.
+  const scheduleFilter = frequency === 'ONE_TIME' ? schedule : 'all';
+  const visible = ofPerson.filter(
     (task) =>
-      (person === 'all' || task.assignee.id === person) &&
-      (frequency === 'all' || task.frequency === frequency),
+      (frequency === 'all' || task.frequency === frequency) &&
+      (scheduleFilter === 'all' || task.scheduleStatus === scheduleFilter),
   );
+  const scheduleCounts = {
+    DUE_TODAY: ofPerson.filter((task) => task.scheduleStatus === 'DUE_TODAY').length,
+    OVERDUE: ofPerson.filter((task) => task.scheduleStatus === 'OVERDUE').length,
+  };
   const personName =
     person === 'all'
       ? null
@@ -296,7 +305,16 @@ export function TasksScreen() {
           pendingByEmployee={pendingByEmployee}
           onSelect={setPerson}
         />
-        <FrequencyFilterBar selected={frequency} onSelect={setFrequency} />
+        <FrequencyFilterBar
+          selected={frequency}
+          onSelect={(value) => {
+            setFrequency(value);
+            setSchedule('all');
+          }}
+        />
+        {frequency === 'ONE_TIME' ? (
+          <ScheduleFilterBar selected={schedule} counts={scheduleCounts} onSelect={setSchedule} />
+        ) : null}
         {isAdmin ? (
           <label className="tasks__admin-toggle">
             <input

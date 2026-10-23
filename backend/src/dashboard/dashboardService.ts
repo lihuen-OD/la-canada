@@ -83,7 +83,9 @@ export async function getDashboard(actor: TaskActor, now = new Date()) {
     }),
   ]);
 
-  const tasks = taskResult.tasks;
+  // Una «Una vez» programada para más adelante todavía no es exigible: no
+  // entra al KPI operativo (sí la de hoy y la vencida). Sin fecha, como siempre.
+  const tasks = taskResult.tasks.filter((task) => task.scheduleStatus !== 'SCHEDULED');
   const completedTasks = tasks.filter((task) => task.currentExecution !== null).length;
   const urgentTasks = tasks.filter(
     (task) => task.frequency === 'URGENT' && task.currentExecution === null,

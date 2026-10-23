@@ -10,8 +10,9 @@ import type {
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { AlertIcon } from '../../components/ui/icons';
+import { formatDateWithWeekday } from '../../utils/dateFormat';
 import { errorMessageOf } from './dialogErrors';
-import { FREQUENCY_LABEL, FREQUENCY_ORDER, SEMI_MONTHLY_HINT } from './taskLabels';
+import { FREQUENCY_HINT, FREQUENCY_LABEL, FREQUENCY_ORDER } from './taskLabels';
 import { useSubmitGuard } from './useSubmitGuard';
 
 const DESCRIPTION_MAX = 200;
@@ -52,9 +53,14 @@ export function TaskFormDialog({
   const [description, setDescription] = useState(task?.description ?? '');
   const [employeeId, setEmployeeId] = useState(task?.assignee.id ?? '');
   const [frequency, setFrequency] = useState<TaskFrequency | ''>(task?.frequency ?? '');
+  // `value` del `<input type="date">` (ISO); vacío = sin fecha. Se conserva si
+  // se elige otra frecuencia y se vuelve a «Una vez» antes de guardar.
+  const [scheduledDate, setScheduledDate] = useState(task?.scheduledDate ?? '');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { isSubmitting, run } = useSubmitGuard();
   const isEdit = task !== undefined;
+  const hint = frequency ? FREQUENCY_HINT[frequency] : undefined;
+  const oneTime = frequency === 'ONE_TIME';
 
   // Un responsable reasignado a alguien que ya no está activo sigue
   // apareciendo como opción actual (no se puede "perder" en el select), pero
@@ -72,17 +78,28 @@ export function TaskFormDialog({
     if (!employeeId) return setErrorMessage('Elegí un responsable.');
     if (!frequency) return setErrorMessage('Elegí una frecuencia.');
 
+    // Solo una «Una vez» lleva fecha. Al pasar a otra frecuencia no se envía:
+    // el backend la quita en la misma transacción.
+    const date = frequency === 'ONE_TIME' ? scheduledDate || null : null;
+
     void run(async () => {
       setErrorMessage(null);
       try {
         if (!task) {
-          await onCreate({ description: normalized, employeeId, frequency });
+          await onCreate({
+            description: normalized,
+            employeeId,
+            frequency,
+            ...(date ? { scheduledDate: date } : {}),
+          });
           return;
         }
         const changes: UpdateTaskRequest = {};
         if (normalized !== task.description) changes.description = normalized;
         if (employeeId !== task.assignee.id) changes.employeeId = employeeId;
         if (frequency !== task.frequency) changes.frequency = frequency;
+        // `null` quita la fecha; omitida la deja como está.
+        if (frequency === 'ONE_TIME' && date !== task.scheduledDate) changes.scheduledDate = date;
         if (Object.keys(changes).length === 0) {
           onCancel();
           return;
@@ -156,9 +173,7 @@ export function TaskFormDialog({
             className="field__input"
             value={frequency}
             disabled={isSubmitting}
-            aria-describedby={
-              frequency === 'SEMI_MONTHLY' ? `${titleId}-frequency-hint` : undefined
-            }
+            aria-describedby={hint ? `${titleId}-frequency-hint` : undefined}
             onChange={(event) => {
               setFrequency(event.target.value as TaskFrequency | '');
               setErrorMessage(null);
@@ -171,12 +186,39 @@ export function TaskFormDialog({
               </option>
             ))}
           </select>
-          {frequency === 'SEMI_MONTHLY' ? (
+          {hint ? (
             <p className="field__hint" id={`${titleId}-frequency-hint`}>
-              {SEMI_MONTHLY_HINT}
+              {hint}
             </p>
           ) : null}
         </div>
+
+        {oneTime ? (
+          <div className="field">
+            <label className="field__label" htmlFor={`${titleId}-scheduled-date`}>
+              Fecha para realizar
+            </label>
+            <input
+              id={`${titleId}-scheduled-date`}
+              className="field__input"
+              type="date"
+              min="2000-01-01"
+              max="2100-12-31"
+              value={scheduledDate}
+              disabled={isSubmitting}
+              aria-describedby={`${titleId}-scheduled-date-hint`}
+              onChange={(event) => {
+                setScheduledDate(event.target.value);
+                setErrorMessage(null);
+              }}
+            />
+            <p className="field__hint" id={`${titleId}-scheduled-date-hint`}>
+              {scheduledDate
+                ? formatDateWithWeekday(scheduledDate)
+                : 'Opcional. Puede ser una fecha pasada si ya está atrasada.'}
+            </p>
+          </div>
+        ) : null}
 
         <div aria-live="assertive" className="live-status live-status--start">
           {isSubmitting ? <span role="status">Guardando…</span> : null}
