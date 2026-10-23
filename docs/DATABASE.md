@@ -571,3 +571,10 @@ Lo que esta rama **no** hace, por diseño:
 - **CHECKs** (a mano): `tasks_scheduled_date_one_time_check` y `task_planning_intervals_scheduled_date_one_time_check` — `scheduled_date IS NULL OR frequency = 'ONE_TIME'`.
 - **Sin backfill ni fechas inventadas**: columnas nuevas nullable sin DEFAULT (metadato, sin reescribir tablas); todas las filas existentes quedan en NULL. Verificado en `demo` antes/después en `READ ONLY`: 14 tareas, 13 ejecuciones (5 revertidas), 14 intervalos y 22 auditorías de tareas con sumas de verificación idénticas; 0 fechas cargadas.
 - **Compatibilidad**: el código publicado lee columnas explícitas y crea filas con la fecha en NULL (cumple los CHECK). Sin índices nuevos: el listado de tareas ya carga todas las tareas y Desempeño lee los intervalos por rango con los índices existentes.
+
+### Orden de realización y programación sugerida (`20261024120000_task_execution_order_suggested_schedule`, aplicada a `demo`)
+
+- **Columnas nuevas en `tasks`** (todas `SMALLINT NULL`, sin DEFAULT; metadato, sin reescribir la tabla): `execution_order` (1–9999), `suggested_weekday` (1 = lunes … 7 = domingo), `suggested_first_half_day` (1–15), `suggested_second_half_day` (16–31), `suggested_month_day` (1–31) y `suggested_month` (1–2 en bimestral, 1–12 en anual).
+- **CHECKs** (a mano): `tasks_execution_order_check`, uno por campo de sugerencia que lo limita a su frecuencia y rango (`tasks_suggested_weekday_check`, `…_first_half_day_check`, `…_second_half_day_check`, `…_month_day_check`, `…_month_check`) y `tasks_suggested_month_pair_check` (bimestral/anual: mes y día juntos o ninguno). Un 31 en un mes de 30 días es válido: el backend lo toma como el último día.
+- **Sin cambios en `task_planning_intervals`**: orden y sugerencia no afectan ningún cálculo; su historia es la auditoría.
+- **Sin backfill, UPDATE ni DELETE**. Verificado en `demo` antes/después en `READ ONLY`: 15 tareas, 13 ejecuciones, 15 intervalos y 23 auditorías de tareas con sumas de verificación idénticas de sus columnas anteriores; las seis columnas nuevas en NULL en todas las filas.

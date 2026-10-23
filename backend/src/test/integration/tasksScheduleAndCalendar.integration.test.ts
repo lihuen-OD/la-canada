@@ -19,6 +19,12 @@ import {
 } from '../../tasks/tasksService';
 import { getPerformance } from '../../performance/performanceService';
 import { getDashboard } from '../../dashboard/dashboardService';
+import {
+  assertNoSyntheticWritesOnRealData,
+  assertRealTaskStateUnchanged,
+  captureRealTaskState,
+  type RealTaskState,
+} from './realTaskDataGuard';
 
 /**
  * «Fecha para realizar» de las «Una vez» y frecuencias BIMESTRAL y ANUAL
@@ -51,59 +57,9 @@ let empB: string;
 const syntheticUserIds: string[] = [];
 const syntheticEmployeeIds: string[] = [];
 
-let baseline: {
-  tasks: number;
-  executions: number;
-  intervals: number;
-  audits: number;
-  users: number;
-  sessions: number;
-  employees: number;
-};
-let realTasksBefore: unknown;
-let realExecutionsBefore: unknown;
-let realIntervalsBefore: unknown;
+let realState: RealTaskState;
 
 const notSynthetic = { NOT: { description: { startsWith: '[test-' } } };
-
-async function snapshotRealTasks() {
-  return prisma.task.findMany({
-    where: notSynthetic,
-    select: {
-      id: true,
-      description: true,
-      employeeId: true,
-      frequency: true,
-      active: true,
-      scheduledDate: true,
-      updatedAt: true,
-    },
-    orderBy: { id: 'asc' },
-  });
-}
-
-async function snapshotRealExecutions() {
-  return prisma.taskExecution.findMany({
-    where: { task: notSynthetic },
-    select: { id: true, periodKey: true, completed: true, revertedAt: true, updatedAt: true },
-    orderBy: { id: 'asc' },
-  });
-}
-
-async function snapshotRealIntervals() {
-  return prisma.taskPlanningInterval.findMany({
-    where: { task: notSynthetic },
-    select: {
-      id: true,
-      employeeId: true,
-      frequency: true,
-      scheduledDate: true,
-      validFrom: true,
-      validTo: true,
-    },
-    orderBy: { id: 'asc' },
-  });
-}
 
 async function createEmployee(suffix: string): Promise<string> {
   const employee = await prisma.employee.create({
@@ -221,18 +177,7 @@ async function intervalsOf(taskId: string) {
 
 beforeAll(async () => {
   expect(process.env.DATABASE_TARGET).toBe('demo');
-  baseline = {
-    tasks: await prisma.task.count(),
-    executions: await prisma.taskExecution.count(),
-    intervals: await prisma.taskPlanningInterval.count(),
-    audits: await prisma.auditLog.count(),
-    users: await prisma.user.count(),
-    sessions: await prisma.session.count(),
-    employees: await prisma.employee.count(),
-  };
-  realTasksBefore = await snapshotRealTasks();
-  realExecutionsBefore = await snapshotRealExecutions();
-  realIntervalsBefore = await snapshotRealIntervals();
+  realState = await captureRealTaskState();
 
   app = createApp();
   empA = await createEmployee('A');
@@ -252,6 +197,10 @@ afterAll(async () => {
     where: { taskId: { in: taskIds } },
     select: { id: true },
   });
+  await assertNoSyntheticWritesOnRealData(realState, syntheticUserIds, [
+    ...taskIds,
+    ...executions.map((execution) => execution.id),
+  ]);
   await prisma.auditLog.deleteMany({
     where: {
       OR: [
@@ -267,33 +216,33 @@ afterAll(async () => {
   await prisma.user.deleteMany({ where: { id: { in: syntheticUserIds } } });
   await prisma.employee.deleteMany({ where: { id: { in: syntheticEmployeeIds } } });
 
-  expect(await prisma.task.count()).toBe(baseline.tasks);
-  expect(await prisma.taskExecution.count()).toBe(baseline.executions);
-  expect(await prisma.taskPlanningInterval.count()).toBe(baseline.intervals);
-  expect(await prisma.auditLog.count()).toBe(baseline.audits);
-  expect(await prisma.user.count()).toBe(baseline.users);
-  expect(await prisma.session.count()).toBe(baseline.sessions);
-  expect(await prisma.employee.count()).toBe(baseline.employees);
-  expect(await snapshotRealTasks()).toEqual(realTasksBefore);
-  expect(await snapshotRealExecutions()).toEqual(realExecutionsBefore);
-  expect(await snapshotRealIntervals()).toEqual(realIntervalsBefore);
+  await assertRealTaskStateUnchanged(realState, syntheticUserIds, RUN);
 }, 60_000);
 
 describe('regresión: tareas reales existentes', () => {
-  it('siguen sin fecha y sin estado programado; ninguna planificación real tiene fecha', async () => {
+  it('muestran exactamente la fecha guardada (nada se inventa); sin fecha, sin estado programado', async () => {
     const response = await request(app).get('/api/v1/tasks?status=all').set(as(admin));
     expect(response.status).toBe(200);
     const real = (response.body.tasks as (TaskBody & { description: string })[]).filter(
       (task) => !task.description.startsWith('[test-'),
     );
     expect(real.length).toBeGreaterThan(0);
+    const stored = new Map(
+      (
+        await prisma.task.findMany({
+          where: { ...notSynthetic, id: { in: real.map((task) => task.id) } },
+          select: { id: true, scheduledDate: true },
+        })
+      ).map((row) => [row.id, row.scheduledDate?.toISOString().slice(0, 10) ?? null]),
+    );
     for (const task of real) {
-      expect(task.scheduledDate).toBeNull();
-      expect(task.scheduleStatus).toBeNull();
+      expect(task.scheduledDate).toBe(stored.get(task.id));
+      if (task.scheduledDate === null) expect(task.scheduleStatus).toBeNull();
     }
+    // Solo las «Una vez» pueden tener fecha, también en su planificación.
     expect(
       await prisma.taskPlanningInterval.count({
-        where: { task: notSynthetic, scheduledDate: { not: null } },
+        where: { task: notSynthetic, scheduledDate: { not: null }, NOT: { frequency: 'ONE_TIME' } },
       }),
     ).toBe(0);
   });
@@ -337,7 +286,6 @@ describe('«Una vez» con fecha — alta, validación y permisos (HTTP)', { time
     ['con formato local', '26/10/2026', 'formato'],
     ['fuera de rango', '1999-12-31', 'entre 2000 y 2100'],
   ])('rechaza una fecha %s sin crear nada', async (_label, scheduledDate, message) => {
-    const before = await prisma.task.count();
     const response = await request(app)
       .post('/api/v1/tasks')
       .set(as(admin))
@@ -349,7 +297,7 @@ describe('«Una vez» con fecha — alta, validación y permisos (HTTP)', { time
       });
     expect(response.status).toBe(400);
     expect(response.body.error.message).toMatch(new RegExp(message));
-    expect(await prisma.task.count()).toBe(before);
+    expect(await prisma.task.count({ where: { description: `${TAG} inválida` } })).toBe(0);
   });
 
   it.each(['DAILY', 'WEEKLY', 'SEMI_MONTHLY', 'MONTHLY', 'BIMONTHLY', 'ANNUAL', 'URGENT'])(

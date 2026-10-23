@@ -71,6 +71,39 @@ const scheduledDateSchema = z
   }, `La fecha para realizar debe estar entre ${SCHEDULED_DATE_MIN_YEAR} y ${SCHEDULED_DATE_MAX_YEAR}.`)
   .nullable();
 
+/** Tope práctico del orden de realización (una tarea N.º 10 000 no ordena nada). */
+export const EXECUTION_ORDER_MAX = 9999;
+
+/** «Orden de realización»: entero de 1 a 9999 (repetidos permitidos); `null` = sin orden, nunca 0. */
+const executionOrderSchema = z
+  .number({ message: 'El orden de realización debe ser un número entero de 1 a 9999.' })
+  .int('El orden de realización debe ser un número entero de 1 a 9999.')
+  .min(1, 'El orden de realización debe ser un número entero de 1 a 9999.')
+  .max(EXECUTION_ORDER_MAX, 'El orden de realización debe ser un número entero de 1 a 9999.')
+  .nullable();
+
+/**
+ * Un dato de la programación sugerida: entero (rango grueso 1–31). Qué campo
+ * admite cada frecuencia, y con qué rango, lo decide el servicio
+ * (`taskSuggestion.resolveSuggestion`), que conoce la frecuencia resultante.
+ */
+const suggestionValueSchema = z
+  .number({ message: 'La programación sugerida debe ser un número entero.' })
+  .int('La programación sugerida debe ser un número entero.')
+  .min(1, 'La programación sugerida está fuera de rango.')
+  .max(31, 'La programación sugerida está fuera de rango.')
+  .nullable()
+  .optional();
+
+const orderAndSuggestionFields = {
+  executionOrder: executionOrderSchema.optional(),
+  suggestedWeekday: suggestionValueSchema,
+  suggestedFirstHalfDay: suggestionValueSchema,
+  suggestedSecondHalfDay: suggestionValueSchema,
+  suggestedMonthDay: suggestionValueSchema,
+  suggestedMonth: suggestionValueSchema,
+};
+
 export const taskIdParamSchema = uuidSchema;
 
 export const createTaskBodySchema = z
@@ -79,16 +112,18 @@ export const createTaskBodySchema = z
     employeeId: uuidSchema,
     frequency: frequencySchema,
     scheduledDate: scheduledDateSchema.optional(),
+    ...orderAndSuggestionFields,
   })
   .strict();
 
-/** `scheduledDate`: omitida = sin cambios; `null` = quitar la fecha. */
+/** `scheduledDate`, orden y sugerencia: omitidos = sin cambios; `null` = quitar. */
 export const updateTaskBodySchema = z
   .object({
     description: descriptionSchema.optional(),
     employeeId: uuidSchema.optional(),
     frequency: frequencySchema.optional(),
     scheduledDate: scheduledDateSchema.optional(),
+    ...orderAndSuggestionFields,
   })
   .strict()
   .refine((body) => Object.values(body).some((value) => value !== undefined), {
@@ -127,5 +162,14 @@ export const taskHistoryQuerySchema = z
       .regex(/^\d{4}-\d{2}-\d{2}$/, 'La semana debe tener formato YYYY-MM-DD.')
       .optional(),
     employeeId: uuidSchema.optional(),
+  })
+  .strict();
+
+/** Mes del calendario de Configuración (`YYYY-MM`, mes real). */
+export const taskCalendarQuerySchema = z
+  .object({
+    month: z
+      .string({ message: 'El mes debe tener formato YYYY-MM.' })
+      .regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'El mes debe tener formato YYYY-MM.'),
   })
   .strict();

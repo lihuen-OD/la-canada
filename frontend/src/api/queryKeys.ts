@@ -32,6 +32,10 @@ export const queryKeys = {
     history: (userId: string, week: string | null, employeeId: string | null) =>
       [...scope(userId), 'tasks', 'history', week ?? 'current', employeeId ?? 'all'] as const,
     historyAll: (userId: string) => [...scope(userId), 'tasks', 'history'] as const,
+    /** Fechas sugeridas de un mes (`YYYY-MM`) para el calendario de Configuración. */
+    calendar: (userId: string, month: string) =>
+      [...scope(userId), 'tasks', 'calendar', month] as const,
+    calendarAll: (userId: string) => [...scope(userId), 'tasks', 'calendar'] as const,
   },
   performance: {
     all: (userId: string) => [...scope(userId), 'performance'] as const,

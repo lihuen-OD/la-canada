@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { queryKeys } from '../../api/queryKeys';
-import { fetchTasks } from '../../api/tasksApi';
+import { fetchTaskCalendar, fetchTasks } from '../../api/tasksApi';
 import { useSessionScope } from '../../api/useSessionScope';
 import { Avatar } from '../../components/ui/Avatar';
 import { Badge } from '../../components/ui/Badge';
@@ -31,6 +31,15 @@ export function TaskCalendar() {
     queryFn: () => fetchTasks('active'),
     enabled,
   });
+  // Fechas sugeridas del mes visible (las calcula el backend); una request por mes.
+  const monthKey = `${cursor.year}-${String(cursor.month + 1).padStart(2, '0')}`;
+  const calendarQuery = useQuery({
+    queryKey: queryKeys.tasks.calendar(userId, monthKey),
+    queryFn: () => fetchTaskCalendar(monthKey),
+    enabled,
+    placeholderData: keepPreviousData,
+  });
+  const calendar = calendarQuery.data?.month === monthKey ? calendarQuery.data : null;
 
   if (!query.data) {
     return query.isError ? (
@@ -54,7 +63,7 @@ export function TaskCalendar() {
       return { year: y + Math.floor(next / 12), month: ((next % 12) + 12) % 12 };
     });
   };
-  const dayTasks = selected ? tasksForDay(tasks, year, month, selected) : [];
+  const dayTasks = selected ? tasksForDay(tasks, year, month, selected, calendar) : [];
 
   return (
     <div className="calendar">
@@ -69,7 +78,12 @@ export function TaskCalendar() {
           ›
         </Button>
       </div>
-      <div className="calendar__grid" role="group" aria-label={`${MONTHS_LONG[month]} ${year}`}>
+      <div
+        className={calendar ? 'calendar__grid' : 'calendar__grid is-stale'}
+        role="group"
+        aria-label={`${MONTHS_LONG[month]} ${year}`}
+        aria-busy={calendar ? undefined : true}
+      >
         {WEEKDAYS.map((weekday) => (
           <span key={weekday} className="calendar__weekday" aria-hidden="true">
             {weekday}
@@ -81,7 +95,7 @@ export function TaskCalendar() {
         {Array.from({ length: daysInMonth }, (_, index) => {
           const day = index + 1;
           const isToday = year === todayYear && month === todayMonth - 1 && day === todayDay;
-          const count = tasksForDay(tasks, year, month, day).length;
+          const count = tasksForDay(tasks, year, month, day, calendar).length;
           return (
             <button
               key={day}

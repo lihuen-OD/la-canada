@@ -8,6 +8,7 @@ import {
   FREQUENCY_ORDER,
   SCHEDULE_STATUS_LABEL,
   formatPeriodKey,
+  formatSuggestedDate,
 } from './taskLabels';
 
 describe('taskLabels — bimestral, anual y fecha para realizar', () => {
@@ -47,5 +48,13 @@ describe('taskLabels — bimestral, anual y fecha para realizar', () => {
     expect(formatDateWithWeekday('2026-12-31')).toBe('Jueves 31/12/2026');
     expect(formatDateWithWeekday('26/10/2026')).toBe('');
     expect(formatDateWithWeekday(null)).toBe('');
+  });
+});
+
+describe('programación sugerida — textos', () => {
+  it('«Sugerida: miércoles 28/10/2026», sin presentarla como vencimiento', () => {
+    expect(formatSuggestedDate('2026-10-28')).toBe('Sugerida: miércoles 28/10/2026');
+    expect(formatSuggestedDate('2027-02-28')).toBe('Sugerida: domingo 28/02/2027');
+    expect(formatSuggestedDate('')).toBe('');
   });
 });

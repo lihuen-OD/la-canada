@@ -6,6 +6,7 @@ import {
   createTaskBodySchema,
   listTasksQuerySchema,
   revertTaskBodySchema,
+  taskCalendarQuerySchema,
   taskHistoryQuerySchema,
   taskIdParamSchema,
   taskStatusBodySchema,
@@ -14,6 +15,7 @@ import {
 import {
   completeTask,
   createTask,
+  getTaskCalendar,
   getWeeklyHistory,
   listTaskEmployees,
   listTasks,
@@ -76,6 +78,13 @@ export async function getTaskHistory(req: Request, res: Response): Promise<void>
     'Parámetros de historial inválidos.',
   );
   send(res, 200, await getWeeklyHistory(actor, params));
+}
+
+/** `GET /tasks/calendar?month=YYYY-MM` — fechas sugeridas del mes (calendario de Configuración). */
+export async function getTaskCalendarHandler(req: Request, res: Response): Promise<void> {
+  await actorFrom(req);
+  const { month } = parseOrThrow(taskCalendarQuerySchema, req.query, 'Mes inválido.');
+  send(res, 200, await getTaskCalendar(month));
 }
 
 export async function postTask(req: Request, res: Response): Promise<void> {

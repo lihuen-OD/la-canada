@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { onlineManager } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '../test/render';
+import { render, screen, waitFor, within } from '../test/render';
 import { PERSON_A, PERSON_B, emptyHistory, makeTask } from '../test/fixtures/tasks';
 import { resetBusinessDayForTests } from '../connectivity/businessDay';
 import type { TasksListResponse } from '../api/taskTypes';
@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   fetchTasks: vi.fn(),
   fetchTaskEmployees: vi.fn(),
   fetchTaskHistory: vi.fn(),
+  fetchTaskCalendar: vi.fn(),
   createTask: vi.fn(),
   updateTask: vi.fn(),
   setTaskActive: vi.fn(),
@@ -33,6 +34,7 @@ import { BusinessDayRefresh } from './BusinessDayRefresh';
 import { TasksScreen } from '../features/tasks/TasksScreen';
 import { PerformanceScreen } from '../features/tasks/PerformanceScreen';
 import { AuthenticatedHome } from '../features/home/AuthenticatedHome';
+import { TaskCalendar } from '../features/more/TaskCalendar';
 
 const TZ = 'America/Argentina/Buenos_Aires';
 const MINUTE = 60_000;
@@ -61,6 +63,13 @@ const ONE_TIME = makeTask({
   scheduledDate: '2026-10-26',
 });
 
+const WEEKLY_SUGGESTED = makeTask({
+  id: '00000000-0000-4000-8000-0000000000w1',
+  description: 'Semanal sintética con sugerencia',
+  frequency: 'WEEKLY',
+  suggestedWeekday: 1,
+});
+
 function tasksResponse(): TasksListResponse {
   const today = serverDay();
   return {
@@ -70,7 +79,31 @@ function tasksResponse(): TasksListResponse {
       timeZone: TZ,
       generatedAt: serverTime(),
     },
-    tasks: [{ ...ONE_TIME, scheduleStatus: today < '2026-10-26' ? 'SCHEDULED' : 'DUE_TODAY' }],
+    tasks: [
+      { ...ONE_TIME, scheduleStatus: today < '2026-10-26' ? 'SCHEDULED' : 'DUE_TODAY' },
+      // Semanal con sugerencia «lunes»: la fecha del período vigente la calcula el backend.
+      {
+        ...WEEKLY_SUGGESTED,
+        periodKey: today < '2026-10-26' ? '2026-10-19' : '2026-10-26',
+        suggestedDate: today < '2026-10-26' ? '2026-10-19' : '2026-10-26',
+      },
+    ],
+  };
+}
+
+/** Ubicación de la semanal en el calendario de octubre: desde su semana vigente. */
+function calendarResponse(month: string) {
+  const current = serverDay() < '2026-10-26';
+  return {
+    month,
+    today: serverDay(),
+    suggestions: [
+      {
+        taskId: WEEKLY_SUGGESTED.id,
+        from: current ? '2026-10-19' : '2026-10-26',
+        dates: current ? ['2026-10-19', '2026-10-26'] : ['2026-10-26'],
+      },
+    ],
   };
 }
 
@@ -143,6 +176,7 @@ beforeEach(() => {
   api.fetchTaskEmployees.mockResolvedValue({ employees: [PERSON_A, PERSON_B] });
   api.fetchTaskHistory.mockResolvedValue(emptyHistory());
   api.fetchTasks.mockImplementation(async () => tasksResponse());
+  api.fetchTaskCalendar.mockImplementation(async (month: string) => calendarResponse(month));
   dashboardApi.getDashboard.mockImplementation(async () => dashboardResponse());
   performanceApi.fetchPerformance.mockImplementation(async (from: string, to: string) =>
     performanceResponse(from, to),
@@ -308,5 +342,38 @@ describe('pestaña oculta y reconexión', () => {
     window.dispatchEvent(new Event('online'));
     await settle();
     expect(api.fetchTasks).toHaveBeenCalledTimes(calls);
+  });
+});
+
+describe('programación sugerida al cambiar de semana', () => {
+  it('la fecha sugerida y el calendario pasan a la semana nueva recién cuando el servidor la confirma', async () => {
+    serverOffsetMs = -5 * MINUTE; // dispositivo adelantado
+    await startAt(
+      ar('2026-10-25', '23:58:00'),
+      <>
+        <BusinessDayRefresh />
+        <TasksScreen />
+        <TaskCalendar />
+      </>,
+    );
+    expect(await screen.findByText('Sugerida: lunes 19/10/2026')).toBeInTheDocument();
+    await waitFor(() => expect(api.fetchTaskCalendar).toHaveBeenCalledWith('2026-10'));
+    const calendarCalls = api.fetchTaskCalendar.mock.calls.length;
+
+    deviceAt(ar('2026-10-26', '00:00:30')); // medianoche del dispositivo: el servidor sigue en el 25
+    await settle();
+    expect(screen.getByText('Sugerida: lunes 19/10/2026')).toBeInTheDocument();
+    expect(api.fetchTaskCalendar).toHaveBeenCalledTimes(calendarCalls);
+
+    deviceAt(ar('2026-10-26', '00:05:02')); // el servidor ya está en la semana nueva
+    expect(await screen.findByText('Sugerida: lunes 26/10/2026')).toBeInTheDocument();
+    await waitFor(() => expect(api.fetchTaskCalendar).toHaveBeenCalledTimes(calendarCalls + 1));
+    // El 19 ya no se ubica por la sugerencia: el día anterior al período vigente conserva la marca de siempre.
+    const grid = screen.getByRole('group', { name: 'Octubre 2026' });
+    await waitFor(() =>
+      expect(
+        within(grid).getByRole('button', { name: /^26, hoy, \d+ tareas/ }),
+      ).toBeInTheDocument(),
+    );
   });
 });

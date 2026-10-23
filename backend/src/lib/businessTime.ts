@@ -96,6 +96,11 @@ export function compareLocalDates(a: LocalDate, b: LocalDate): number {
   return formatLocalDate(a).localeCompare(formatLocalDate(b));
 }
 
+/** Cantidad de días del mes (`month` de 1 a 12), con febrero bisiesto. */
+export function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
 /** Lunes de la semana (lunes a domingo) que contiene `date`. */
 export function startOfWeek(date: LocalDate): LocalDate {
   const weekday = new Date(Date.UTC(date.year, date.month - 1, date.day)).getUTCDay(); // 0 = domingo

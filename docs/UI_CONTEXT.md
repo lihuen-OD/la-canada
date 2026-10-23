@@ -245,6 +245,7 @@ Desempeño se integra mediante navegación secundaria en chips `📋 Tareas | �
 - Filtro horizontal por persona con avatar y cantidad pendiente.
 - Filtros por frecuencia mediante chips (Bimestrales y Anuales después de Mensuales). Dentro de «Una vez», una segunda fila de chips con los accesos «Hoy» y «Vencidas» (con su cantidad, combinables con la persona; tocar el elegido vuelve a todas).
 - «Una vez» con fecha para realizar: después de la etiqueta de frecuencia, una etiqueta de estado con punto (`Programada` neutral, `Para hoy` warning, `Vencida` danger) y la fecha con el día de la semana («📅 Lunes 26/10/2026») como metadato secundario. Sin fecha: sin cambios. Bimestral y Anual usan el tono `warning` de la mensual.
+- Orden de realización y programación sugerida: en los metadatos, texto secundario sin color de estado («Sugerida: miércoles 28/10/2026», «Orden 2»). En el formulario, el orden (número) va al final para todas las frecuencias y la sugerencia solo con los campos de la frecuencia elegida (pares en dos columnas con `.field-row`).
 - Lista de tareas dentro de tarjetas.
 - Casilla cuadrada del prototipo (`.tck`, 22 px visibles dentro de 44 px táctiles); ✏️/✕ del ADMIN como botones de icono a la derecha.
 - Frecuencia y responsable como metadatos secundarios.

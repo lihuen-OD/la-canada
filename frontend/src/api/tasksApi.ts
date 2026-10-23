@@ -1,6 +1,7 @@
 import { apiRequest } from './httpClient';
 import type {
   CreateTaskRequest,
+  TaskCalendarResponse,
   TaskEmployeesResponse,
   TaskHistoryResponse,
   TaskMutationResponse,
@@ -29,6 +30,13 @@ export async function fetchTaskHistory(params: {
   const search = query.toString();
   const suffix = search ? `?${search}` : '';
   return apiRequest<TaskHistoryResponse>(`/tasks/history${suffix}`, { authenticated: true });
+}
+
+/** Fechas sugeridas del mes para el calendario de Configuración (las calcula el backend). */
+export async function fetchTaskCalendar(month: string): Promise<TaskCalendarResponse> {
+  return apiRequest<TaskCalendarResponse>(`/tasks/calendar?month=${month}`, {
+    authenticated: true,
+  });
 }
 
 export async function createTask(body: CreateTaskRequest): Promise<TaskMutationResponse> {

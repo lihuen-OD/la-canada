@@ -52,7 +52,12 @@ export function BusinessDayRefresh(): null {
       queryKeys.dashboard(userId),
       queryKeys.performance.all(userId),
     ];
-    const dayDependent = [...reporting, queryKeys.tasks.historyAll(userId)];
+    const dayDependent = [
+      ...reporting,
+      queryKeys.tasks.historyAll(userId),
+      // Fechas sugeridas del calendario: dependen del período vigente.
+      queryKeys.tasks.calendarAll(userId),
+    ];
 
     /**
      * Fecha (y hora) del servidor que trae cada respuesta que depende del

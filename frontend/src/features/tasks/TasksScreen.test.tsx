@@ -835,3 +835,41 @@ describe('TasksScreen — «Una vez» con fecha y frecuencias nuevas', () => {
     expect(within(line).getByText(/Viernes 30\/10\/2026/)).toBeInTheDocument();
   });
 });
+
+describe('TasksScreen — orden de realización y fecha sugerida', () => {
+  beforeEach(() => asEmployee());
+
+  it('muestra el orden y la fecha sugerida de forma discreta, en el orden que decide el backend', async () => {
+    const ordered = [
+      makeTask({
+        id: '00000000-0000-4000-8000-0000000000c1',
+        description: 'Semanal sintética orden 1',
+        frequency: 'WEEKLY',
+        periodKey: '2026-10-26',
+        executionOrder: 1,
+        suggestedWeekday: 3,
+        suggestedDate: '2026-10-28',
+      }),
+      makeTask({
+        id: '00000000-0000-4000-8000-0000000000c2',
+        description: 'Semanal sintética sin orden',
+        frequency: 'WEEKLY',
+        periodKey: '2026-10-26',
+      }),
+    ];
+    await renderLoaded(ordered);
+    const list = screen.getByRole('list', { name: 'Tareas del período' });
+    const items = within(list).getAllByRole('listitem');
+    expect(items.map((item) => item.querySelector('.task-item__description')?.textContent)).toEqual(
+      ['Semanal sintética orden 1', 'Semanal sintética sin orden'],
+    );
+    expect(within(items[0]!).getByText('Sugerida: miércoles 28/10/2026')).toBeInTheDocument();
+    // Visible «Orden 1»; el lector de pantalla oye «Orden de realización: 1».
+    expect(items[0]!.querySelector('.task-item__order')).toHaveTextContent(
+      'Orden de realización: Orden 1',
+    );
+    // No se presenta como vencimiento: sin etiqueta de estado.
+    expect(within(items[0]!).queryByText(/Vencida|Para hoy|Programada/)).not.toBeInTheDocument();
+    expect(within(items[1]!).queryByText(/Sugerida|Orden/)).not.toBeInTheDocument();
+  });
+});

@@ -308,3 +308,186 @@ describe('TaskFormDialog — Bimestral, Anual y fecha para «Una vez»', () => {
     expect(screen.getByLabelText('Fecha para realizar')).toHaveValue('2026-10-26');
   });
 });
+
+describe('TaskFormDialog — orden de realización y programación sugerida', () => {
+  async function fill(user: ReturnType<typeof userEvent.setup>, frequency: string) {
+    await user.type(screen.getByLabelText('Descripción'), 'Tarea sintética');
+    await user.selectOptions(screen.getByLabelText('Responsable'), PERSON_A.id);
+    await user.selectOptions(screen.getByLabelText('Frecuencia'), frequency);
+  }
+  const base = { description: 'Tarea sintética', employeeId: PERSON_A.id };
+
+  it('orden: opcional para todas las frecuencias, con su ayuda; vacío no se envía', async () => {
+    const { onCreate } = renderForm();
+    const user = userEvent.setup();
+    await fill(user, 'DAILY');
+    const order = screen.getByLabelText('Orden de realización');
+    expect(order).toHaveAccessibleDescription('Los números menores aparecen primero. Es opcional');
+    await user.click(screen.getByRole('button', { name: 'Crear tarea' }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith({ ...base, frequency: 'DAILY' }));
+  });
+
+  it.each(['0', '-1', '1.5', '10000'])('orden «%s» se rechaza antes de enviar', async (value) => {
+    const { onCreate } = renderForm();
+    const user = userEvent.setup();
+    await fill(user, 'URGENT');
+    await user.type(screen.getByLabelText('Orden de realización'), value);
+    await user.click(screen.getByRole('button', { name: 'Crear tarea' }));
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'El orden de realización debe ser un número entero de 1 a 9999.',
+    );
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['DAILY', []],
+    ['URGENT', []],
+    ['ONE_TIME', []],
+    ['WEEKLY', ['Día sugerido']],
+    ['SEMI_MONTHLY', ['Día sugerido, primera quincena', 'Día sugerido, segunda quincena']],
+    ['MONTHLY', ['Día sugerido del mes']],
+    ['BIMONTHLY', ['Mes del bimestre', 'Día sugerido']],
+    ['ANNUAL', ['Mes sugerido', 'Día sugerido']],
+  ] as const)('%s muestra solo sus campos de sugerencia', async (frequency, labels) => {
+    renderForm();
+    await userEvent.setup().selectOptions(screen.getByLabelText('Frecuencia'), frequency);
+    const shown = [
+      'Día sugerido',
+      'Día sugerido, primera quincena',
+      'Día sugerido, segunda quincena',
+      'Día sugerido del mes',
+      'Mes del bimestre',
+      'Mes sugerido',
+    ].filter((label) => screen.queryByLabelText(label) !== null);
+    expect(shown.sort()).toEqual([...labels].sort());
+  });
+
+  it('crear: semanal con día y orden; la ayuda aclara que es una sugerencia', async () => {
+    const { onCreate } = renderForm();
+    const user = userEvent.setup();
+    await fill(user, 'WEEKLY');
+    const weekday = screen.getByLabelText('Día sugerido');
+    expect(weekday).toHaveAccessibleDescription(/Es una sugerencia: no cambia el período/);
+    await user.selectOptions(weekday, 'Miércoles');
+    await user.type(screen.getByLabelText('Orden de realización'), '2');
+    await user.click(screen.getByRole('button', { name: 'Crear tarea' }));
+    await waitFor(() =>
+      expect(onCreate).toHaveBeenCalledWith({
+        ...base,
+        frequency: 'WEEKLY',
+        executionOrder: 2,
+        suggestedWeekday: 3,
+      }),
+    );
+  });
+
+  it('quincenal: cada quincena por separado; la ayuda explica el último día del mes', async () => {
+    const { onCreate } = renderForm();
+    const user = userEvent.setup();
+    await fill(user, 'SEMI_MONTHLY');
+    const second = screen.getByLabelText('Día sugerido, segunda quincena');
+    expect(second).toHaveAccessibleDescription(/31 de abril → 30 de abril/);
+    await user.selectOptions(second, '31');
+    await user.click(screen.getByRole('button', { name: 'Crear tarea' }));
+    await waitFor(() =>
+      expect(onCreate).toHaveBeenCalledWith({
+        ...base,
+        frequency: 'SEMI_MONTHLY',
+        suggestedSecondHalfDay: 31,
+      }),
+    );
+  });
+
+  it.each(['BIMONTHLY', 'ANNUAL'])('%s exige mes y día juntos', async (frequency) => {
+    const { onCreate } = renderForm();
+    const user = userEvent.setup();
+    await fill(user, frequency);
+    await user.selectOptions(screen.getByLabelText('Día sugerido'), '29');
+    await user.click(screen.getByRole('button', { name: 'Crear tarea' }));
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Para una sugerencia bimestral o anual elegí el mes y el día, o dejá ambos vacíos.',
+    );
+    expect(onCreate).not.toHaveBeenCalled();
+    await user.selectOptions(
+      screen.getByLabelText(frequency === 'ANNUAL' ? 'Mes sugerido' : 'Mes del bimestre'),
+      frequency === 'ANNUAL' ? 'Febrero' : 'Segundo mes',
+    );
+    await user.click(screen.getByRole('button', { name: 'Crear tarea' }));
+    await waitFor(() =>
+      expect(onCreate).toHaveBeenCalledWith({
+        ...base,
+        frequency,
+        suggestedMonth: 2,
+        suggestedMonthDay: 29,
+      }),
+    );
+  });
+
+  const monthly = makeTask({
+    frequency: 'MONTHLY',
+    periodKey: '2026-10-01',
+    executionOrder: 3,
+    suggestedMonthDay: 31,
+    suggestedDate: '2026-10-31',
+  });
+
+  it('editar otra cosa no envía orden ni sugerencia (se conservan)', async () => {
+    const { onUpdate } = renderForm({ task: monthly });
+    const user = userEvent.setup();
+    expect(screen.getByLabelText('Orden de realización')).toHaveValue(3);
+    expect(screen.getByLabelText('Día sugerido del mes')).toHaveValue('31');
+    await user.selectOptions(screen.getByLabelText('Responsable'), PERSON_B.id);
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() =>
+      expect(onUpdate).toHaveBeenCalledWith(monthly.id, { employeeId: PERSON_B.id }),
+    );
+  });
+
+  it('editar: quitar orden y sugerencia envía null', async () => {
+    const { onUpdate } = renderForm({ task: monthly });
+    const user = userEvent.setup();
+    await user.clear(screen.getByLabelText('Orden de realización'));
+    await user.selectOptions(screen.getByLabelText('Día sugerido del mes'), 'Sin sugerencia');
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() =>
+      expect(onUpdate).toHaveBeenCalledWith(monthly.id, {
+        executionOrder: null,
+        suggestedMonthDay: null,
+      }),
+    );
+  });
+
+  it('cambiar de frecuencia: avisa, conserva lo que sigue valiendo y el orden', async () => {
+    const weekly = makeTask({
+      frequency: 'WEEKLY',
+      periodKey: '2026-10-26',
+      executionOrder: 1,
+      suggestedWeekday: 3,
+    });
+    const { onUpdate } = renderForm({ task: weekly });
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText('Frecuencia'), 'MONTHLY');
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'La programación sugerida que no corresponde a la nueva frecuencia se quita al guardar.',
+    );
+    expect(screen.getByLabelText('Orden de realización')).toHaveValue(1);
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(weekly.id, { frequency: 'MONTHLY' }));
+  });
+
+  it('mensual día 31 → anual: el día sigue y solo falta elegir el mes', async () => {
+    const { onUpdate } = renderForm({ task: monthly });
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText('Frecuencia'), 'ANNUAL');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Día sugerido')).toHaveValue('31');
+    await user.selectOptions(screen.getByLabelText('Mes sugerido'), 'Abril');
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() =>
+      expect(onUpdate).toHaveBeenCalledWith(monthly.id, {
+        frequency: 'ANNUAL',
+        suggestedMonth: 4,
+      }),
+    );
+  });
+});

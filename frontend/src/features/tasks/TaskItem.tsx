@@ -8,6 +8,7 @@ import {
   SCHEDULE_STATUS_LABEL,
   SCHEDULE_STATUS_TONE,
   formatCompletedAt,
+  formatSuggestedDate,
 } from './taskLabels';
 
 interface TaskItemProps {
@@ -100,6 +101,17 @@ export function TaskItem({
               <span className="visually-hidden">Fecha para realizar: </span>
               <span aria-hidden="true">📅 </span>
               {formatDateWithWeekday(task.scheduledDate)}
+            </span>
+          ) : null}
+          {task.suggestedDate ? (
+            // Solo una sugerencia del backend: sin color de estado ni de vencimiento.
+            <span className="task-item__suggestion">{formatSuggestedDate(task.suggestedDate)}</span>
+          ) : null}
+          {task.executionOrder !== null ? (
+            <span className="task-item__order">
+              <span className="visually-hidden">Orden de realización: </span>
+              <span aria-hidden="true">Orden </span>
+              {task.executionOrder}
             </span>
           ) : null}
           {showAssignee ? (

@@ -426,3 +426,26 @@ Función nueva pedida explícitamente por el usuario. El prototipo no tenía fec
 **Ejemplo con resultado concreto** (rango de Inicio 16–22/10/2026, visto el jueves 22): Juan tiene una «Una vez» para el 30/10 (no cuenta), una para hoy y una vencida el 12/10 (pendientes), una que vencía el 30/10 y completó el 20/10 (propia), una que vencía el 14/10 y el 20/10 se reprogramó al 05/11 y se reasignó a Coke (pendiente de Juan: estuvo vencida del 16 al 20) y una del 18/10 que hizo Coke (cubierta) → 5 asignadas, 1 realizada personalmente, 3 sin completar, 1 cobertura recibida: **20%**. Coke: 1 cobertura realizada. Una semana después (23–29/10) la reprogramada no cuenta para nadie: recién vence el 05/11.
 
 **Mascotas, sin cambios**: vacunas y desparasitaciones siguen con su «Fecha de próxima aplicación o control» y 📅 Vencimientos. Completar una tarea no crea registros clínicos, no hay recurrencias veterinarias automáticas ni vínculos entre Tareas y Mascotas.
+
+## Orden de realización y programación sugerida (2026-10-24)
+
+Función nueva pedida explícitamente por el usuario. Permisos sin cambios: cargar, editar o quitar orden y sugerencia = solo `ADMIN` (como el resto de la edición de tareas). Las tareas existentes quedan sin orden ni sugerencia: no se completa nada automáticamente.
+
+**Orden de realización** (todas las frecuencias, opcional)
+
+- Entero de 1 a 9999; se admiten repetidos; vacío = sin orden (nunca 0). Ayuda: «Los números menores aparecen primero. Es opcional».
+- En el listado operativo, dentro de cada grupo de frecuencia: primero las numeradas, de menor a mayor; después las sin orden. En empates y entre las sin orden, el criterio de siempre («Una vez»: con fecha primero, por fecha; después por descripción) y, al final, un desempate estable por identificador. Se aplica también a lo que sale de ese listado (calendario, urgentes de Inicio). Agrupación y filtros, sin cambios.
+- No reordena el historial cronológico ni cambia vencimientos, permisos, períodos o Desempeño. Sin arrastrar ni renumerar.
+
+**Programación sugerida** (solo recurrentes, opcional)
+
+- Semanal: día de la semana. Quincenal: un día del 1 al 15 para la primera quincena y otro del 16 al 31 para la segunda, cada uno opcional. Mensual: día del mes (1–31). Bimestral: primer o segundo mes del bimestre y día. Anual: mes y día. Bimestral y anual necesitan los dos datos o ninguno. Diaria y urgente no tienen; «Una vez» conserva su fecha para realizar.
+- Es una SUGERENCIA: no bloquea completar antes o después dentro del período, no cambia cuándo empieza o termina el período, no crea ejecuciones, no cambia estados, vencimientos ni porcentajes y no arrastra pendientes.
+- Un día que no existe en el mes se toma como el último: 31 de abril → 30 de abril; 29 de febrero en un año no bisiesto → 28 (lo explica la ayuda del formulario).
+- El backend calcula la fecha sugerida del período vigente (zona de negocio) y la tarjeta la muestra como «Sugerida: miércoles 28/10/2026», sin estilo de vencimiento.
+
+**Edición**: campo omitido = se conserva; `null` = se quita; editar otro campo nunca borra orden ni sugerencia. Un dato que no corresponde a la frecuencia se rechaza. Al cambiar de frecuencia se quita SOLO la sugerencia que deja de valer (p. ej. semanal → mensual quita el día de la semana; mensual día 31 → anual conserva el día si se elige el mes) y el orden se conserva; el formulario lo avisa, y todo se guarda en una transacción con auditoría (valor anterior y nuevo).
+
+**Historia**: orden y sugerencia no cambian ningún cálculo, así que no abren una versión de la planificación ni reinterpretan ejecuciones; su historia es la auditoría. Ninguna vista histórica (historial semanal, Desempeño) los muestra, para no atribuirles la configuración actual.
+
+**Calendario de Configuración**: una tarea con sugerencia se ubica solo en sus fechas sugeridas, una por período, desde su período vigente; los días anteriores conservan la marca de siempre. Sin sugerencia, la marca de siempre.

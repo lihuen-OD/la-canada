@@ -5,6 +5,8 @@ import type {
   TaskEmployee,
   TaskFrequency,
   TaskItem,
+  TaskSuggestion,
+  TaskSuggestionField,
   UpdateTaskRequest,
 } from '../../api/taskTypes';
 import { Button } from '../../components/ui/Button';
@@ -12,7 +14,19 @@ import { Modal } from '../../components/ui/Modal';
 import { AlertIcon } from '../../components/ui/icons';
 import { formatDateWithWeekday } from '../../utils/dateFormat';
 import { errorMessageOf } from './dialogErrors';
-import { FREQUENCY_HINT, FREQUENCY_LABEL, FREQUENCY_ORDER } from './taskLabels';
+import {
+  EXECUTION_ORDER_HINT,
+  EXECUTION_ORDER_MAX,
+  FREQUENCY_HINT,
+  FREQUENCY_LABEL,
+  FREQUENCY_ORDER,
+  PAIRED_SUGGESTION,
+  SUGGESTION_DROPPED_NOTICE,
+  SUGGESTION_HINT,
+  SUGGESTION_INPUTS,
+  SUGGESTION_LAST_DAY_HINT,
+  SUGGESTION_PAIR_ERROR,
+} from './taskLabels';
 import { useSubmitGuard } from './useSubmitGuard';
 
 const DESCRIPTION_MAX = 200;
@@ -21,6 +35,37 @@ const DESCRIPTION_MAX = 200;
 function normalizeDescription(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
+
+const SUGGESTION_FIELDS: readonly TaskSuggestionField[] = [
+  'suggestedWeekday',
+  'suggestedFirstHalfDay',
+  'suggestedSecondHalfDay',
+  'suggestedMonthDay',
+  'suggestedMonth',
+];
+/** Valores de los `<select>` de la sugerencia; vacío = sin dato. */
+type SuggestionForm = Record<TaskSuggestionField, string>;
+
+const suggestionFormOf = (task?: TaskSuggestion): SuggestionForm =>
+  Object.fromEntries(
+    SUGGESTION_FIELDS.map((field) => [field, task?.[field] != null ? String(task[field]) : '']),
+  ) as SuggestionForm;
+
+/** Al cambiar de frecuencia se conserva solo lo que la nueva admite (el backend hace lo mismo). */
+function keepValidSuggestion(
+  values: SuggestionForm,
+  frequency: TaskFrequency | '',
+): SuggestionForm {
+  const kept = suggestionFormOf();
+  for (const input of frequency ? SUGGESTION_INPUTS[frequency] : []) {
+    if (input.options.some((option) => String(option.value) === values[input.field])) {
+      kept[input.field] = values[input.field];
+    }
+  }
+  return kept;
+}
+
+const ORDER_ERROR = `El orden de realización debe ser un número entero de 1 a ${EXECUTION_ORDER_MAX}.`;
 
 function validateDescription(value: string): string | null {
   if (value.length < 3) return 'La descripción debe tener al menos 3 caracteres.';
@@ -56,11 +101,21 @@ export function TaskFormDialog({
   // `value` del `<input type="date">` (ISO); vacío = sin fecha. Se conserva si
   // se elige otra frecuencia y se vuelve a «Una vez» antes de guardar.
   const [scheduledDate, setScheduledDate] = useState(task?.scheduledDate ?? '');
+  const [executionOrder, setExecutionOrder] = useState(
+    task?.executionOrder != null ? String(task.executionOrder) : '',
+  );
+  const [suggestion, setSuggestion] = useState<SuggestionForm>(() => suggestionFormOf(task));
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { isSubmitting, run } = useSubmitGuard();
   const isEdit = task !== undefined;
   const hint = frequency ? FREQUENCY_HINT[frequency] : undefined;
   const oneTime = frequency === 'ONE_TIME';
+  const suggestionInputs = frequency ? SUGGESTION_INPUTS[frequency] : [];
+  // Editar y cambiar la frecuencia: se avisa si se pierde parte de la sugerencia.
+  const suggestionDropped =
+    task !== undefined &&
+    frequency !== task.frequency &&
+    SUGGESTION_FIELDS.some((field) => task[field] !== null && suggestion[field] === '');
 
   // Un responsable reasignado a alguien que ya no está activo sigue
   // apareciendo como opción actual (no se puede "perder" en el select), pero
@@ -78,6 +133,28 @@ export function TaskFormDialog({
     if (!employeeId) return setErrorMessage('Elegí un responsable.');
     if (!frequency) return setErrorMessage('Elegí una frecuencia.');
 
+    const orderText = executionOrder.trim();
+    const order = orderText === '' ? null : Number(orderText);
+    if (
+      order !== null &&
+      !(/^\d+$/.test(orderText) && order >= 1 && order <= EXECUTION_ORDER_MAX)
+    ) {
+      return setErrorMessage(ORDER_ERROR);
+    }
+    // Solo los datos de sugerencia que muestra la frecuencia elegida.
+    const suggested = Object.fromEntries(
+      SUGGESTION_INPUTS[frequency].map((input) => [
+        input.field,
+        suggestion[input.field] === '' ? null : Number(suggestion[input.field]),
+      ]),
+    ) as Partial<Record<TaskSuggestionField, number | null>>;
+    if (
+      PAIRED_SUGGESTION.has(frequency) &&
+      (suggested.suggestedMonth === null) !== (suggested.suggestedMonthDay === null)
+    ) {
+      return setErrorMessage(SUGGESTION_PAIR_ERROR);
+    }
+
     // Solo una «Una vez» lleva fecha. Al pasar a otra frecuencia no se envía:
     // el backend la quita en la misma transacción.
     const date = frequency === 'ONE_TIME' ? scheduledDate || null : null;
@@ -91,6 +168,8 @@ export function TaskFormDialog({
             employeeId,
             frequency,
             ...(date ? { scheduledDate: date } : {}),
+            ...(order !== null ? { executionOrder: order } : {}),
+            ...Object.fromEntries(Object.entries(suggested).filter(([, value]) => value !== null)),
           });
           return;
         }
@@ -100,6 +179,15 @@ export function TaskFormDialog({
         if (frequency !== task.frequency) changes.frequency = frequency;
         // `null` quita la fecha; omitida la deja como está.
         if (frequency === 'ONE_TIME' && date !== task.scheduledDate) changes.scheduledDate = date;
+        // Orden y sugerencia: solo lo que cambió (`null` quita). Lo que la
+        // frecuencia nueva no admite no se envía: el backend lo limpia.
+        if (order !== task.executionOrder) changes.executionOrder = order;
+        for (const [field, value] of Object.entries(suggested) as [
+          TaskSuggestionField,
+          number | null,
+        ][]) {
+          if (value !== task[field]) changes[field] = value;
+        }
         if (Object.keys(changes).length === 0) {
           onCancel();
           return;
@@ -175,7 +263,9 @@ export function TaskFormDialog({
             disabled={isSubmitting}
             aria-describedby={hint ? `${titleId}-frequency-hint` : undefined}
             onChange={(event) => {
-              setFrequency(event.target.value as TaskFrequency | '');
+              const next = event.target.value as TaskFrequency | '';
+              setFrequency(next);
+              setSuggestion((current) => keepValidSuggestion(current, next));
               setErrorMessage(null);
             }}
           >
@@ -191,7 +281,50 @@ export function TaskFormDialog({
               {hint}
             </p>
           ) : null}
+          {suggestionDropped ? (
+            <p className="field__hint" role="status">
+              {SUGGESTION_DROPPED_NOTICE}
+            </p>
+          ) : null}
         </div>
+
+        {suggestionInputs.length > 0 ? (
+          <div className="field">
+            <div className={suggestionInputs.length > 1 ? 'field-row' : undefined}>
+              {suggestionInputs.map((input) => (
+                <div className="field" key={input.field}>
+                  <label className="field__label" htmlFor={`${titleId}-${input.field}`}>
+                    {input.label}
+                  </label>
+                  <select
+                    id={`${titleId}-${input.field}`}
+                    className="field__input"
+                    value={suggestion[input.field]}
+                    disabled={isSubmitting}
+                    aria-describedby={`${titleId}-suggestion-hint`}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setSuggestion((current) => ({ ...current, [input.field]: value }));
+                      setErrorMessage(null);
+                    }}
+                  >
+                    <option value="">Sin sugerencia</option>
+                    {input.options.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+            <p className="field__hint" id={`${titleId}-suggestion-hint`}>
+              {frequency === 'WEEKLY'
+                ? SUGGESTION_HINT
+                : `${SUGGESTION_HINT} ${SUGGESTION_LAST_DAY_HINT}`}
+            </p>
+          </div>
+        ) : null}
 
         {oneTime ? (
           <div className="field">
@@ -219,6 +352,31 @@ export function TaskFormDialog({
             </p>
           </div>
         ) : null}
+
+        <div className="field">
+          <label className="field__label" htmlFor={`${titleId}-execution-order`}>
+            Orden de realización
+          </label>
+          <input
+            id={`${titleId}-execution-order`}
+            className="field__input"
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={EXECUTION_ORDER_MAX}
+            step={1}
+            value={executionOrder}
+            disabled={isSubmitting}
+            aria-describedby={`${titleId}-execution-order-hint`}
+            onChange={(event) => {
+              setExecutionOrder(event.target.value);
+              setErrorMessage(null);
+            }}
+          />
+          <p className="field__hint" id={`${titleId}-execution-order-hint`}>
+            {EXECUTION_ORDER_HINT}
+          </p>
+        </div>
 
         <div aria-live="assertive" className="live-status live-status--start">
           {isSubmitting ? <span role="status">Guardando…</span> : null}

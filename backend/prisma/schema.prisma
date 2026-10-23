@@ -457,17 +457,35 @@ model AuditLog {
 /// `TaskExecution` para el detalle completo de por qué son dos conceptos
 /// separados.
 model Task {
-  id            String        @id @default(uuid()) @db.Uuid
-  description   String
-  employeeId    String        @map("employee_id") @db.Uuid
-  employee      Employee      @relation("TaskAssignee", fields: [employeeId], references: [id])
-  frequency     TaskFrequency
-  active        Boolean       @default(true)
+  id                     String        @id @default(uuid()) @db.Uuid
+  description            String
+  employeeId             String        @map("employee_id") @db.Uuid
+  employee               Employee      @relation("TaskAssignee", fields: [employeeId], references: [id])
+  frequency              TaskFrequency
+  active                 Boolean       @default(true)
   /// «Fecha para realizar» opcional, SOLO de una tarea `ONE_TIME` (CHECK en la
   /// migración `task_one_time_scheduled_date`): fecha de calendario sin hora
   /// en `BUSINESS_TIME_ZONE`. Es la fecha vigente; cada cambio queda versionado
   /// en `TaskPlanningInterval.scheduledDate`.
-  scheduledDate DateTime?     @map("scheduled_date") @db.Date
+  scheduledDate          DateTime?     @map("scheduled_date") @db.Date
+  /// «Orden de realización» opcional (1–9999; null = sin orden; se admiten
+  /// repetidos). Solo ordena los listados operativos dentro de cada
+  /// frecuencia: no cambia períodos, estados ni Desempeño, y no versiona la
+  /// planificación.
+  executionOrder         Int?          @map("execution_order") @db.SmallInt
+  /// Programación SUGERIDA opcional de las recurrentes (CHECK por frecuencia
+  /// en la migración `task_execution_order_suggested_schedule`): semanal →
+  /// día de la semana (1 = lunes … 7 = domingo); quincenal → día de la 1.ª
+  /// quincena (1–15) y de la 2.ª (16–31), independientes; mensual → día del
+  /// mes; bimestral → mes del bimestre (1–2) + día; anual → mes (1–12) + día
+  /// (los dos o ninguno). Un día que no existe en el mes se toma como el
+  /// último. Es solo una sugerencia: no cambia períodos, estados,
+  /// vencimientos ni métricas (ver `tasks/taskSuggestion.ts`).
+  suggestedWeekday       Int?          @map("suggested_weekday") @db.SmallInt
+  suggestedFirstHalfDay  Int?          @map("suggested_first_half_day") @db.SmallInt
+  suggestedSecondHalfDay Int?          @map("suggested_second_half_day") @db.SmallInt
+  suggestedMonthDay      Int?          @map("suggested_month_day") @db.SmallInt
+  suggestedMonth         Int?          @map("suggested_month") @db.SmallInt
 
   executions        TaskExecution[]
   planningIntervals TaskPlanningInterval[]

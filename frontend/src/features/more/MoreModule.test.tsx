@@ -931,3 +931,36 @@ describe('reglas de presentación del prototipo', () => {
     expect(ids(2026, 9, 27)).toEqual([]);
   });
 });
+
+describe('calendario con programación sugerida', () => {
+  const task = (id: string, frequency: TaskItem['frequency'], extra: Partial<TaskItem> = {}) =>
+    ({ id, frequency, suggestedWeekday: null, suggestedMonthDay: null, ...extra }) as TaskItem;
+  const calendar = {
+    month: '2026-10',
+    today: '2026-10-21',
+    suggestions: [{ taskId: 'ws', from: '2026-10-19', dates: ['2026-10-21', '2026-10-28'] }],
+  };
+  const ids = (tasks: TaskItem[], day: number, data: typeof calendar | null = calendar) =>
+    tasksForDay(tasks, 2026, 9, day, data).map((t) => t.id);
+
+  it('semanal con sugerencia: solo en su fecha desde el período vigente; antes, la marca de siempre', () => {
+    const tasks = [task('ws', 'WEEKLY', { suggestedWeekday: 3 }), task('w', 'WEEKLY')];
+    expect(ids(tasks, 21)).toEqual(['ws', 'w']); // miércoles sugerido de la semana vigente
+    expect(ids(tasks, 22)).toEqual(['w']); // jueves: solo la sin sugerencia
+    expect(ids(tasks, 28)).toEqual(['ws', 'w']);
+    expect(ids(tasks, 15)).toEqual(['ws', 'w']); // semana anterior: no se le atribuye la sugerencia
+  });
+
+  it('sin duplicados: cada fecha sugerida aparece una sola vez en el mes', () => {
+    const tasks = [task('ws', 'WEEKLY', { suggestedWeekday: 3 })];
+    const marked = Array.from({ length: 31 }, (_, index) => index + 1).filter(
+      (day) => day >= 19 && ids(tasks, day).length > 0,
+    );
+    expect(marked).toEqual([21, 28]);
+  });
+
+  it('mientras no llegan las fechas del mes, una tarea con sugerencia no se marca (nunca se inventa)', () => {
+    const tasks = [task('ws', 'WEEKLY', { suggestedWeekday: 3 }), task('w', 'WEEKLY')];
+    expect(ids(tasks, 21, null)).toEqual(['w']);
+  });
+});

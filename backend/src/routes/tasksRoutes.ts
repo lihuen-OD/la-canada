@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requireAuth } from '../middleware/requireAuth';
 import { requireJsonContentType } from '../middleware/requireJsonContentType';
 import {
+  getTaskCalendarHandler,
   getTaskEmployees,
   getTaskHistory,
   getTasks,
@@ -26,6 +27,7 @@ tasksRouter.use(requireAuth);
 tasksRouter.get('/', getTasks);
 tasksRouter.get('/employees', getTaskEmployees);
 tasksRouter.get('/history', getTaskHistory);
+tasksRouter.get('/calendar', getTaskCalendarHandler);
 tasksRouter.post('/', requireJsonContentType, postTask);
 tasksRouter.patch('/:id', requireJsonContentType, patchTask);
 tasksRouter.patch('/:id/status', requireJsonContentType, patchTaskStatus);
