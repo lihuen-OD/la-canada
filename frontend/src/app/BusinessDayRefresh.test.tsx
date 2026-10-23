@@ -3,8 +3,9 @@ import { onlineManager } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '../test/render';
-import { PERSON_A, PERSON_B, emptyHistory, listResponse, makeTask } from '../test/fixtures/tasks';
+import { PERSON_A, PERSON_B, emptyHistory, makeTask } from '../test/fixtures/tasks';
 import { resetBusinessDayForTests } from '../connectivity/businessDay';
+import type { TasksListResponse } from '../api/taskTypes';
 
 const api = vi.hoisted(() => ({
   fetchTasks: vi.fn(),
@@ -21,17 +22,36 @@ const performanceApi = vi.hoisted(() => ({
   fetchPerformance: vi.fn(),
   fetchEmployeePerformance: vi.fn(),
 }));
+const dashboardApi = vi.hoisted(() => ({ getDashboard: vi.fn() }));
 const { useAuthMock } = vi.hoisted(() => ({ useAuthMock: vi.fn() }));
 vi.mock('../api/tasksApi', () => api);
 vi.mock('../api/performanceApi', () => performanceApi);
+vi.mock('../api/dashboardApi', () => dashboardApi);
 vi.mock('../auth/useAuth', () => ({ useAuth: useAuthMock }));
 
 import { BusinessDayRefresh } from './BusinessDayRefresh';
 import { TasksScreen } from '../features/tasks/TasksScreen';
 import { PerformanceScreen } from '../features/tasks/PerformanceScreen';
+import { AuthenticatedHome } from '../features/home/AuthenticatedHome';
 
+const TZ = 'America/Argentina/Buenos_Aires';
+const MINUTE = 60_000;
 /** Instante `HH:MM:SS` de Buenos Aires (UTC−3) del día `YYYY-MM-DD`. */
 const ar = (day: string, time = '12:00:00') => new Date(`${day}T${time}.000-03:00`);
+
+/**
+ * Backend SIMULADO con su propio reloj: `serverOffsetMs` es su diferencia con
+ * el dispositivo (negativo = el dispositivo está adelantado). Cada respuesta
+ * informa el día del servidor y, salvo en un backend anterior
+ * (`serverSendsTime = false`), su hora. La «Una vez» sintética es para el
+ * 26/10: programada el 25, para hoy el 26.
+ */
+let serverOffsetMs = 0;
+let serverSendsTime = true;
+const serverNow = () => Date.now() + serverOffsetMs;
+const serverDay = () => new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(serverNow());
+const serverTime = () => (serverSendsTime ? new Date(serverNow()).toISOString() : undefined);
+const performanceCalls: { from: string; to: string; serverDay: string }[] = [];
 
 const ONE_TIME = makeTask({
   id: '00000000-0000-4000-8000-0000000000o1',
@@ -40,41 +60,95 @@ const ONE_TIME = makeTask({
   periodKey: 'ONE_TIME',
   scheduledDate: '2026-10-26',
 });
-/** Domingo 25/10 (todavía programada) y lunes 26/10 (ya es para hoy, semana nueva). */
-const sunday = {
-  ...listResponse([{ ...ONE_TIME, scheduleStatus: 'SCHEDULED' as const }]),
-  period: {
-    today: '2026-10-25',
-    weekStart: '2026-10-19',
-    timeZone: 'America/Argentina/Buenos_Aires',
-  },
-};
-const monday = {
-  ...listResponse([{ ...ONE_TIME, scheduleStatus: 'DUE_TODAY' as const }]),
-  period: {
-    today: '2026-10-26',
-    weekStart: '2026-10-26',
-    timeZone: 'America/Argentina/Buenos_Aires',
-  },
-};
 
-function goTo(instant: Date) {
+function tasksResponse(): TasksListResponse {
+  const today = serverDay();
+  return {
+    period: {
+      today,
+      weekStart: today === '2026-10-25' ? '2026-10-19' : '2026-10-26',
+      timeZone: TZ,
+      generatedAt: serverTime(),
+    },
+    tasks: [{ ...ONE_TIME, scheduleStatus: today < '2026-10-26' ? 'SCHEDULED' : 'DUE_TODAY' }],
+  };
+}
+
+function dashboardResponse() {
+  const today = serverDay();
+  return {
+    generatedAt: serverTime(),
+    today,
+    timeZone: TZ,
+    // El KPI no cuenta la «Una vez» mientras está programada para más adelante.
+    kpis: {
+      tasksCompleted: 0,
+      tasksTotal: today < '2026-10-26' ? 0 : 1,
+      urgentPending: 0,
+      stockAlerts: 0,
+      goodEggsToday: 0,
+    },
+    urgentTasks: [],
+    performance: null,
+    stockAlerts: [],
+    upcomingEvents: [],
+    latestNews: [],
+  };
+}
+
+function performanceResponse(from: string, requestedTo: string) {
+  const today = serverDay();
+  performanceCalls.push({ from, to: requestedTo, serverDay: today });
+  const to = requestedTo > today ? today : requestedTo;
+  return {
+    generatedAt: serverTime(),
+    range: { from, to, today, timeZone: TZ, includesCurrentDay: to === today, maxDays: 30 },
+    team: {
+      assigned: 0,
+      completedPersonally: 0,
+      percentage: null,
+      pending: 0,
+      coverageReceived: 0,
+      coverageGiven: 0,
+      operationalCompleted: 0,
+    },
+    special: { urgentCompleted: 0, oneTimeCompleted: 0, urgentPending: 0 },
+    employees: [],
+    trend: [],
+  };
+}
+
+/** Mueve el reloj del dispositivo y vuelve a la pestaña (los temporizadores reales no se esperan). */
+function deviceAt(instant: Date) {
   vi.setSystemTime(instant);
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
   document.dispatchEvent(new Event('visibilitychange'));
 }
 
+const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+const homeKpi = () => screen.getByRole('link', { name: /Tareas completadas/ }).textContent;
+
 beforeEach(() => {
   // Solo se simula la fecha: los temporizadores son reales (Testing Library y TanStack Query).
   vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(ar('2026-10-25', '23:59:00'));
-  resetBusinessDayForTests();
-  for (const mock of [...Object.values(api), ...Object.values(performanceApi)]) mock.mockReset();
+  serverOffsetMs = 0;
+  serverSendsTime = true;
+  performanceCalls.length = 0;
+  for (const mock of [
+    ...Object.values(api),
+    ...Object.values(performanceApi),
+    ...Object.values(dashboardApi),
+  ])
+    mock.mockReset();
   api.fetchTaskEmployees.mockResolvedValue({ employees: [PERSON_A, PERSON_B] });
   api.fetchTaskHistory.mockResolvedValue(emptyHistory());
-  api.fetchTasks.mockResolvedValueOnce(sunday).mockResolvedValue(monday);
+  api.fetchTasks.mockImplementation(async () => tasksResponse());
+  dashboardApi.getDashboard.mockImplementation(async () => dashboardResponse());
+  performanceApi.fetchPerformance.mockImplementation(async (from: string, to: string) =>
+    performanceResponse(from, to),
+  );
   useAuthMock.mockReturnValue({
-    user: { id: 'u-admin', role: 'ADMIN', status: 'ACTIVE', employee: null },
+    user: { id: 'u-admin', role: 'ADMIN', status: 'ACTIVE', displayName: null, employee: null },
     logout: vi.fn(),
   });
 });
@@ -85,115 +159,154 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('cambio de día de negocio con Tareas abierta', () => {
-  it('revalida lista e historial una vez, no el catálogo, y conserva el formulario abierto', async () => {
-    render(
-      <StrictMode>
+async function startAt(device: Date, ui: React.ReactNode) {
+  vi.setSystemTime(device);
+  resetBusinessDayForTests();
+  render(<StrictMode>{ui}</StrictMode>, { route: '/tasks' });
+}
+
+describe('cambio de día con el dispositivo adelantado', () => {
+  it('Tareas, Inicio y Desempeño: nada cambia a la medianoche del dispositivo; los tres pasan juntos a la del servidor', async () => {
+    serverOffsetMs = -5 * MINUTE; // dispositivo 23:58, servidor 23:53
+    await startAt(
+      ar('2026-10-25', '23:58:00'),
+      <>
         <BusinessDayRefresh />
         <TasksScreen />
-      </StrictMode>,
-      { route: '/tasks' },
+        <AuthenticatedHome />
+        <PerformanceScreen />
+      </>,
+    );
+    expect(await screen.findByText('Programada')).toBeInTheDocument();
+    await waitFor(() => expect(homeKpi()).toContain('0/0'));
+    await waitFor(() =>
+      expect(performanceApi.fetchPerformance).toHaveBeenLastCalledWith('2026-10-19', '2026-10-25'),
+    );
+    const before = {
+      tasks: api.fetchTasks.mock.calls.length,
+      history: api.fetchTaskHistory.mock.calls.length,
+      employees: api.fetchTaskEmployees.mock.calls.length,
+      dashboard: dashboardApi.getDashboard.mock.calls.length,
+      performance: performanceCalls.length,
+    };
+
+    // Medianoche del DISPOSITIVO (servidor 23:55:30): el backend sigue en el 25.
+    deviceAt(ar('2026-10-26', '00:00:30'));
+    await settle();
+    expect(screen.getByText('Programada')).toBeInTheDocument();
+    expect(homeKpi()).toContain('0/0');
+    expect(api.fetchTasks).toHaveBeenCalledTimes(before.tasks);
+    expect(dashboardApi.getDashboard).toHaveBeenCalledTimes(before.dashboard);
+    expect(performanceCalls).toHaveLength(before.performance);
+
+    // Medianoche del SERVIDOR: los tres quedan en el 26.
+    deviceAt(ar('2026-10-26', '00:05:02'));
+    expect(await screen.findByText('Para hoy')).toBeInTheDocument();
+    await waitFor(() => expect(homeKpi()).toContain('0/1'));
+    await waitFor(() =>
+      expect(performanceApi.fetchPerformance).toHaveBeenLastCalledWith('2026-10-20', '2026-10-26'),
+    );
+    await waitFor(() => expect(api.fetchTaskHistory).toHaveBeenCalledTimes(before.history + 1));
+    expect(api.fetchTasks).toHaveBeenCalledTimes(before.tasks + 1);
+    expect(dashboardApi.getDashboard).toHaveBeenCalledTimes(before.dashboard + 1);
+    expect(api.fetchTaskEmployees).toHaveBeenCalledTimes(before.employees);
+    // Desempeño confirma con su rango vigente y pide UNA vez el rango nuevo; nunca un día que el servidor no alcanzó.
+    expect(performanceCalls.filter((call) => call.to === '2026-10-26')).toHaveLength(1);
+    for (const call of performanceCalls) expect(call.to <= call.serverDay).toBe(true);
+  });
+
+  it('backend sin hora (versión anterior): si responde con el día anterior, la pantalla no cambia', async () => {
+    serverOffsetMs = -5 * MINUTE;
+    serverSendsTime = false;
+    await startAt(
+      ar('2026-10-25', '23:58:00'),
+      <>
+        <BusinessDayRefresh />
+        <TasksScreen />
+        <PerformanceScreen />
+      </>,
+    );
+    expect(await screen.findByText('Programada')).toBeInTheDocument();
+    const historyBefore = api.fetchTaskHistory.mock.calls.length;
+
+    deviceAt(ar('2026-10-26', '00:00:30')); // el dispositivo cree que es el 26
+    await waitFor(() => expect(performanceCalls.at(-1)?.serverDay).toBe('2026-10-25'));
+    await settle();
+    expect(screen.getByText('Programada')).toBeInTheDocument();
+    expect(api.fetchTaskHistory).toHaveBeenCalledTimes(historyBefore);
+    expect(performanceApi.fetchPerformance).toHaveBeenLastCalledWith('2026-10-19', '2026-10-25');
+
+    deviceAt(ar('2026-10-26', '00:05:02')); // el servidor ya está en el 26
+    expect(await screen.findByText('Para hoy')).toBeInTheDocument();
+    await waitFor(() => expect(api.fetchTaskHistory).toHaveBeenCalledTimes(historyBefore + 1));
+    await waitFor(() =>
+      expect(performanceApi.fetchPerformance).toHaveBeenLastCalledWith('2026-10-20', '2026-10-26'),
+    );
+    for (const call of performanceCalls) expect(call.to <= call.serverDay).toBe(true);
+  });
+});
+
+describe('cambio de día con el dispositivo atrasado', () => {
+  it('el día cambia a la medianoche del servidor, antes que la del dispositivo', async () => {
+    serverOffsetMs = 5 * MINUTE; // dispositivo 23:50, servidor 23:55
+    await startAt(
+      ar('2026-10-25', '23:50:00'),
+      <>
+        <BusinessDayRefresh />
+        <TasksScreen />
+      </>,
+    );
+    expect(await screen.findByText('Programada')).toBeInTheDocument();
+    deviceAt(ar('2026-10-25', '23:55:02')); // servidor 00:00:02 del 26
+    expect(await screen.findByText('Para hoy')).toBeInTheDocument();
+  });
+});
+
+describe('pestaña oculta y reconexión', () => {
+  it('oculta toda la noche y sin Internet: no pide nada; al reconectar revalida una vez, conserva el formulario y no reenvía escrituras', async () => {
+    await startAt(
+      ar('2026-10-25', '22:00:00'),
+      <>
+        <BusinessDayRefresh />
+        <TasksScreen />
+      </>,
     );
     expect(await screen.findByText('Programada')).toBeInTheDocument();
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Nueva tarea' }));
     await user.type(screen.getByLabelText('Descripción'), 'Borrador sintético');
     const tasksBefore = api.fetchTasks.mock.calls.length;
-    const historyBefore = api.fetchTaskHistory.mock.calls.length;
-    const employeesBefore = api.fetchTaskEmployees.mock.calls.length;
 
-    goTo(ar('2026-10-26', '00:00:02'));
-
-    expect(await screen.findByText('Para hoy')).toBeInTheDocument();
-    expect(api.fetchTasks).toHaveBeenCalledTimes(tasksBefore + 1);
-    await waitFor(() => expect(api.fetchTaskHistory).toHaveBeenCalledTimes(historyBefore + 1));
-    expect(api.fetchTaskEmployees).toHaveBeenCalledTimes(employeesBefore);
-    // El formulario sigue abierto con lo que se escribió.
-    expect(screen.getByRole('dialog', { name: 'Nueva tarea' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Descripción')).toHaveValue('Borrador sintético');
-    expect(api.createTask).not.toHaveBeenCalled();
-  });
-
-  it('sin conexión no pide nada; al reconectar revalida una sola vez y no reenvía escrituras', async () => {
-    render(
-      <>
-        <BusinessDayRefresh />
-        <TasksScreen />
-      </>,
-      { route: '/tasks' },
-    );
-    expect(await screen.findByText('Programada')).toBeInTheDocument();
-    const tasksBefore = api.fetchTasks.mock.calls.length;
-
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
     onlineManager.setOnline(false);
-    goTo(ar('2026-10-26', '07:00:00'));
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    deviceAt(ar('2026-10-26', '07:00:00'));
+    await settle();
     expect(api.fetchTasks).toHaveBeenCalledTimes(tasksBefore);
 
     onlineManager.setOnline(true);
     window.dispatchEvent(new Event('online'));
     expect(await screen.findByText('Para hoy')).toBeInTheDocument();
     expect(api.fetchTasks).toHaveBeenCalledTimes(tasksBefore + 1);
+    expect(screen.getByRole('dialog', { name: 'Nueva tarea' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Descripción')).toHaveValue('Borrador sintético');
     for (const write of [api.createTask, api.updateTask, api.completeTask, api.setTaskActive])
       expect(write).not.toHaveBeenCalled();
   });
 
-  it('el mismo día, volver a la pestaña no genera requests', async () => {
-    render(
+  it('el mismo día, volver a la pestaña o reconectar no genera requests', async () => {
+    await startAt(
+      ar('2026-10-25', '18:00:00'),
       <>
         <BusinessDayRefresh />
         <TasksScreen />
       </>,
-      { route: '/tasks' },
     );
     expect(await screen.findByText('Programada')).toBeInTheDocument();
     const calls = api.fetchTasks.mock.calls.length;
-    goTo(ar('2026-10-25', '23:59:30'));
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    deviceAt(ar('2026-10-25', '23:59:30'));
+    window.dispatchEvent(new Event('online'));
+    await settle();
     expect(api.fetchTasks).toHaveBeenCalledTimes(calls);
-  });
-});
-
-describe('cambio de día de negocio con Desempeño abierto', () => {
-  it('pide el rango nuevo (que termina el día nuevo) una sola vez', async () => {
-    const response = (from: string, to: string) => ({
-      range: {
-        from,
-        to,
-        timeZone: 'America/Argentina/Buenos_Aires',
-        includesCurrentDay: true,
-        maxDays: 30,
-      },
-      team: {
-        assigned: 0,
-        completedPersonally: 0,
-        percentage: null,
-        pending: 0,
-        coverageReceived: 0,
-        coverageGiven: 0,
-        operationalCompleted: 0,
-      },
-      special: { urgentCompleted: 0, oneTimeCompleted: 0, urgentPending: 0 },
-      employees: [],
-      trend: [],
-    });
-    performanceApi.fetchPerformance.mockImplementation(async (from: string, to: string) =>
-      response(from, to),
-    );
-    render(
-      <>
-        <BusinessDayRefresh />
-        <PerformanceScreen />
-      </>,
-      { route: '/tasks/performance' },
-    );
-    await waitFor(() =>
-      expect(performanceApi.fetchPerformance).toHaveBeenCalledWith('2026-10-19', '2026-10-25'),
-    );
-    goTo(ar('2026-10-26', '00:00:02'));
-    await waitFor(() =>
-      expect(performanceApi.fetchPerformance).toHaveBeenLastCalledWith('2026-10-20', '2026-10-26'),
-    );
-    expect(performanceApi.fetchPerformance).toHaveBeenCalledTimes(2);
   });
 });

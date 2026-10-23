@@ -50,7 +50,13 @@ export interface TaskItem {
 export type TaskStatusFilter = 'active' | 'inactive' | 'all';
 
 export interface TasksListResponse {
-  period: { today: string; weekStart: string; timeZone: string };
+  period: {
+    today: string;
+    weekStart: string;
+    timeZone: string;
+    /** Hora del servidor (ISO), para el reloj del día; ausente en un backend anterior. */
+    generatedAt?: string;
+  };
   tasks: TaskItem[];
 }
 

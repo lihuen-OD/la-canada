@@ -259,9 +259,14 @@ export async function getPerformance(
     });
 
   return {
+    // `today` y `generatedAt`: fecha de negocio y hora del servidor, para que
+    // el reloj del día del frontend no dé por empezado un día que el backend
+    // todavía no alcanzó (docs/ARCHITECTURE.md §39.1).
+    generatedAt: now.toISOString(),
     range: {
       from: formatLocalDate(from),
       to: formatLocalDate(to),
+      today: formatLocalDate(today),
       timeZone,
       includesCurrentDay: compareLocalDates(to, today) === 0,
       maxDays: MAX_RANGE_DAYS,

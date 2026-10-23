@@ -61,8 +61,10 @@ function body(path: string): unknown {
   if (path.startsWith('/auth/login-options')) return { options: [] };
   if (path.startsWith('/dashboard'))
     return {
-      generatedAt: '2026-09-25T12:00:00.000Z',
-      today: '2026-09-25',
+      // Mismo día y hora de servidor que el listado de tareas sintético
+      // (un backend real informa un solo día; ver docs/ARCHITECTURE.md §39.1).
+      generatedAt: '2026-09-24T15:00:00.000Z',
+      today: '2026-09-24',
       timeZone: 'America/Argentina/Cordoba',
       kpis: {
         tasksCompleted: 0,

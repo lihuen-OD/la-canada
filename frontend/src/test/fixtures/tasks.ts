@@ -56,6 +56,8 @@ export function listResponse(tasks: TaskItem[]): TasksListResponse {
       today: '2026-09-24',
       weekStart: '2026-09-21',
       timeZone: 'America/Argentina/Buenos_Aires',
+      // Hora del servidor coherente con `today` (24/09 12:00 en Buenos Aires).
+      generatedAt: '2026-09-24T15:00:00.000Z',
     },
     tasks,
   };

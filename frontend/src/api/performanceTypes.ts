@@ -39,9 +39,13 @@ export interface PerformanceOccurrence {
 }
 
 export interface PerformanceResponse {
+  /** Hora del servidor (ISO), para el reloj del día; ausente en un backend anterior. */
+  generatedAt?: string;
   range: {
     from: string;
     to: string;
+    /** Fecha de negocio del servidor (puede ser posterior a `to`). */
+    today?: string;
     timeZone: string;
     includesCurrentDay: boolean;
     maxDays: number;

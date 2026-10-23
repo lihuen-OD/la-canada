@@ -275,6 +275,9 @@ export async function listTasks(actor: TaskActor, filters: ListTasksFilters, now
       today: formatLocalDate(today),
       weekStart: formatLocalDate(startOfWeek(today)),
       timeZone: config.businessTimeZone,
+      // Hora del servidor: el reloj del día del frontend la usa para no
+      // depender de la hora del dispositivo (docs/ARCHITECTURE.md §39.1).
+      generatedAt: now.toISOString(),
     },
     tasks: serialized,
   };
