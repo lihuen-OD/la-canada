@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { ApiError } from '../../api/httpClient';
 import { OfflineError } from '../../api/transportErrors';
@@ -55,6 +55,7 @@ import {
   fulfillActionLabel,
   nextDay,
   petSummary,
+  UPCOMING_ANCHOR,
 } from './petLabels';
 import { useBusinessDayRefresh } from './useBusinessDayRefresh';
 import { usePetsCache } from './usePetsCache';
@@ -333,7 +334,8 @@ function PetKpis({ detail }: { detail: PetDetailResponse }) {
  * (mismo endpoint que 📅 Vencimientos, filtrado por mascota), con
  * «Registrar aplicación / control» si admite registros nuevos. Desde
  * Vencimientos se llega con `?cumplir=<id>`: se abre el formulario con ese
- * pendiente ya elegido.
+ * pendiente ya elegido. Desde 🐾 Atenciones de mascotas (Inicio) se llega con
+ * `#proximas-atenciones`: la tarjeta queda a la vista y con el foco.
  */
 function UpcomingCard({
   petId,
@@ -371,6 +373,16 @@ function UpcomingCard({
   }, [expired, onSessionExpired]);
   useBusinessDayRefresh(query.data?.pages[0]?.refreshAt);
 
+  const location = useLocation();
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const toAnchor = location.hash === `#${UPCOMING_ANCHOR}`;
+  useEffect(() => {
+    if (!toAnchor) return;
+    anchorRef.current?.scrollIntoView?.({ block: 'start' });
+    anchorRef.current?.focus({ preventScroll: true });
+    // Cada llegada desde Inicio (otra `key`) vuelve a ubicar la tarjeta.
+  }, [toAnchor, location.key]);
+
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
   useEffect(() => {
     if (!fulfillParam || !query.data) return;
@@ -382,58 +394,60 @@ function UpcomingCard({
   }, [fulfillParam, query.data]);
 
   return (
-    <Card
-      title={
-        <>
-          <span aria-hidden="true">📅 </span>Próximas atenciones
-        </>
-      }
-    >
-      {!query.data ? (
-        query.isError ? (
-          <ErrorState
-            title="No pudimos cargar las próximas atenciones"
-            description={errorMessageOf(query.error)}
-            onRetry={() => void query.refetch()}
+    <div id={UPCOMING_ANCHOR} ref={anchorRef} tabIndex={-1} className="pet-upcoming-anchor">
+      <Card
+        title={
+          <>
+            <span aria-hidden="true">📅 </span>Próximas atenciones
+          </>
+        }
+      >
+        {!query.data ? (
+          query.isError ? (
+            <ErrorState
+              title="No pudimos cargar las próximas atenciones"
+              description={errorMessageOf(query.error)}
+              onRetry={() => void query.refetch()}
+            />
+          ) : (
+            <LoadingState label="Cargando próximas atenciones…" />
+          )
+        ) : items.length === 0 ? (
+          <EmptyState
+            titleAs="p"
+            title="Sin atenciones programadas"
+            description="Al registrar una vacuna, desparasitación o control podés indicar la fecha de la próxima."
           />
         ) : (
-          <LoadingState label="Cargando próximas atenciones…" />
-        )
-      ) : items.length === 0 ? (
-        <EmptyState
-          titleAs="p"
-          title="Sin atenciones programadas"
-          description="Al registrar una vacuna, desparasitación o control podés indicar la fecha de la próxima."
-        />
-      ) : (
-        <>
-          <ul className="pet-history__list" aria-label="Próximas atenciones">
-            {items.map((item) => (
-              <PetDueRow
-                key={item.record.id}
-                item={item}
-                onRegister={canRegister ? () => onRegister(item) : undefined}
-                onEditDate={
-                  isAdmin
-                    ? () => onEditDate({ record: item.record, current: item.nextDue.date })
-                    : undefined
-                }
-              />
-            ))}
-          </ul>
-          {query.hasNextPage ? (
-            <Button
-              variant="secondary"
-              fullWidth
-              loading={query.isFetchingNextPage}
-              onClick={() => void query.fetchNextPage({ cancelRefetch: false })}
-            >
-              Cargar más
-            </Button>
-          ) : null}
-        </>
-      )}
-    </Card>
+          <>
+            <ul className="pet-history__list" aria-label="Próximas atenciones">
+              {items.map((item) => (
+                <PetDueRow
+                  key={item.record.id}
+                  item={item}
+                  onRegister={canRegister ? () => onRegister(item) : undefined}
+                  onEditDate={
+                    isAdmin
+                      ? () => onEditDate({ record: item.record, current: item.nextDue.date })
+                      : undefined
+                  }
+                />
+              ))}
+            </ul>
+            {query.hasNextPage ? (
+              <Button
+                variant="secondary"
+                fullWidth
+                loading={query.isFetchingNextPage}
+                onClick={() => void query.fetchNextPage({ cancelRefetch: false })}
+              >
+                Cargar más
+              </Button>
+            ) : null}
+          </>
+        )}
+      </Card>
+    </div>
   );
 }
 

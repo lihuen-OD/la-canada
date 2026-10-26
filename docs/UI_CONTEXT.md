@@ -236,6 +236,7 @@ La implementación React actual debe reconciliarse visualmente con esta referenc
 - Grilla de KPI: dos columnas en móvil y cuatro en escritorio.
 - Cifras en Fraunces.
 - Bloques resumidos para tareas urgentes, progreso del equipo, alertas de stock, próximos eventos y novedades.
+- «🐾 Atenciones de mascotas» (pedido del usuario, 2026-10-26), entre «⚠️ Stock crítico» y «📅 Próximos eventos»: la misma tarjeta (`DashboardCard`) con «Ver vencimientos»; resumen de totales en texto secundario; hasta 5 filas tocables (nombre en negrita, tipo · descripción en una línea con elipsis, «Programada: dd/mm/aaaa · Hace N días» con el tono de 📅 Vencimientos) y la etiqueta de estado (`Badge`) a la derecha. Los enlaces de las tarjetas no se cortan en dos líneas: el título se ajusta.
 - Cada resumen debe provenir de datos reales; no mostrar métricas mock.
 
 ### Tareas

@@ -5,6 +5,7 @@ import { computeStockLevel, computeSuggestedPurchase } from '../stock/stockLevel
 import { listTasks, type TaskActor } from '../tasks/tasksService';
 import { listUpcomingEvents } from '../more/eventsService';
 import { defaultPerformanceRange, getPerformance } from '../performance/performanceService';
+import { getPetDueAlerts } from '../pets/petService';
 
 const stockSelect = {
   id: true,
@@ -54,6 +55,23 @@ async function dashboardPerformance(actor: TaskActor, now: Date) {
 }
 
 /**
+ * 🐾 Atenciones de mascotas: el mismo resumen para todos los roles (lectura
+ * de todos, como 📅 Vencimientos). Una falla de esta rama no tumba Inicio:
+ * llega `null`, la tarjeta muestra su error y las demás se ven igual.
+ */
+async function dashboardPetDue(actor: TaskActor, now: Date) {
+  try {
+    return await getPetDueAlerts(actor, now);
+  } catch (error) {
+    console.error(
+      'Inicio: no se pudieron calcular las atenciones de mascotas:',
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
+}
+
+/**
  * Inicio replica `rndInicio` del prototipo. Las ramas son independientes y se
  * resuelven en paralelo; la cantidad de sentencias es fija y no depende de
  * tarjetas, personas ni filas devueltas.
@@ -63,25 +81,27 @@ export async function getDashboard(actor: TaskActor, now = new Date()) {
   const todayText = formatLocalDate(today);
   const todayDb = new Date(Date.UTC(today.year, today.month - 1, today.day));
 
-  const [taskResult, performance, stockRows, eggAggregate, events, newsRows] = await Promise.all([
-    listTasks(actor, { status: 'active' }, now),
-    dashboardPerformance(actor, now),
-    prisma.stockItem.findMany({
-      where: { active: true },
-      select: stockSelect,
-      orderBy: [{ area: 'asc' }, { name: 'asc' }],
-    }),
-    prisma.eggCollection.aggregate({
-      where: { collectionDate: todayDb, voidedAt: null },
-      _sum: { goodEggsCount: true },
-    }),
-    listUpcomingEvents(actor, 3, now),
-    prisma.newsReport.findMany({
-      select: newsSelect,
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: 3,
-    }),
-  ]);
+  const [taskResult, performance, stockRows, eggAggregate, events, newsRows, petDue] =
+    await Promise.all([
+      listTasks(actor, { status: 'active' }, now),
+      dashboardPerformance(actor, now),
+      prisma.stockItem.findMany({
+        where: { active: true },
+        select: stockSelect,
+        orderBy: [{ area: 'asc' }, { name: 'asc' }],
+      }),
+      prisma.eggCollection.aggregate({
+        where: { collectionDate: todayDb, voidedAt: null },
+        _sum: { goodEggsCount: true },
+      }),
+      listUpcomingEvents(actor, 3, now),
+      prisma.newsReport.findMany({
+        select: newsSelect,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 3,
+      }),
+      dashboardPetDue(actor, now),
+    ]);
 
   // Una «Una vez» programada para más adelante todavía no es exigible: no
   // entra al KPI operativo (sí la de hoy y la vencida). Sin fecha, como siempre.
@@ -133,6 +153,7 @@ export async function getDashboard(actor: TaskActor, now = new Date()) {
     performance,
     stockAlerts,
     upcomingEvents: events,
+    petDue,
     latestNews: newsRows.map((news) => ({
       id: news.id,
       text: news.text,

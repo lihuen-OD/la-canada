@@ -66,6 +66,8 @@
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
   text-decoration: none;
+  /* «Ver vencimientos» junto a un título largo: el título se ajusta, el enlace no. */
+  white-space: nowrap;
 }
 .home-list {
   display: grid;
@@ -259,6 +261,46 @@
   font-size: var(--font-size-sm);
   line-height: 1.4;
   overflow-wrap: anywhere;
+}
+/* 🐾 Atenciones de mascotas: cada fila abre la ficha en «Próximas atenciones».
+   Mismos tonos del tiempo relativo que 📅 Vencimientos (pets.css). */
+.home-pet-due {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3) 0;
+  color: var(--color-text);
+  text-decoration: none;
+}
+.home-pet-due__body {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.home-pet-due strong {
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+.home-pet-due small {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+/* Descripción breve: una línea; el texto completo queda en la ficha. */
+.home-pet-due__detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-pet-due__relative {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+.home-pet-due--overdue .home-pet-due__relative {
+  color: var(--color-danger);
+}
+.home-pet-due .badge {
+  flex: 0 0 auto;
 }
 .home-empty {
   padding: var(--space-4) 0;

@@ -10,12 +10,21 @@ import { useSessionScope } from '../../api/useSessionScope';
 import { useAuth } from '../../auth/useAuth';
 import { getLoadedDisplayName } from '../../auth/userDisplay';
 import { Avatar } from '../../components/ui/Avatar';
+import { Badge } from '../../components/ui/Badge';
 import { Card } from '../../components/ui/Card';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { ErrorState } from '../../components/ui/StateMessage';
+import {
+  DUE_STATUS_LABEL,
+  DUE_STATUS_TONE,
+  RECORD_TAG_LABEL,
+  UPCOMING_ANCHOR,
+  dueRelativeText,
+  dueSummaryText,
+} from '../pets/petLabels';
 import { COMPLETE_TARGET_TEXT, LEVEL_LABEL } from '../stock/stockLabels';
 import { stockBarPercent } from '../stock/stockStatus';
-import { formatDateRange, formatPercentage } from '../../utils/dateFormat';
+import { formatDate, formatDateRange, formatPercentage } from '../../utils/dateFormat';
 
 const EVENT_ICON: Record<string, string> = {
   VISIT: '👥',
@@ -61,10 +70,24 @@ export function AuthenticatedHome() {
     }
     return <DashboardSkeleton />;
   }
-  return <DashboardContent data={query.data} refreshing={query.isFetching} />;
+  return (
+    <DashboardContent
+      data={query.data}
+      refreshing={query.isFetching}
+      onRetry={() => void query.refetch()}
+    />
+  );
 }
 
-function DashboardContent({ data, refreshing }: { data: DashboardResponse; refreshing: boolean }) {
+function DashboardContent({
+  data,
+  refreshing,
+  onRetry,
+}: {
+  data: DashboardResponse;
+  refreshing: boolean;
+  onRetry: () => void;
+}) {
   const { kpis } = data;
   const { user } = useAuth();
   // Etapa 5F: el saludo lleva el nombre visible cargado; sin nombre, el saludo de siempre.
@@ -170,6 +193,7 @@ function DashboardContent({ data, refreshing }: { data: DashboardResponse; refre
               <EmptyText>Ningún producto en stock crítico ✅</EmptyText>
             )}
           </DashboardCard>
+          <PetDueCard petDue={data.petDue} onRetry={onRetry} />
           <DashboardCard title="📅 Próximos eventos" to="/more/events" linkLabel="Ver todos">
             {data.upcomingEvents.length ? (
               <ul className="home-list">
@@ -318,6 +342,72 @@ function PerformanceCard({ performance }: { performance: DashboardResponse['perf
             </li>
           ))}
         </ul>
+      )}
+    </DashboardCard>
+  );
+}
+
+/**
+ * 🐾 Atenciones de mascotas: lo que calcula el backend con la regla de 📅
+ * Vencimientos (acá no se clasifica ni se calcula ninguna fecha). Totales de
+ * todas las atenciones de la ventana, hasta 5 filas, y cada fila abre la
+ * ficha en «Próximas atenciones». Solo lectura: se cumple desde Mascotas.
+ */
+function PetDueCard({
+  petDue,
+  onRetry,
+}: {
+  petDue: DashboardResponse['petDue'];
+  onRetry: () => void;
+}) {
+  return (
+    <DashboardCard title="🐾 Atenciones de mascotas" to="/pets/due" linkLabel="Ver vencimientos">
+      {!petDue ? (
+        <ErrorState
+          kind="generic"
+          titleAs="p"
+          title="No pudimos cargar las atenciones de mascotas"
+          onRetry={onRetry}
+        />
+      ) : petDue.items.length === 0 ? (
+        <EmptyText>No hay atenciones vencidas ni previstas para los próximos 30 días</EmptyText>
+      ) : (
+        <>
+          <p className="home-period">{dueSummaryText(petDue.counts)}</p>
+          <ul className="home-list" aria-label="Atenciones de mascotas">
+            {petDue.items.map(({ record, pet, nextDue }) => {
+              const label = DUE_STATUS_LABEL[nextDue.status];
+              const relative = dueRelativeText(nextDue);
+              return (
+                <li key={record.id}>
+                  <Link
+                    className={`home-pet-due home-pet-due--${nextDue.status.toLowerCase()}`}
+                    to={`/pets/${pet.id}#${UPCOMING_ANCHOR}`}
+                  >
+                    <span className="home-pet-due__body">
+                      <strong>{pet.name}</strong>
+                      <small className="home-pet-due__detail">
+                        {RECORD_TAG_LABEL[record.type]}
+                        {record.description ? ` · ${record.description}` : ''}
+                      </small>
+                      <small>
+                        Programada: {formatDate(nextDue.date)}
+                        {/* «Vence hoy» ya lo dice el estado: no se repite. */}
+                        {relative !== label ? (
+                          <>
+                            {' · '}
+                            <span className="home-pet-due__relative">{relative}</span>
+                          </>
+                        ) : null}
+                      </small>
+                    </span>
+                    <Badge tone={DUE_STATUS_TONE[nextDue.status]}>{label}</Badge>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
     </DashboardCard>
   );

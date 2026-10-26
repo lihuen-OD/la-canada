@@ -42,13 +42,12 @@ import {
 } from './petCatalog';
 import { computePetAge, daysToNextBirthday } from './petDates';
 import {
-  alertWindowEnd,
+  alertDueWhere,
   computeDueStatus,
   daysUntil,
   dueDateOf,
   dueStatusWhere,
   isAlertStatus,
-  OPEN_DUE_WHERE,
   type DueStatus,
 } from './petDue';
 import type {
@@ -457,26 +456,31 @@ export async function listPets(
  * por animal.
  */
 async function loadDueSummaries(petIds: string[], today: LocalDate) {
-  const summaries = new Map<string, { overdue: number; dueToday: number; upcoming: number }>();
+  const summaries = new Map<string, AlertCounts>();
   if (petIds.length === 0) return summaries;
   const rows = await prisma.animalMedicalRecord.findMany({
-    where: {
-      ...OPEN_DUE_WHERE,
-      animalId: { in: petIds },
-      nextDueDate: { not: null, lte: alertWindowEnd(today) },
-    },
+    where: { ...alertDueWhere(today), animalId: { in: petIds } },
     select: { animalId: true, nextDueDate: true },
   });
   for (const row of rows) {
-    const status = computeDueStatus(dueDateOf(row.nextDueDate!), today, false);
-    if (!isAlertStatus(status)) continue;
-    const entry = summaries.get(row.animalId) ?? { overdue: 0, dueToday: 0, upcoming: 0 };
-    if (status === 'OVERDUE') entry.overdue += 1;
-    else if (status === 'DUE_TODAY') entry.dueToday += 1;
-    else entry.upcoming += 1;
+    const entry = summaries.get(row.animalId) ?? emptyAlertCounts();
+    tallyAlert(entry, row.nextDueDate!, today);
     summaries.set(row.animalId, entry);
   }
   return summaries;
+}
+
+/** Vencidas, de hoy y próximas (1–30 días): indicadores del listado y resumen de Inicio. */
+type AlertCounts = { overdue: number; dueToday: number; upcoming: number };
+const emptyAlertCounts = (): AlertCounts => ({ overdue: 0, dueToday: 0, upcoming: 0 });
+
+/** Suma `count` pendientes abiertos con fecha `due` al estado de hoy (`computeDueStatus`). */
+function tallyAlert(counts: AlertCounts, due: Date, today: LocalDate, count = 1): void {
+  const status = computeDueStatus(dueDateOf(due), today, false);
+  if (!isAlertStatus(status)) return;
+  if (status === 'OVERDUE') counts.overdue += count;
+  else if (status === 'DUE_TODAY') counts.dueToday += count;
+  else counts.upcoming += count;
 }
 
 /** Ficha + KPIs del prototipo (vacunas, último peso, desparasitaciones, próximo cumple). */
@@ -936,6 +940,13 @@ const dueSelect = {
   },
 } as const;
 
+/** Orden de 📅 Vencimientos: fecha ascendente (vencidas más antiguas primero), desempate estable. */
+const DUE_ORDER = [
+  { nextDueDate: 'asc' },
+  { recordDate: 'asc' },
+  { id: 'asc' },
+] satisfies Prisma.AnimalMedicalRecordOrderByWithRelationInput[];
+
 /**
  * 📅 Vencimientos: atenciones programadas de mascotas ACTIVAS, por fecha
  * ascendente (primero las vencidas más antiguas). Por defecto solo los
@@ -967,7 +978,7 @@ export async function listPetDue(
     prisma.animalMedicalRecord.findMany({
       where,
       select: dueSelect,
-      orderBy: [{ nextDueDate: 'asc' }, { recordDate: 'asc' }, { id: 'asc' }],
+      orderBy: DUE_ORDER,
       skip: (filters.page - 1) * filters.pageSize,
       take: filters.pageSize,
     }),
@@ -996,6 +1007,61 @@ export async function listPetDue(
     totalPages: Math.max(1, Math.ceil(total / filters.pageSize)),
   };
 }
+
+/** Filas de 🐾 Atenciones de mascotas en Inicio (los totales cuentan todas). */
+export const PET_DUE_ALERTS_LIMIT = 5;
+
+/**
+ * 🐾 Atenciones de mascotas para Inicio: los pendientes abiertos de mascotas
+ * ACTIVAS vencidos, de hoy o próximos (≤ 30 días) — misma regla
+ * (`alertDueWhere`) y mismo orden que 📅 Vencimientos. Lectura de todos, como
+ * Vencimientos. Dos sentencias en paralelo más la relación de las filas
+ * (índice `animal_medical_records_next_due_date_idx`): los totales de TODA la
+ * ventana agrupados por fecha y clasificados con `computeDueStatus`, y las
+ * primeras filas ya filtradas y ordenadas en Postgres. Nunca una consulta por
+ * mascota o atención. Solo los campos que muestra la tarjeta.
+ */
+export async function getPetDueAlerts(_actor: PetActor, now = new Date()) {
+  const today = businessToday(now);
+  const where: Prisma.AnimalMedicalRecordWhereInput = {
+    ...alertDueWhere(today),
+    animal: { active: true },
+  };
+  const [byDate, rows] = await Promise.all([
+    prisma.animalMedicalRecord.groupBy({ by: ['nextDueDate'], where, _count: { _all: true } }),
+    prisma.animalMedicalRecord.findMany({
+      where,
+      select: {
+        id: true,
+        type: true,
+        description: true,
+        nextDueDate: true,
+        animal: { select: { id: true, name: true } },
+      },
+      orderBy: DUE_ORDER,
+      take: PET_DUE_ALERTS_LIMIT,
+    }),
+  ]);
+  const counts = emptyAlertCounts();
+  for (const group of byDate) tallyAlert(counts, group.nextDueDate!, today, group._count._all);
+  return {
+    counts,
+    items: rows.map((row) => {
+      const due = dueDateOf(row.nextDueDate!);
+      return {
+        record: { id: row.id, type: row.type, description: row.description },
+        pet: row.animal,
+        nextDue: {
+          date: dateText(row.nextDueDate!),
+          status: computeDueStatus(due, today, false),
+          daysUntil: daysUntil(due, today),
+        },
+      };
+    }),
+  };
+}
+
+export type PetDueAlerts = Awaited<ReturnType<typeof getPetDueAlerts>>;
 
 /** "✕" del historial (solo ADMIN, confirmación en el cliente): anulación lógica auditada. */
 export async function voidPetRecord(

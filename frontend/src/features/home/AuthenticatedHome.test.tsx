@@ -1,5 +1,5 @@
 import { StrictMode } from 'react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { DashboardResponse } from '../../api/dashboardTypes';
@@ -89,6 +89,7 @@ const dashboard: DashboardResponse = {
       daysUntil: 1,
     },
   ],
+  petDue: { counts: { overdue: 0, dueToday: 0, upcoming: 0 }, items: [] },
   latestNews: [
     {
       id: 'n1',
@@ -99,12 +100,34 @@ const dashboard: DashboardResponse = {
   ],
 };
 
+type PetDueItem = NonNullable<DashboardResponse['petDue']>['items'][number];
+const petDueItem = (
+  id: string,
+  petName: string,
+  date: string,
+  status: PetDueItem['nextDue']['status'],
+  daysUntil: number,
+  record: Partial<PetDueItem['record']> = {},
+): PetDueItem => ({
+  record: { id, type: 'VACCINE', description: null, ...record },
+  pet: { id: `pet-${petName}`, name: petName },
+  nextDue: { date, status, daysUntil },
+});
+
+/** Ficha de destino: muestra el ancla recibida, para comprobar la navegación. */
+function PetDestination() {
+  const location = useLocation();
+  return <p>Ficha destino {`${location.pathname}${location.hash}`}</p>;
+}
+
 function renderHome(queryClient = createTestQueryClient(), strict = false) {
   const content = (
     <MemoryRouter>
       <Routes>
         <Route path="/" element={<AuthenticatedHome />} />
         <Route path="/tasks" element={<p>Tareas destino</p>} />
+        <Route path="/pets/due" element={<p>Vencimientos destino</p>} />
+        <Route path="/pets/:petId" element={<PetDestination />} />
       </Routes>
     </MemoryRouter>
   );
@@ -124,7 +147,9 @@ describe('Dashboard de Inicio', () => {
     expect(screen.getByRole('heading', { name: '⚠️ Stock crítico' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '📅 Próximos eventos' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '📝 Últimas novedades' })).toBeInTheDocument();
-    expect(screen.queryByText(/clima|mascotas/i)).not.toBeInTheDocument();
+    // 🐾 Atenciones de mascotas: función nueva pedida por el usuario (2026-10-26).
+    expect(screen.getByRole('heading', { name: '🐾 Atenciones de mascotas' })).toBeInTheDocument();
+    expect(screen.queryByText(/clima/i)).not.toBeInTheDocument();
   });
 
   it('alertas de reposición: solo críticos del backend, con cantidad sugerida y enlace a Compras', async () => {
@@ -297,5 +322,120 @@ describe('Dashboard de Inicio', () => {
     renderHome(queryClient);
     expect(screen.getByText('Revisar bomba')).toBeInTheDocument();
     expect(screen.getByText('Actualizando…')).toBeInTheDocument();
+  });
+});
+
+describe('🐾 Atenciones de mascotas en Inicio', () => {
+  /** Tal como lo manda el backend: 8 en la ventana, las 5 primeras ya ordenadas. */
+  const withPetDue: DashboardResponse = {
+    ...dashboard,
+    petDue: {
+      counts: { overdue: 3, dueToday: 1, upcoming: 4 },
+      items: [
+        petDueItem('r1', 'Luna sintética', '2026-08-01', 'OVERDUE', -55, {
+          description: 'Antirrábica',
+        }),
+        petDueItem('r2', 'Tobi sintético', '2026-09-20', 'OVERDUE', -5, { type: 'DEWORMING' }),
+        petDueItem('r3', 'Tobi sintético', '2026-09-24', 'OVERDUE', -1, { type: 'CHECKUP' }),
+        petDueItem('r4', 'Michi sintética', '2026-09-25', 'DUE_TODAY', 0, {
+          type: 'CLINICAL_EVENT',
+        }),
+        // Segunda vacuna de la misma mascota: otra fila, nunca fusionada.
+        petDueItem('r5', 'Luna sintética', '2026-09-26', 'UPCOMING', 1, {
+          description: 'Séxtuple',
+        }),
+      ],
+    },
+  };
+  const card = () => screen.getByRole('region', { name: '🐾 Atenciones de mascotas' });
+  const rows = () => within(card()).getAllByRole('listitem');
+
+  it('va antes de «Próximos eventos», después de «Stock crítico»', async () => {
+    mocks.getDashboard.mockResolvedValueOnce(withPetDue);
+    renderHome();
+    await screen.findAllByText('Luna sintética');
+    const titles = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
+    const at = (title: string) => titles.indexOf(title);
+    expect(at('🐾 Atenciones de mascotas')).toBe(at('⚠️ Stock crítico') + 1);
+    expect(at('📅 Próximos eventos')).toBe(at('🐾 Atenciones de mascotas') + 1);
+  });
+
+  it('resumen con los totales reales (no solo las filas) y filas en el orden del backend, con todo su contenido', async () => {
+    mocks.getDashboard.mockResolvedValueOnce(withPetDue);
+    renderHome();
+    await screen.findAllByText('Luna sintética');
+    expect(within(card()).getByText('3 vencidas · 1 hoy · 4 próximas')).toBeInTheDocument();
+    const items = rows();
+    expect(items).toHaveLength(5);
+    expect(items.map((row) => row.querySelector('strong')?.textContent)).toEqual([
+      'Luna sintética',
+      'Tobi sintético',
+      'Tobi sintético',
+      'Michi sintética',
+      'Luna sintética',
+    ]);
+    // Tipo con la etiqueta del módulo, descripción, fecha, estado y tiempo relativo.
+    expect(items[0]).toHaveTextContent('💉 Vacuna · Antirrábica');
+    expect(items[0]).toHaveTextContent('Programada: 01/08/2026');
+    expect(within(items[0]!).getByText('Vencida')).toBeInTheDocument();
+    expect(within(items[0]!).getByText('Hace 55 días')).toBeInTheDocument();
+    expect(items[1]).toHaveTextContent('🪱 Desparasitación');
+    expect(within(items[2]!).getByText('Hace 1 día')).toBeInTheDocument();
+    // «Vence hoy» es el estado: una sola vez.
+    expect(within(items[3]!).getAllByText(/Vence hoy/)).toHaveLength(1);
+    expect(items[3]).toHaveTextContent('📋 Evento');
+    expect(within(items[4]!).getByText('Próxima')).toBeInTheDocument();
+    expect(within(items[4]!).getByText('En 1 día')).toBeInTheDocument();
+    expect(items[4]).toHaveTextContent('💉 Vacuna · Séxtuple');
+  });
+
+  it('cada atención abre la ficha de su mascota en «Próximas atenciones»', async () => {
+    mocks.getDashboard.mockResolvedValueOnce(withPetDue);
+    renderHome();
+    await screen.findAllByText('Luna sintética');
+    await userEvent.setup().click(within(rows()[1]!).getByRole('link'));
+    expect(
+      screen.getByText('Ficha destino /pets/pet-Tobi sintético#proximas-atenciones'),
+    ).toBeInTheDocument();
+  });
+
+  it('«Ver vencimientos» abre la pestaña de Mascotas', async () => {
+    mocks.getDashboard.mockResolvedValueOnce(withPetDue);
+    renderHome();
+    await screen.findAllByText('Luna sintética');
+    await userEvent.setup().click(within(card()).getByRole('link', { name: 'Ver vencimientos' }));
+    expect(screen.getByText('Vencimientos destino')).toBeInTheDocument();
+  });
+
+  it('sin resultados: el mensaje vacío, y «Ver vencimientos» sigue disponible', async () => {
+    mocks.getDashboard.mockResolvedValueOnce(dashboard);
+    renderHome();
+    await screen.findByText('Revisar bomba');
+    expect(
+      within(card()).getByText('No hay atenciones vencidas ni previstas para los próximos 30 días'),
+    ).toBeInTheDocument();
+    expect(within(card()).queryByRole('list')).not.toBeInTheDocument();
+    expect(within(card()).getByRole('link', { name: 'Ver vencimientos' })).toHaveAttribute(
+      'href',
+      '/pets/due',
+    );
+  });
+
+  it('si el backend no pudo calcularla: error con reintento (nunca el vacío) y las demás tarjetas siguen', async () => {
+    mocks.getDashboard.mockResolvedValueOnce({ ...dashboard, petDue: null });
+    mocks.getDashboard.mockResolvedValueOnce(withPetDue);
+    renderHome();
+    await screen.findByText('Revisar bomba');
+    expect(within(card()).getByRole('alert')).toHaveTextContent(
+      'No pudimos cargar las atenciones de mascotas',
+    );
+    expect(within(card()).queryByText(/No hay atenciones vencidas/)).not.toBeInTheDocument();
+    expect(within(card()).getByRole('link', { name: 'Ver vencimientos' })).toBeInTheDocument();
+    expect(screen.getByText('Alimento', { exact: false })).toBeInTheDocument();
+    expect(screen.getByText('Portón revisado')).toBeInTheDocument();
+
+    await userEvent.setup().click(within(card()).getByRole('button', { name: 'Reintentar' }));
+    expect(await within(card()).findByText('3 vencidas · 1 hoy · 4 próximas')).toBeInTheDocument();
+    expect(mocks.getDashboard).toHaveBeenCalledTimes(2);
   });
 });

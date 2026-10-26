@@ -96,6 +96,16 @@ export function alertWindowEnd(today: LocalDate): Date {
   return toDbDate(addDays(today, UPCOMING_WINDOW_DAYS));
 }
 
+/**
+ * Pendientes abiertos que ALERTAN — vencidos (cualquier fecha anterior a hoy),
+ * de hoy o próximos (1 a 30 días) —, es decir, `OVERDUE ∪ DUE_TODAY ∪
+ * UPCOMING` de `dueStatusWhere` en una sola condición. Indicadores del listado
+ * y 🐾 Atenciones de mascotas en Inicio.
+ */
+export function alertDueWhere(today: LocalDate): Prisma.AnimalMedicalRecordWhereInput {
+  return { ...OPEN_DUE_WHERE, nextDueDate: { not: null, lte: alertWindowEnd(today) } };
+}
+
 /** Vencida / hoy / próxima (1–30 días) para un indicador; `null` si es vigente (> 30). */
 export function isAlertStatus(status: DueStatus): status is 'OVERDUE' | 'DUE_TODAY' | 'UPCOMING' {
   return status === 'OVERDUE' || status === 'DUE_TODAY' || status === 'UPCOMING';

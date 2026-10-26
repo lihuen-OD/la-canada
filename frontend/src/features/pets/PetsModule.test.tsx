@@ -2,7 +2,7 @@ import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../api/httpClient';
-import { render, screen, waitFor, within } from '../../test/render';
+import { createTestQueryClient, render, screen, waitFor, within } from '../../test/render';
 import {
   TYPE_CAT,
   TYPE_CUSTOM,
@@ -66,12 +66,12 @@ function asAdmin() {
   });
 }
 
-function renderPets(route = '/pets') {
+function renderPets(route = '/pets', queryClient = createTestQueryClient()) {
   return render(
     <Routes>
       <Route path="/pets/*" element={<PetsModule />} />
     </Routes>,
-    { route },
+    { route, queryClient },
   );
 }
 
@@ -723,6 +723,88 @@ describe('🐾 Mascotas — 📅 Vencimientos', () => {
       await waitFor(() => expect(api.fetchPetDue.mock.calls.length).toBe(calls + 1));
     } finally {
       vi.useRealTimers();
+    }
+  });
+});
+
+describe('🐾 Mascotas — 🐾 Atenciones de mascotas en Inicio', () => {
+  /** Inicio ya en caché para la sesión: una mutación de Mascotas tiene que invalidarlo. */
+  function seededClient(userId: string) {
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(['session', userId, 'dashboard'], { petDue: null });
+    return queryClient;
+  }
+  const homeInvalidated = (queryClient: ReturnType<typeof createTestQueryClient>, userId: string) =>
+    queryClient.getQueryState(['session', userId, 'dashboard'])?.isInvalidated;
+
+  it('registrar una atención con próxima fecha invalida Inicio', async () => {
+    const user = userEvent.setup();
+    api.createPetRecord.mockResolvedValue({ record: makeRecord() });
+    const queryClient = seededClient('u-e');
+    renderPets(`/pets/${PET.id}`, queryClient);
+    const form = await screen.findByRole('form', { name: 'Nuevo registro' });
+    await user.type(
+      within(form).getByLabelText('Fecha de próxima aplicación o control'),
+      '2026-10-20',
+    );
+    expect(homeInvalidated(queryClient, 'u-e')).toBe(false);
+    await user.click(within(form).getByRole('button', { name: 'Guardar registro' }));
+    await waitFor(() => expect(homeInvalidated(queryClient, 'u-e')).toBe(true));
+  });
+
+  it('anular un registro y desactivar la mascota invalidan Inicio', async () => {
+    const user = userEvent.setup();
+    asAdmin();
+    api.voidPetRecord.mockResolvedValue({});
+    api.setPetActive.mockResolvedValue(detailResponse(makePet({ active: false })));
+    const queryClient = seededClient('u-a');
+    renderPets(`/pets/${PET.id}`, queryClient);
+    await user.click(
+      await screen.findByRole('button', { name: 'Eliminar registro 💉 Vacuna del 20/09/2026' }),
+    );
+    const voidDialog = await screen.findByRole('dialog', { name: '¿Eliminar este registro?' });
+    await user.click(within(voidDialog).getByRole('button', { name: 'Eliminar' }));
+    await waitFor(() => expect(homeInvalidated(queryClient, 'u-a')).toBe(true));
+
+    queryClient.setQueryData(['session', 'u-a', 'dashboard'], { petDue: null });
+    expect(homeInvalidated(queryClient, 'u-a')).toBe(false);
+    const actions = screen.getByRole('group', { name: `Acciones sobre ${PET.name}` });
+    await user.click(within(actions).getByRole('button', { name: 'Desactivar' }));
+    const confirm = await screen.findByRole('dialog', { name: `Desactivar «${PET.name}»` });
+    await user.click(within(confirm).getByRole('button', { name: 'Desactivar' }));
+    await waitFor(() => expect(homeInvalidated(queryClient, 'u-a')).toBe(true));
+  });
+
+  it('llegar desde Inicio (#proximas-atenciones) ubica «Próximas atenciones» y le da el foco, sin abrir el formulario', async () => {
+    const original = Element.prototype.scrollIntoView;
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    try {
+      renderPets(`/pets/${PET.id}#proximas-atenciones`);
+      const heading = await screen.findByRole('heading', { name: 'Próximas atenciones' });
+      const anchor = document.getElementById('proximas-atenciones');
+      expect(anchor).toContainElement(heading);
+      await waitFor(() => expect(scroll).toHaveBeenCalledWith({ block: 'start' }));
+      expect(scroll.mock.contexts[0]).toBe(anchor);
+      expect(anchor).toHaveFocus();
+      // Solo ubica: cumplir sigue siendo una acción explícita de la ficha.
+      expect(screen.queryByText(/Cumple:/)).not.toBeInTheDocument();
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
+  it('sin el ancla, la ficha no se desplaza ni mueve el foco', async () => {
+    const original = Element.prototype.scrollIntoView;
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    try {
+      renderPets(`/pets/${PET.id}`);
+      await screen.findByRole('heading', { name: 'Próximas atenciones' });
+      expect(scroll).not.toHaveBeenCalled();
+      expect(document.getElementById('proximas-atenciones')).not.toHaveFocus();
+    } finally {
+      Element.prototype.scrollIntoView = original;
     }
   });
 });

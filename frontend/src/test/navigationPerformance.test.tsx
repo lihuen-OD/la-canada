@@ -77,6 +77,7 @@ function body(path: string): unknown {
       performance: null,
       stockAlerts: [],
       upcomingEvents: [],
+      petDue: { counts: { overdue: 0, dueToday: 0, upcoming: 0 }, items: [] },
       latestNews: [],
     };
   if (path.startsWith('/tasks/employees')) return { employees: [PERSON_A, PERSON_B] };

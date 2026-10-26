@@ -106,6 +106,9 @@ export function dueRelativeText(nextDue: Pick<NextDue, 'daysUntil' | 'status'>):
   return days > 0 ? `En ${days} ${plural}` : `Hace ${-days} ${plural}`;
 }
 
+/** Ancla de «Próximas atenciones» en la ficha: `/pets/<id>#proximas-atenciones` (desde Inicio). */
+export const UPCOMING_ANCHOR = 'proximas-atenciones';
+
 /** «Registrar aplicación» (vacunas y desparasitaciones) o «Registrar control». */
 export function fulfillActionLabel(type: MedicalRecordType): string {
   return type === 'VACCINE' || type === 'DEWORMING' ? 'Registrar aplicación' : 'Registrar control';
