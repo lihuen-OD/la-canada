@@ -77,8 +77,8 @@ const FREQUENCY_ORDER: Record<TaskFrequency, number> = {
   ANNUAL: 7,
 };
 
-/** Dentro de las «Una vez»: primero las que tienen fecha (la más antigua arriba), después las sin fecha. */
-function compareScheduledDates(a: string | null, b: string | null): number {
+/** Fechas `YYYY-MM-DD`: primero las que tienen fecha (la más antigua arriba), después las sin fecha. */
+function compareDates(a: string | null, b: string | null): number {
   if (a === b) return 0;
   if (a === null) return 1;
   if (b === null) return -1;
@@ -91,6 +91,39 @@ function compareExecutionOrder(a: number | null, b: number | null): number {
   if (a === null) return 1;
   if (b === null) return -1;
   return a - b;
+}
+
+/**
+ * Fecha que ordena dentro de la frecuencia: la «Fecha para realizar» de una
+ * «Una vez» o la fecha sugerida del período vigente de una recurrente (ambas
+ * del backend). Diarias y urgentes se ordenan solo por número.
+ */
+function sortDateOf(task: Pick<SerializedTask, 'frequency' | 'scheduledDate' | 'suggestedDate'>) {
+  switch (task.frequency) {
+    case 'DAILY':
+    case 'URGENT':
+      return null;
+    case 'ONE_TIME':
+      return task.scheduledDate;
+    default:
+      return task.suggestedDate;
+  }
+}
+
+/**
+ * Orden operativo (docs/BUSINESS_RULES.md, "Orden de realización y
+ * programación sugerida"): frecuencia → fecha (sin fecha al final) → orden de
+ * realización (sin número al final) → descripción → id (desempate estable).
+ * Nunca por estado ni cumplimiento.
+ */
+function compareOperationalOrder(a: SerializedTask, b: SerializedTask): number {
+  return (
+    FREQUENCY_ORDER[a.frequency] - FREQUENCY_ORDER[b.frequency] ||
+    compareDates(sortDateOf(a), sortDateOf(b)) ||
+    compareExecutionOrder(a.executionOrder, b.executionOrder) ||
+    a.description.localeCompare(b.description, 'es') ||
+    a.id.localeCompare(b.id)
+  );
 }
 
 const suggestionSelect = {
@@ -308,14 +341,7 @@ export async function listTasks(actor: TaskActor, filters: ListTasksFilters, now
       (task) =>
         !(filters.status === 'active' && task.frequency === 'ONE_TIME' && task.currentExecution),
     )
-    .sort(
-      (a, b) =>
-        FREQUENCY_ORDER[a.frequency] - FREQUENCY_ORDER[b.frequency] ||
-        compareExecutionOrder(a.executionOrder, b.executionOrder) ||
-        compareScheduledDates(a.scheduledDate, b.scheduledDate) ||
-        a.description.localeCompare(b.description, 'es') ||
-        a.id.localeCompare(b.id),
-    );
+    .sort(compareOperationalOrder);
 
   return {
     period: {

@@ -385,6 +385,49 @@ describe('orden del listado y calendario (HTTP)', { timeout: 60_000 }, () => {
     ]);
   });
 
+  it('fecha antes que número (caso obligatorio): «Una vez» por su fecha y anual por la sugerida, también con filtros de persona y frecuencia', async () => {
+    const employee = await createEmployee('F');
+    const cases = [
+      ['D 15/01 orden 2', 15, 2],
+      ['B 19/01 orden 3', 19, 3],
+      ['A sin fecha orden 1', null, 1],
+      ['C 19/01 orden 1', 19, 1],
+    ] as const;
+    for (const [label, day, executionOrder] of cases) {
+      await createTask(`única ${label}`, employee, 'ONE_TIME', {
+        executionOrder,
+        ...(day ? { scheduledDate: `2027-01-${day}` } : {}),
+      });
+      await createTask(`anual ${label}`, employee, 'ANNUAL', {
+        executionOrder,
+        ...(day ? { suggestedMonth: 1, suggestedMonthDay: day } : {}),
+      });
+    }
+    const expected = [
+      'D 15/01 orden 2',
+      'C 19/01 orden 1',
+      'B 19/01 orden 3',
+      'A sin fecha orden 1',
+    ];
+    const listed = async (query: string) =>
+      (
+        (await request(app).get(`/api/v1/tasks?${query}`).set(as(employeeA))).body
+          .tasks as TaskBody[]
+      )
+        .filter((task) => (task.assignee as { id: string }).id === employee)
+        .map((task) => task.description.slice(TAG.length + 1));
+
+    expect(await listed(`employeeId=${employee}`)).toEqual([
+      ...expected.map((label) => `única ${label}`),
+      ...expected.map((label) => `anual ${label}`),
+    ]);
+    expect(await listed(`employeeId=${employee}&frequency=ONE_TIME`)).toEqual(
+      expected.map((label) => `única ${label}`),
+    );
+    // Sin filtro de persona (otras tareas pueden intercalarse): el mismo orden relativo.
+    expect(await listed('frequency=ANNUAL')).toEqual(expected.map((label) => `anual ${label}`));
+  });
+
   it('calendario del mes: una fecha por período desde el vigente; mes inválido 400', async () => {
     const task = await createTask('calendario semanal', empB, 'WEEKLY', { suggestedWeekday: 1 });
     const today = toLocalDate(new Date(), TZ);

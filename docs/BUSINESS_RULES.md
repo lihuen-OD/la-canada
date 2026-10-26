@@ -434,8 +434,14 @@ Función nueva pedida explícitamente por el usuario. Permisos sin cambios: carg
 **Orden de realización** (todas las frecuencias, opcional)
 
 - Entero de 1 a 9999; se admiten repetidos; vacío = sin orden (nunca 0). Ayuda: «Los números menores aparecen primero. Es opcional».
-- En el listado operativo, dentro de cada grupo de frecuencia: primero las numeradas, de menor a mayor; después las sin orden. En empates y entre las sin orden, el criterio de siempre («Una vez»: con fecha primero, por fecha; después por descripción) y, al final, un desempate estable por identificador. Se aplica también a lo que sale de ese listado (calendario, urgentes de Inicio). Agrupación y filtros, sin cambios.
-- No reordena el historial cronológico ni cambia vencimientos, permisos, períodos o Desempeño. Sin arrastrar ni renumerar.
+- **Orden del listado operativo — fecha antes que número** (correctivo pedido por el usuario el 2026-10-26; reemplaza al criterio inicial, que ponía el número antes que la fecha). Los grupos de frecuencia no cambian ni se mezclan (urgentes primero, como siempre). Dentro de cada grupo:
+  - **Diarias y urgentes**: orden de realización ascendente; las sin número, al final.
+  - **Semanales, quincenales, mensuales, bimestrales, anuales y «Una vez»**: primero las que tienen fecha, de la más antigua a la más futura; con la misma fecha, por orden de realización ascendente (las sin número, después de las numeradas); después, todas las sin fecha, por orden ascendente y las sin número al final. La fecha de una recurrente es la **fecha sugerida del período vigente** que calcula el backend (una quincenal sin sugerencia para la quincena en curso cuenta como sin fecha); la de una «Una vez», su **fecha para realizar**.
+  - Empates (misma fecha y mismo número, o ninguno de los dos): por descripción y, al final, un desempate estable por identificador.
+  - Nunca se ordena por estado ni por cumplimiento: completada, pendiente o desactivada (vista administrativa) quedan donde las ubica la regla.
+  - Ejemplo dentro de una misma frecuencia: 15 de enero con orden 2 → 19 de enero con orden 1 → 19 de enero con orden 3 → sin fecha con orden 1.
+- Se aplica al listado operativo y, por lo tanto, a los filtros por persona y frecuencia (filtran sin reordenar) y a lo que sale de ese listado (tareas de un día en el calendario de Configuración; urgentes de Inicio, cuyo criterio no cambia). No hay paginación en este listado. Agrupación y filtros, sin cambios. No requiere migración ni modifica datos guardados.
+- No reordena el historial cronológico ni cambia vencimientos, permisos, períodos, Desempeño, métricas ni reportes. Sin arrastrar ni renumerar.
 
 **Programación sugerida** (solo recurrentes, opcional)
 

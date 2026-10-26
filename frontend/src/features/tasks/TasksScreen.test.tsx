@@ -872,4 +872,66 @@ describe('TasksScreen — orden de realización y fecha sugerida', () => {
     expect(within(items[0]!).queryByText(/Vencida|Para hoy|Programada/)).not.toBeInTheDocument();
     expect(within(items[1]!).queryByText(/Sugerida|Orden/)).not.toBeInTheDocument();
   });
+
+  it('filtrar por persona y frecuencia conserva el orden del backend (fecha antes que número)', async () => {
+    const onceFor = (n: number, label: string, person: typeof PERSON_A, extra = {}) =>
+      makeTask({
+        id: `00000000-0000-4000-8000-0000000000d${n}`,
+        description: `Única sintética ${label}`,
+        frequency: 'ONE_TIME',
+        periodKey: 'ONE_TIME',
+        assignee: { ...person, active: true },
+        ...extra,
+      });
+    const dated = (day: string, executionOrder: number) => ({
+      scheduledDate: `2027-01-${day}`,
+      scheduleStatus: 'SCHEDULED' as const,
+      executionOrder,
+    });
+    // Orden en que lo entrega el backend (el caso obligatorio del criterio).
+    await renderLoaded([
+      onceFor(1, '15/01 orden 2', PERSON_A, dated('15', 2)),
+      onceFor(2, '19/01 orden 1', PERSON_B, dated('19', 1)),
+      onceFor(3, '19/01 orden 3', PERSON_A, dated('19', 3)),
+      onceFor(4, 'sin fecha orden 1', PERSON_B, { executionOrder: 1 }),
+      makeTask({
+        id: '00000000-0000-4000-8000-0000000000d5',
+        description: 'Diaria sintética orden 1',
+        assignee: { ...PERSON_B, active: true },
+        executionOrder: 1,
+      }),
+    ]);
+    const user = userEvent.setup();
+    const shown = () =>
+      within(screen.getByRole('list', { name: 'Tareas del período' }))
+        .getAllByRole('listitem')
+        .map((item) => item.querySelector('.task-item__description')?.textContent);
+    const frequencyChip = (name: string) =>
+      within(screen.getByRole('group', { name: 'Filtrar por frecuencia' })).getByRole('button', {
+        name,
+      });
+
+    expect(shown()).toEqual([
+      'Única sintética 15/01 orden 2',
+      'Única sintética 19/01 orden 1',
+      'Única sintética 19/01 orden 3',
+      'Única sintética sin fecha orden 1',
+      'Diaria sintética orden 1',
+    ]);
+    await user.click(frequencyChip('Una vez'));
+    expect(shown()).toEqual([
+      'Única sintética 15/01 orden 2',
+      'Única sintética 19/01 orden 1',
+      'Única sintética 19/01 orden 3',
+      'Única sintética sin fecha orden 1',
+    ]);
+    await user.click(screen.getByRole('button', { name: /persona sintética b/i }));
+    expect(shown()).toEqual(['Única sintética 19/01 orden 1', 'Única sintética sin fecha orden 1']);
+    await user.click(frequencyChip('Todas'));
+    expect(shown()).toEqual([
+      'Única sintética 19/01 orden 1',
+      'Única sintética sin fecha orden 1',
+      'Diaria sintética orden 1',
+    ]);
+  });
 });
