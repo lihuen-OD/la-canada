@@ -95,6 +95,7 @@ describe('GET /api/v1/dashboard contra demo', () => {
         'generatedAt',
         'kpis',
         'latestNews',
+        'petDue',
         'stockAlerts',
         'performance',
         'timeZone',
@@ -119,9 +120,10 @@ describe('GET /api/v1/dashboard contra demo', () => {
     // relación cuando el padre viene vacío: auth 1 + tareas 3–5 + stock 1 +
     // huevos 1 + eventos 1 + novedades 1–2 + cumpleaños 5–7 (Etapa 5F: +1,
     // perfil personal) + desempeño canónico 5 (personas, planificación +
-    // tarea, ejecuciones, urgentes) = 18–23. El techo es fijo: nada depende
-    // de cuántas filas haya (sin N+1).
-    expect(statements.length).toBeGreaterThanOrEqual(18);
-    expect(statements.length).toBeLessThanOrEqual(23);
+    // tarea, ejecuciones, urgentes) + 🐾 atenciones de mascotas 2–3 (totales
+    // por fecha, primeras 5 y su mascota) = 20–26. El techo es fijo: nada
+    // depende de cuántas filas haya (sin N+1).
+    expect(statements.length).toBeGreaterThanOrEqual(20);
+    expect(statements.length).toBeLessThanOrEqual(26);
   });
 });

@@ -96,6 +96,11 @@ export function compareLocalDates(a: LocalDate, b: LocalDate): number {
   return formatLocalDate(a).localeCompare(formatLocalDate(b));
 }
 
+/** Cantidad de días del mes (`month` de 1 a 12), con febrero bisiesto. */
+export function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
 /** Lunes de la semana (lunes a domingo) que contiene `date`. */
 export function startOfWeek(date: LocalDate): LocalDate {
   const weekday = new Date(Date.UTC(date.year, date.month - 1, date.day)).getUTCDay(); // 0 = domingo
@@ -151,6 +156,42 @@ export function semiMonthlyPeriodKey(date: LocalDate): string {
   return `${pad(date.year, 4)}-${pad(date.month)}-Q${half}`;
 }
 
+/**
+ * Bimestres: seis por año calendario — ene–feb (1), mar–abr (2), may–jun (3),
+ * jul–ago (4), sep–oct (5) y nov–dic (6). No es "cada dos meses" desde la
+ * creación ni desde la última ejecución.
+ */
+export function bimesterOf(date: LocalDate): number {
+  return Math.ceil(date.month / 2);
+}
+
+/** El 1 de un mes impar (ene, mar, may, jul, sep, nov) empieza un bimestre. */
+export function isBimesterStart(date: LocalDate): boolean {
+  return date.day === 1 && date.month % 2 === 1;
+}
+
+/** Primer día del bimestre siguiente (el 1 de enero del año siguiente después de nov–dic). */
+export function nextBimesterStart(date: LocalDate): LocalDate {
+  const bimester = bimesterOf(date);
+  return bimester === 6
+    ? { year: date.year + 1, month: 1, day: 1 }
+    : { year: date.year, month: bimester * 2 + 1, day: 1 };
+}
+
+/**
+ * `YYYY-B1` (ene–feb) … `YYYY-B6` (nov–dic). Como la quincenal, NO es una
+ * fecha: una ejecución de otra frecuencia nunca coincide con la clave
+ * bimestral ni la "cumple" si la tarea cambia de frecuencia.
+ */
+export function bimonthlyPeriodKey(date: LocalDate): string {
+  return `${pad(date.year, 4)}-B${bimesterOf(date)}`;
+}
+
+/** Año calendario: del 1 de enero al 31 de diciembre. Clave `YYYY-A` (tampoco es una fecha). */
+export function annualPeriodKey(date: LocalDate): string {
+  return `${pad(date.year, 4)}-A`;
+}
+
 /** Claves fijas de las frecuencias no recurrentes (una sola ejecución vigente). */
 export const URGENT_PERIOD_KEY = 'URGENT';
 export const ONE_TIME_PERIOD_KEY = 'ONE_TIME';
@@ -162,6 +203,8 @@ export const ONE_TIME_PERIOD_KEY = 'ONE_TIME';
  *  - WEEKLY:       lunes de la semana local     `YYYY-MM-DD`
  *  - SEMI_MONTHLY: quincena del mes local       `YYYY-MM-Q1` / `YYYY-MM-Q2`
  *  - MONTHLY:      primer día del mes local     `YYYY-MM-01`
+ *  - BIMONTHLY:    bimestre del año local       `YYYY-B1` … `YYYY-B6`
+ *  - ANNUAL:       año local                    `YYYY-A`
  *  - URGENT:       `URGENT` (vigente hasta que se revierta)
  *  - ONE_TIME:     `ONE_TIME` (vigente hasta que se revierta)
  */
@@ -180,6 +223,10 @@ export function computePeriodKey(
       return semiMonthlyPeriodKey(today);
     case 'MONTHLY':
       return formatLocalDate({ ...today, day: 1 });
+    case 'BIMONTHLY':
+      return bimonthlyPeriodKey(today);
+    case 'ANNUAL':
+      return annualPeriodKey(today);
     case 'URGENT':
       return URGENT_PERIOD_KEY;
     case 'ONE_TIME':

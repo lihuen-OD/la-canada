@@ -1,4 +1,19 @@
 import type { EventListItem, PersonRef } from './moreTypes';
+import type { MedicalRecordType } from './petTypes';
+
+/**
+ * 🐾 Atenciones de mascotas: pendientes abiertos de mascotas activas vencidos,
+ * de hoy o próximos (≤ 30 días), con la regla y el orden de 📅 Vencimientos.
+ * `counts` cuenta TODOS; `items` trae a lo sumo 5, ya ordenados.
+ */
+export interface DashboardPetDue {
+  counts: { overdue: number; dueToday: number; upcoming: number };
+  items: {
+    record: { id: string; type: MedicalRecordType; description: string | null };
+    pet: { id: string; name: string };
+    nextDue: { date: string; status: 'OVERDUE' | 'DUE_TODAY' | 'UPCOMING'; daysUntil: number };
+  }[];
+}
 
 export interface DashboardResponse {
   generatedAt: string;
@@ -43,5 +58,7 @@ export interface DashboardResponse {
     suggestedPurchaseQuantity: string | null;
   }[];
   upcomingEvents: EventListItem[];
+  /** `null`: el backend no pudo calcular este resumen (el resto de Inicio llega igual). */
+  petDue: DashboardPetDue | null;
   latestNews: { id: string; text: string; createdAt: string; employee: PersonRef }[];
 }

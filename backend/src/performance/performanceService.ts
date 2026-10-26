@@ -11,14 +11,18 @@ import {
   SECOND_HALF_FIRST_DAY,
   URGENT_PERIOD_KEY,
   addDays,
+  annualPeriodKey,
+  bimonthlyPeriodKey,
   compareLocalDates,
   formatLocalDate,
+  isBimesterStart,
   parseLocalDate,
   semiMonthlyPeriodKey,
   startOfLocalDay,
   toLocalDate,
   type LocalDate,
 } from '../lib/businessTime';
+import { scheduledDateText } from '../tasks/taskSchedule';
 import type { TaskActor } from '../tasks/tasksService';
 import {
   buildRecurringOccurrences,
@@ -43,7 +47,7 @@ export function defaultPerformanceRange(now = new Date()) {
   };
 }
 
-function rangeOrThrow(fromText: string, toText: string, now: Date) {
+export function rangeOrThrow(fromText: string, toText: string, now: Date) {
   const from = parseLocalDate(fromText);
   const requestedTo = parseLocalDate(toText);
   if (!from || !requestedTo || compareLocalDates(from, requestedTo) > 0) {
@@ -65,14 +69,18 @@ function rangeOrThrow(fromText: string, toText: string, now: Date) {
 }
 
 /**
- * Claves `YYYY-MM-Q1/Q2` de las quincenas que empiezan (día 1 o 16) dentro
- * del rango — las mismas que genera `buildRecurringOccurrences`. No son
- * fechas, así que no entran en el filtro `gte/lte` de las claves diarias.
+ * Claves de las quincenas (`YYYY-MM-Q1/Q2`, día 1 o 16), bimestres
+ * (`YYYY-B1…B6`, el 1 de un mes impar) y años (`YYYY-A`, el 1/1) que
+ * EMPIEZAN dentro del rango — las mismas que genera
+ * `buildRecurringOccurrences`. No son fechas, así que no entran en el filtro
+ * `gte/lte` de las claves diarias.
  */
-function semiMonthlyKeysInRange(from: LocalDate, to: LocalDate): string[] {
+export function calendarKeysInRange(from: LocalDate, to: LocalDate): string[] {
   const keys: string[] = [];
   for (let day = from; compareLocalDates(day, to) <= 0; day = addDays(day, 1)) {
     if (day.day === 1 || day.day === SECOND_HALF_FIRST_DAY) keys.push(semiMonthlyPeriodKey(day));
+    if (isBimesterStart(day)) keys.push(bimonthlyPeriodKey(day));
+    if (day.day === 1 && day.month === 1) keys.push(annualPeriodKey(day));
   }
   return keys;
 }
@@ -119,6 +127,7 @@ export async function getPerformance(
         taskId: true,
         employeeId: true,
         frequency: true,
+        scheduledDate: true,
         validFrom: true,
         validTo: true,
         task: { select: { description: true } },
@@ -126,7 +135,7 @@ export async function getPerformance(
       orderBy: { validFrom: 'asc' },
     }),
     // Una sola sentencia: las ejecuciones vigentes de los períodos del rango
-    // (fechas y quincenas) y, para URGENT/ONE_TIME, la finalización vigente
+    // (fechas, quincenas, bimestres y años) y, para URGENT/ONE_TIME, la finalización vigente
     // (a lo sumo una por tarea) de las tareas planificadas en el rango — hace
     // falta aunque sea anterior al rango, para saber que ya no estaba pendiente.
     prisma.taskExecution.findMany({
@@ -142,7 +151,7 @@ export async function getPerformance(
               },
             },
           },
-          { periodKey: { in: semiMonthlyKeysInRange(from, to) } },
+          { periodKey: { in: calendarKeysInRange(from, to) } },
         ],
       },
       select: {
@@ -164,7 +173,18 @@ export async function getPerformance(
     }),
   ]);
 
-  const planRows = plans.map((plan) => ({ ...plan, description: plan.task.description }));
+  // Una «Una vez» con fecha recién es exigible desde el primer instante de ese
+  // día de negocio, según la versión de planificación de cada momento.
+  const planRows = plans.map(({ scheduledDate, ...plan }) => {
+    const text = scheduledDateText(scheduledDate ?? null);
+    const due = text ? parseLocalDate(text) : null;
+    return {
+      ...plan,
+      description: plan.task.description,
+      scheduledDate: text,
+      dueFrom: due ? startOfLocalDay(due, timeZone) : null,
+    };
+  });
   const completedExecutions = executions.filter(
     (
       execution,
@@ -239,9 +259,14 @@ export async function getPerformance(
     });
 
   return {
+    // `today` y `generatedAt`: fecha de negocio y hora del servidor, para que
+    // el reloj del día del frontend no dé por empezado un día que el backend
+    // todavía no alcanzó (docs/ARCHITECTURE.md §39.1).
+    generatedAt: now.toISOString(),
     range: {
       from: formatLocalDate(from),
       to: formatLocalDate(to),
+      today: formatLocalDate(today),
       timeZone,
       includesCurrentDay: compareLocalDates(to, today) === 0,
       maxDays: MAX_RANGE_DAYS,

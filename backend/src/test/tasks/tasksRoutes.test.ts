@@ -11,6 +11,7 @@ describe('/api/v1/tasks — requiere autenticación', () => {
     ['get', '/api/v1/tasks'],
     ['get', '/api/v1/tasks/employees'],
     ['get', '/api/v1/tasks/history'],
+    ['get', '/api/v1/tasks/calendar?month=2026-10'],
     ['post', '/api/v1/tasks'],
     ['patch', `/api/v1/tasks/${TASK_ID}`],
     ['patch', `/api/v1/tasks/${TASK_ID}/status`],

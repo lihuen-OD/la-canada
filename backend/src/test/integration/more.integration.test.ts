@@ -8,6 +8,7 @@ import { accessTokenSecret } from '../../auth/config';
 import { generateRefreshToken, hashRefreshToken, signAccessToken } from '../../auth/tokens';
 import { config } from '../../config';
 import { addDays, formatLocalDate, toLocalDate } from '../../lib/businessTime';
+import { setDriveBackupConfigForTests } from '../../driveBackup/config';
 import { setObjectStorageForTests, type ObjectStorageClient } from '../../lib/objectStorage';
 import { setWeatherFetcherForTests } from '../../more/weatherService';
 
@@ -144,6 +145,9 @@ beforeAll(async () => {
   admin = await createActor('ADMIN', 'admin');
   employee = await createActor('EMPLOYEE', 'emp', employeeId);
   setObjectStorageForTests(memoryStorage);
+  // Las fotos viven en memoria: nunca se encolan copias en Drive (eso lo
+  // prueba driveBackup.integration), aunque el `.env` local la tenga activa.
+  setDriveBackupConfigForTests(null);
   (pg.Client.prototype as unknown as { query: QueryFn }).query = function (
     this: unknown,
     ...args: unknown[]
@@ -160,6 +164,7 @@ beforeAll(async () => {
 afterAll(async () => {
   (pg.Client.prototype as unknown as { query: QueryFn }).query = originalQuery;
   setObjectStorageForTests(undefined);
+  setDriveBackupConfigForTests(undefined);
   setWeatherFetcherForTests(null);
   const created = await prisma.employee.findMany({
     where: { OR: [{ code: { startsWith: RUN } }, { id: { in: employeeIds } }] },
@@ -196,6 +201,8 @@ afterAll(async () => {
       ],
     },
   });
+  // Defensa: un trabajo de copia de estas fotos (FK RESTRICT) impediría borrarlas.
+  await prisma.driveBackupJob.deleteMany({ where: { fileAssetId: { in: fileIds } } });
   await prisma.fileAsset.deleteMany({ where: { id: { in: fileIds } } });
   await prisma.newsReport.deleteMany({ where: { id: { in: newsIds } } });
   await prisma.event.deleteMany({ where: { id: { in: eventIds } } });

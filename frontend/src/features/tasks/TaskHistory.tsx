@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, type QueryKey } from '@tanstack/react-query';
 import { queryKeys } from '../../api/queryKeys';
 import { fetchTaskHistory } from '../../api/tasksApi';
 import { useSessionScope } from '../../api/useSessionScope';
@@ -9,8 +9,15 @@ import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
 import { isSessionExpired } from './dialogErrors';
-import { formatDate } from '../../utils/dateFormat';
-import { FREQUENCY_LABEL, FREQUENCY_TONE, formatCompletedAt, formatLocalDay } from './taskLabels';
+import { formatDate, formatDateWithWeekday } from '../../utils/dateFormat';
+import {
+  FREQUENCY_LABEL,
+  FREQUENCY_TONE,
+  TASK_NOUN,
+  formatCompletedAt,
+  formatLocalDay,
+  type ItemNoun,
+} from './taskLabels';
 
 const WEEKS_TO_OFFER = 8; // mismas "últimas 8 semanas" que el prototipo
 
@@ -27,6 +34,20 @@ function previousMondays(currentWeekStart: string, count: number): string[] {
 type LoadState =
   { status: 'loading' } | { status: 'error' } | { status: 'loaded'; data: TaskHistoryResponse };
 
+/**
+ * De dónde sale el historial: ✅ Tareas por defecto; 🥬 Huerta pasa su propio
+ * endpoint y clave de caché (adaptados a esta misma forma de presentación).
+ */
+export interface HistorySource {
+  queryKey: (userId: string, week: string | null, personId: string | null) => QueryKey;
+  fetch: (params: { week?: string; personId?: string }) => Promise<TaskHistoryResponse>;
+}
+
+const TASKS_HISTORY: HistorySource = {
+  queryKey: queryKeys.tasks.history,
+  fetch: ({ week, personId }) => fetchTaskHistory({ week, employeeId: personId }),
+};
+
 interface TaskHistoryProps {
   currentWeekStart: string;
   today: string;
@@ -35,6 +56,9 @@ interface TaskHistoryProps {
   employeeName: string | null;
   onRevert: (task: HistoryTask, execution: TaskExecution) => void;
   onSessionExpired: () => void;
+  source?: HistorySource;
+  /** «tarea» (por defecto) o «actividad» (🥬 Huerta): solo textos. */
+  noun?: ItemNoun;
 }
 
 interface CompletionLine {
@@ -55,16 +79,22 @@ export function TaskHistory({
   employeeName,
   onRevert,
   onSessionExpired,
+  source = TASKS_HISTORY,
+  noun = TASK_NOUN,
 }: TaskHistoryProps) {
   const selectId = useId();
   const weeks = previousMondays(currentWeekStart, WEEKS_TO_OFFER);
-  const [week, setWeek] = useState(currentWeekStart);
+  // `null` = «Esta semana»: sigue a la semana vigente aunque cambie con la
+  // pantalla abierta (el lunes a medianoche). Una semana anterior elegida se
+  // conserva mientras siga entre las ofrecidas.
+  const [pastWeek, setPastWeek] = useState<string | null>(null);
+  const week = pastWeek && weeks.slice(1).includes(pastWeek) ? pastWeek : currentWeekStart;
   const { userId, enabled } = useSessionScope();
   const weekParam = week === currentWeekStart ? null : week;
   const query = useQuery({
-    queryKey: queryKeys.tasks.history(userId, weekParam, employeeId),
+    queryKey: source.queryKey(userId, weekParam, employeeId),
     queryFn: () =>
-      fetchTaskHistory({ week: weekParam ?? undefined, employeeId: employeeId ?? undefined }),
+      source.fetch({ week: weekParam ?? undefined, personId: employeeId ?? undefined }),
     enabled,
     placeholderData: keepPreviousData,
   });
@@ -105,8 +135,8 @@ export function TaskHistory({
     content =
       recurring.length === 0 && lines.length === 0 ? (
         <EmptyState
-          title="Sin tareas registradas esta semana."
-          description="Cuando se completen tareas van a aparecer acá."
+          title={`Sin ${noun.plural} registradas esta semana.`}
+          description={`Cuando se completen ${noun.plural} van a aparecer acá.`}
         />
       ) : (
         <div className="history">
@@ -178,6 +208,13 @@ export function TaskHistory({
                             {FREQUENCY_LABEL[task.frequency]}
                           </Badge>
                           {!task.active ? <Badge tone="neutral">Desactivada</Badge> : null}
+                          {task.scheduledDate ? (
+                            <span>
+                              <span className="visually-hidden">Fecha para realizar: </span>
+                              <span aria-hidden="true">📅 </span>
+                              {formatDateWithWeekday(task.scheduledDate)}
+                            </span>
+                          ) : null}
                           <span>
                             {differs
                               ? `Asignada a ${execution.assignedEmployee.displayName} · `
@@ -231,7 +268,9 @@ export function TaskHistory({
           id={selectId}
           className="field__input"
           value={week}
-          onChange={(event) => setWeek(event.target.value)}
+          onChange={(event) =>
+            setPastWeek(event.target.value === currentWeekStart ? null : event.target.value)
+          }
         >
           {weeks.map((monday, index) => (
             <option key={monday} value={monday}>

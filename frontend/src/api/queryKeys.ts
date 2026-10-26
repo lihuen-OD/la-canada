@@ -26,9 +26,16 @@ export const queryKeys = {
     all: (userId: string) => [...scope(userId), 'tasks'] as const,
     list: (userId: string, status: 'active' | 'all') =>
       [...scope(userId), 'tasks', 'list', status] as const,
+    /** Todos los listados (activas / todas): dependen del día de negocio. */
+    listAll: (userId: string) => [...scope(userId), 'tasks', 'list'] as const,
     employees: (userId: string) => [...scope(userId), 'tasks', 'employees'] as const,
     history: (userId: string, week: string | null, employeeId: string | null) =>
       [...scope(userId), 'tasks', 'history', week ?? 'current', employeeId ?? 'all'] as const,
+    historyAll: (userId: string) => [...scope(userId), 'tasks', 'history'] as const,
+    /** Fechas sugeridas de un mes (`YYYY-MM`) para el calendario de Configuración. */
+    calendar: (userId: string, month: string) =>
+      [...scope(userId), 'tasks', 'calendar', month] as const,
+    calendarAll: (userId: string) => [...scope(userId), 'tasks', 'calendar'] as const,
   },
   performance: {
     all: (userId: string) => [...scope(userId), 'performance'] as const,
@@ -36,6 +43,41 @@ export const queryKeys = {
       [...scope(userId), 'performance', 'summary', from, to] as const,
     employee: (userId: string, employeeId: string, from: string, to: string) =>
       [...scope(userId), 'performance', 'employee', employeeId, from, to] as const,
+  },
+  /**
+   * 🥬 Huerta: claves PROPIAS (nunca `tasks` ni `performance`), así que sus
+   * invalidaciones quedan acotadas al módulo y nada de Tareas o Inicio las toca.
+   */
+  kitchenGarden: {
+    all: (userId: string) => [...scope(userId), 'kitchenGarden'] as const,
+    participants: (userId: string) => [...scope(userId), 'kitchenGarden', 'participants'] as const,
+    candidates: (userId: string) => [...scope(userId), 'kitchenGarden', 'candidates'] as const,
+    activities: (userId: string, status: 'active' | 'all') =>
+      [...scope(userId), 'kitchenGarden', 'activities', status] as const,
+    /** Listados de actividades: dependen del día de negocio. */
+    activitiesAll: (userId: string) => [...scope(userId), 'kitchenGarden', 'activities'] as const,
+    history: (userId: string, week: string | null, participantId: string | null) =>
+      [
+        ...scope(userId),
+        'kitchenGarden',
+        'history',
+        week ?? 'current',
+        participantId ?? 'all',
+      ] as const,
+    historyAll: (userId: string) => [...scope(userId), 'kitchenGarden', 'history'] as const,
+    performanceAll: (userId: string) => [...scope(userId), 'kitchenGarden', 'performance'] as const,
+    performanceSummary: (userId: string, from: string, to: string) =>
+      [...scope(userId), 'kitchenGarden', 'performance', 'summary', from, to] as const,
+    performanceParticipant: (userId: string, participantId: string, from: string, to: string) =>
+      [
+        ...scope(userId),
+        'kitchenGarden',
+        'performance',
+        'participant',
+        participantId,
+        from,
+        to,
+      ] as const,
   },
   stock: {
     all: (userId: string) => [...scope(userId), 'stock'] as const,

@@ -52,6 +52,7 @@ Función `getPeriodo(frec)` (línea 1115) — determina a qué "instancia" de la
 - **Semanal** → el período es la fecha del **lunes** de la semana actual (semana definida lunes a domingo). Se resetea cada lunes.
 - **Mensual** → el período es el primer día del mes actual (`YYYY-MM-01`). Se resetea el día 1 de cada mes.
 - **Quincenal** (nueva, no existía en el prototipo; ver "Tareas quincenales" más abajo) → dos períodos por mes calendario: del 1 al 15 y del 16 al último día, inclusive (`YYYY-MM-Q1` / `YYYY-MM-Q2`). Se resetea el 16 y el 1 de cada mes. No es "cada 15 días" desde la creación ni desde la última ejecución.
+- **Bimestral** y **Anual** (nuevas; ver "Fecha para realizar y tareas bimestrales/anuales" más abajo) → bimestres de calendario ene–feb, mar–abr, may–jun, jul–ago, sep–oct, nov–dic (`YYYY-B1` … `YYYY-B6`) y año calendario del 1/1 al 31/12 (`YYYY-A`). No son "dos meses / un año desde la última ejecución".
 - **Urgente** → no tiene período variable; usa el string fijo `'urgente'`. Una vez completada, permanece completada indefinidamente (no hay lógica de reseteo visible) salvo que se destilde manualmente o se elimine la tarea.
 - **Única** → string fijo `'unica'`; comportamiento de completado permanente igual que urgente.
 
@@ -217,7 +218,7 @@ Ver sección 9 — está integrada al módulo Gallinero, no es un módulo separa
 - **Estados** (backend, fechas de calendario de `BUSINESS_TIME_ZONE`): **Vigente** (> 30 días), **Próxima** (1–30), **Vence hoy**, **Vencida** (ya pasó) y **Cumplida** (otra atención vigente la registró). Textos: «En 12 días», «Vence hoy», «Hace 3 días».
 - **Cumplimiento**: «Registrar aplicación» (vacuna, desparasitación) o «Registrar control» (chequeo, evento) abre el formulario de siempre con la mascota y el tipo de ese pendiente; la persona confirma la fecha real y puede programar la siguiente. En una transacción: nueva atención + vínculo explícito con el pendiente elegido (`fulfillsRecordId`) + auditoría `pet.record_due_fulfilled`. **Solo se cumple el pendiente elegido**: nunca por coincidir tipo, texto o fecha, y una mascota puede tener varias vacunas o tratamientos distintos. Dos solicitudes no pueden cumplir el mismo pendiente (índice único parcial → 409 «Esta atención programada ya fue registrada»); `Idempotency-Key` evita duplicados por doble envío.
 - **Anulaciones y permisos**: sin cambios (registrar = todos; anular y corregir fechas = `ADMIN`; el autor sale de la sesión). Un registro anulado no genera pendientes; si se anula la atención que cumplió un pendiente, ese pendiente vuelve a estar abierto (si el original sigue vigente). Una mascota inactiva conserva su historial, no admite aplicaciones nuevas y no aparece en Vencimientos.
-- **📅 Vencimientos** (pestaña de Mascotas): atenciones programadas de mascotas activas por fecha ascendente (primero las vencidas más antiguas); filtros por mascota, tipo y estado; las cumplidas solo con su filtro; paginación en el backend. El listado de mascotas muestra un indicador discreto de vencidas, de hoy y próximas. Sin alertas en Inicio ni notificaciones.
+- **📅 Vencimientos** (pestaña de Mascotas): atenciones programadas de mascotas activas por fecha ascendente (primero las vencidas más antiguas); filtros por mascota, tipo y estado; las cumplidas solo con su filtro; paginación en el backend. El listado de mascotas muestra un indicador discreto de vencidas, de hoy y próximas. Sin notificaciones. Desde el 2026-10-26, Inicio muestra un resumen de solo lectura (ver «🐾 Atenciones de mascotas en Inicio»).
 - **Foto**: el prototipo pedía una URL externa; ahora es un archivo (JPG/PNG/WebP, tipo real por bytes, máx. 5 MB) en Neon Object Storage privado vía el backend (`FileAsset`). Reemplazar o quitar = baja lógica y luego borrado físico. Sin `OBJECT_STORAGE_*` configurado, las fotos se deshabilitan con un aviso claro y el resto funciona.
 - **Cumpleaños**: el prototipo creaba un evento "🎂 Cumpleaños de <mascota>" al guardar la fecha de nacimiento; desde la Etapa 5X se calcula en Eventos desde `Animal.birthDate` (§14), sin filas.
 
@@ -313,7 +314,7 @@ Repetido aquí por completitud del pedido original — el detalle completo y el 
 ## Actualización Etapa 5D — Regla definitiva de Desempeño (reemplaza lo anterior donde difiera)
 
 - **Cumplimiento personal** = obligaciones propias realizadas por la misma persona / obligaciones asignadas. Si Coke completa una tarea asignada a Juan, la ejecución conserva `assignedEmployeeId = Juan` y `completedByEmployeeId = Coke`: la tarea queda terminada, sigue en el denominador de Juan, no suma a su numerador y no altera el porcentaje de Coke; se informa como **cobertura recibida** (Juan) y **cobertura realizada** (Coke). Ejemplo: 10 asignadas, 8 propias, 1 cubierta, 1 pendiente → 80%.
-- **Los cinco tipos cuentan** (seis desde las quincenales: `SEMI_MONTHLY` cuenta con el mismo criterio que `MONTHLY`, una obligación por quincena planificada). DAILY/WEEKLY/MONTHLY: una obligación por día/semana/mes planificado según `TaskPlanningInterval` (altas, bajas, reasignaciones y cambios de frecuencia), nunca fuera de lo planificado. URGENT/ONE_TIME: **una sola** obligación por tarea, si su ventana (desde la planificación hasta la finalización vigente, o hasta el cierre de la planificación si sigue pendiente) se superpone con el rango: completada antes del rango o creada después → no entra; completada durante el rango → entra; completada después del fin del rango → entra como pendiente.
+- **Los cinco tipos cuentan** (seis desde las quincenales: `SEMI_MONTHLY` cuenta con el mismo criterio que `MONTHLY`, una obligación por quincena planificada; ocho desde `BIMONTHLY`/`ANNUAL`, con el mismo criterio; y una `ONE_TIME` con fecha para realizar solo cuenta desde esa fecha — ver "Fecha para realizar y tareas bimestrales/anuales"). DAILY/WEEKLY/MONTHLY: una obligación por día/semana/mes planificado según `TaskPlanningInterval` (altas, bajas, reasignaciones y cambios de frecuencia), nunca fuera de lo planificado. URGENT/ONE_TIME: **una sola** obligación por tarea, si su ventana (desde la planificación hasta la finalización vigente, o hasta el cierre de la planificación si sigue pendiente) se superpone con el rango: completada antes del rango o creada después → no entra; completada durante el rango → entra; completada después del fin del rango → entra como pendiente.
 - Responsable: siempre el snapshot `assignedEmployeeId` de la ejecución; si está pendiente, el de la planificación vigente al cierre. Nunca se deduce por nombres ni por el responsable actual, y ninguna ejecución histórica se modifica.
 - Métricas del DTO: `assigned`, `completedPersonally`, `percentage`, `pending`, `coverageReceived`, `coverageGiven` y `operationalCompleted` (trabajo terminado por la persona, propio + coberturas, fuera del porcentaje). Reversiones no suman ni cuentan como cobertura. Sin puntos, premios ni ponderaciones.
 - **Simplificación (5D.2)**: sin racha (se retiró del cálculo, del DTO y de la pantalla). Etiquetas visibles: **Sin completar** (asignadas que nadie terminó), **Le cubrieron** (propias hechas por otra persona) y **Cubrió a otros** (ajenas hechas por la persona); el porcentaje sigue siendo realizadas personalmente / asignadas (Cami: 2 asignadas, 1 propia, 1 cubierta → 50%, Sin completar 0, Le cubrieron 1). Rangos públicos: 7, 14 y 30 días (predeterminado e Inicio: 7). Con 0 obligaciones asignadas no hay denominador: se muestra «Sin tareas en el período» (nunca «0%» ni «Sin datos») con barra neutra; con asignadas y ninguna realizada sí es «0%».
@@ -395,3 +396,113 @@ Toda eliminación: `DELETE` explícito, `204`/`403`/`404`/`409 *_IN_USE`, transa
 - **Desempeño e Inicio**: cuentan como las mensuales — una obligación por cada quincena planificada que **empieza** (día 1 o 16) dentro del rango (7/14/30 días), con el responsable vigente al cierre o el snapshot de la ejecución. Inicio usa exactamente la misma función.
 - **Historial semanal**: igual que las mensuales, aparecen en «Finalizaciones de la semana» por fecha de finalización y **no** suman slots al conteo realizadas/esperadas (ese conteo solo contempla diarias y semanales: una quincena no entra en una grilla de lunes a domingo).
 - **Calendario de Configuración** (indicador aproximado, §5): marca las quincenales el primer día de cada quincena (1 y 16), como marca las mensuales el día 1.
+
+## Fecha para realizar y tareas bimestrales/anuales (2026-10-23)
+
+Función nueva pedida explícitamente por el usuario. El prototipo no tenía fecha en las «Una vez» ni estas frecuencias: no hay datos que migrar ni tareas existentes que convertir. Permisos sin cambios: crear, editar, reprogramar y quitar la fecha = solo `ADMIN`; completar y revertir según §4/§5.
+
+**«Fecha para realizar» (solo `ONE_TIME`, opcional)**
+
+- Fecha de calendario sin hora en `BUSINESS_TIME_ZONE`; identifica un día concreto (se muestra con el día de la semana: «Lunes 26/10/2026»). Puede ser pasada, para registrar una pendiente atrasada (años 2000–2100).
+- Estado de una tarea con fecha y sin completar, calculado por el backend: **Programada** (fecha futura), **Para hoy** (es hoy) y **Vencida** (ya pasó). Sin fecha: la presentación de siempre.
+- Se puede completar **antes** de la fecha. Completada, conserva auditoría e historial y sale del listado operativo como cualquier «Una vez»; revertida, vuelve a pendiente con el estado que corresponda.
+- La clave sigue siendo `ONE_TIME`: cambiar la fecha nunca crea otra obligación ni permite completarla otra vez si tiene una ejecución vigente.
+- Editar: omitir la fecha la deja igual; `null` la quita; una fecha para otra frecuencia se rechaza (400). Pasar de «Una vez» a otra frecuencia quita la fecha en la misma transacción; queda como antecedente en la planificación cerrada y en la auditoría (valor anterior y nuevo). Cada reprogramación es una versión nueva de la planificación.
+- Tareas: el filtro «Una vez» muestra todas (también las programadas para más adelante y las sin fecha) y suma los accesos «Hoy» y «Vencidas», combinables con la persona. La burbuja de pendientes de cada persona no cuenta las programadas para más adelante. Configuración → Calendario marca la tarea en su fecha.
+
+**Bimestral y Anual**
+
+- Bimestres de calendario (ene–feb, mar–abr, may–jun, jul–ago, sep–oct, nov–dic) y año calendario (1/1–31/12), en `BUSINESS_TIME_ZONE`, sin fecha inicial. Una ejecución vigente por tarea y período (mismo índice único parcial), con claves propias (`YYYY-B1…B6`, `YYYY-A`): una ejecución de otra frecuencia nunca "cumple" el bimestre ni el año al cambiar la frecuencia, ni al revés.
+- Creada a mitad de bimestre o de año: ese período ya corre (pendiente), igual que una mensual creada a mitad de mes. Un `EMPLOYEE` deshace lo propio solo dentro del período vigente; un `ADMIN` corrige con motivo.
+- Ayudas del formulario: «Una vez por bimestre calendario: ene–feb, mar–abr…» y «Una vez por año calendario». Calendario de Configuración: el 1 de cada bimestre y el 1 de enero.
+
+**Inicio y Desempeño** (una sola función, `getPerformance`; el frontend no calcula nada)
+
+- Bimestral y Anual: el criterio de las mensuales — una obligación por cada período planificado que **empieza** (1 de ene/mar/may/jul/sep/nov; 1/1) dentro del rango (7/14/30 días), con el responsable vigente al cierre o el snapshot de la ejecución.
+- «Una vez» con fecha: sigue siendo **una** obligación por tarea, pero solo cuenta como pendiente donde ya era exigible según la versión de planificación de cada momento: programada para después → no entra; para hoy o vencida → entra; completada (antes, el día o después de la fecha) → entra en el rango de su finalización. Reprogramar no reescribe lo esperado antes: un rango en que estuvo vencida la sigue contando, con el responsable de entonces. Sin fecha: exactamente la regla anterior.
+- KPI operativo de Inicio («Tareas completadas»): no cuenta las «Una vez» programadas para después de hoy.
+- Historial semanal: bimestrales, anuales y «Una vez» en «Finalizaciones de la semana», fuera del conteo realizadas/esperadas (solo diarias y semanales).
+
+**Ejemplo con resultado concreto** (rango de Inicio 16–22/10/2026, visto el jueves 22): Juan tiene una «Una vez» para el 30/10 (no cuenta), una para hoy y una vencida el 12/10 (pendientes), una que vencía el 30/10 y completó el 20/10 (propia), una que vencía el 14/10 y el 20/10 se reprogramó al 05/11 y se reasignó a Coke (pendiente de Juan: estuvo vencida del 16 al 20) y una del 18/10 que hizo Coke (cubierta) → 5 asignadas, 1 realizada personalmente, 3 sin completar, 1 cobertura recibida: **20%**. Coke: 1 cobertura realizada. Una semana después (23–29/10) la reprogramada no cuenta para nadie: recién vence el 05/11.
+
+**Mascotas, sin cambios**: vacunas y desparasitaciones siguen con su «Fecha de próxima aplicación o control» y 📅 Vencimientos. Completar una tarea no crea registros clínicos, no hay recurrencias veterinarias automáticas ni vínculos entre Tareas y Mascotas.
+
+## Orden de realización y programación sugerida (2026-10-24)
+
+Función nueva pedida explícitamente por el usuario. Permisos sin cambios: cargar, editar o quitar orden y sugerencia = solo `ADMIN` (como el resto de la edición de tareas). Las tareas existentes quedan sin orden ni sugerencia: no se completa nada automáticamente.
+
+**Orden de realización** (todas las frecuencias, opcional)
+
+- Entero de 1 a 9999; se admiten repetidos; vacío = sin orden (nunca 0). Ayuda: «Los números menores aparecen primero. Es opcional».
+- **Orden del listado operativo — fecha antes que número** (correctivo pedido por el usuario el 2026-10-26; reemplaza al criterio inicial, que ponía el número antes que la fecha). Los grupos de frecuencia no cambian ni se mezclan (urgentes primero, como siempre). Dentro de cada grupo:
+  - **Diarias y urgentes**: orden de realización ascendente; las sin número, al final.
+  - **Semanales, quincenales, mensuales, bimestrales, anuales y «Una vez»**: primero las que tienen fecha, de la más antigua a la más futura; con la misma fecha, por orden de realización ascendente (las sin número, después de las numeradas); después, todas las sin fecha, por orden ascendente y las sin número al final. La fecha de una recurrente es la **fecha sugerida del período vigente** que calcula el backend (una quincenal sin sugerencia para la quincena en curso cuenta como sin fecha); la de una «Una vez», su **fecha para realizar**.
+  - Empates (misma fecha y mismo número, o ninguno de los dos): por descripción y, al final, un desempate estable por identificador.
+  - Nunca se ordena por estado ni por cumplimiento: completada, pendiente o desactivada (vista administrativa) quedan donde las ubica la regla.
+  - Ejemplo dentro de una misma frecuencia: 15 de enero con orden 2 → 19 de enero con orden 1 → 19 de enero con orden 3 → sin fecha con orden 1.
+- Se aplica al listado operativo y, por lo tanto, a los filtros por persona y frecuencia (filtran sin reordenar) y a lo que sale de ese listado (tareas de un día en el calendario de Configuración; urgentes de Inicio, cuyo criterio no cambia). No hay paginación en este listado. Agrupación y filtros, sin cambios. No requiere migración ni modifica datos guardados.
+- No reordena el historial cronológico ni cambia vencimientos, permisos, períodos, Desempeño, métricas ni reportes. Sin arrastrar ni renumerar.
+
+**Programación sugerida** (solo recurrentes, opcional)
+
+- Semanal: día de la semana. Quincenal: un día del 1 al 15 para la primera quincena y otro del 16 al 31 para la segunda, cada uno opcional. Mensual: día del mes (1–31). Bimestral: primer o segundo mes del bimestre y día. Anual: mes y día. Bimestral y anual necesitan los dos datos o ninguno. Diaria y urgente no tienen; «Una vez» conserva su fecha para realizar.
+- Es una SUGERENCIA: no bloquea completar antes o después dentro del período, no cambia cuándo empieza o termina el período, no crea ejecuciones, no cambia estados, vencimientos ni porcentajes y no arrastra pendientes.
+- Un día que no existe en el mes se toma como el último: 31 de abril → 30 de abril; 29 de febrero en un año no bisiesto → 28 (lo explica la ayuda del formulario).
+- El backend calcula la fecha sugerida del período vigente (zona de negocio) y la tarjeta la muestra como «Sugerida: miércoles 28/10/2026», sin estilo de vencimiento.
+
+**Edición**: campo omitido = se conserva; `null` = se quita; editar otro campo nunca borra orden ni sugerencia. Un dato que no corresponde a la frecuencia se rechaza. Al cambiar de frecuencia se quita SOLO la sugerencia que deja de valer (p. ej. semanal → mensual quita el día de la semana; mensual día 31 → anual conserva el día si se elige el mes) y el orden se conserva; el formulario lo avisa, y todo se guarda en una transacción con auditoría (valor anterior y nuevo).
+
+**Historia**: orden y sugerencia no cambian ningún cálculo, así que no abren una versión de la planificación ni reinterpretan ejecuciones; su historia es la auditoría. Ninguna vista histórica (historial semanal, Desempeño) los muestra, para no atribuirles la configuración actual.
+
+**Calendario de Configuración**: una tarea con sugerencia se ubica solo en sus fechas sugeridas, una por período, desde su período vigente; los días anteriores conservan la marca de siempre. Sin sugerencia, la marca de siempre.
+
+## 🐾 Atenciones de mascotas en Inicio (2026-10-26)
+
+Función nueva pedida explícitamente por el usuario: el Inicio del prototipo no la tenía. Es de solo lectura, con el permiso de lectura de 📅 Vencimientos (todo usuario autenticado; `ADMIN` y `EMPLOYEE` ven lo mismo). No agrega acciones: no se cumple, programa ni corrige nada desde Inicio, y no crea tareas, eventos ni registros.
+
+- **Qué entra**: los pendientes abiertos (regla de §12: registro vigente, con próxima fecha y sin cumplimiento vigente) de mascotas **activas** que estén **vencidos** (cualquier fecha anterior a hoy), **vencen hoy** o son **próximos** (del día siguiente hasta 30 días inclusive), con las fechas de calendario de `BUSINESS_TIME_ZONE`.
+- **Qué no entra**: atenciones cumplidas, registros anulados, mascotas inactivas, registros sin próxima fecha y vigentes a más de 30 días. Si se anula la atención que cumplió un pendiente, el pendiente vuelve a aparecer (el estado se calcula, no se guarda).
+- **Orden y tope**: el de 📅 Vencimientos — fecha ascendente, así que primero las vencidas (la más antigua arriba), después las de hoy y después las próximas (la más cercana arriba); con la misma fecha, por fecha de la atención original y por identificador (estable). Se muestran a lo sumo **5**; el filtro y el orden se aplican antes de limitar.
+- **Totales**: «2 vencidas · 1 hoy · 3 próximas» (el texto del indicador del listado de Mascotas: omite los ceros) cuenta **todas** las atenciones que entran, no solo las 5 filas.
+- **Cada fila**: nombre de la mascota; tipo con las etiquetas del módulo (💉 Vacuna, 🪱 Desparasitación, 🩺 Chequeo, 📋 Evento); descripción breve si existe (una línea); «Programada: dd/mm/aaaa»; estado con texto (Vencida, Vence hoy, Próxima); tiempo relativo del módulo («Hace 3 días», «En 4 días»; en las de hoy, el estado «Vence hoy» ya lo dice). Dos atenciones del mismo tipo de una misma mascota son dos filas.
+- **Navegación**: «Ver vencimientos» abre 📅 Vencimientos; tocar una atención abre la ficha de esa mascota ubicada en «Próximas atenciones» (desde ahí se registra la aplicación o el control, como siempre).
+- **Sin resultados**: «No hay atenciones vencidas ni previstas para los próximos 30 días», con «Ver vencimientos». Si este resumen no se pudo calcular, la tarjeta lo dice y ofrece reintentar; nunca muestra el mensaje vacío por una falla, y las demás tarjetas de Inicio se ven igual.
+- **Actualización**: registrar una atención (con o sin próxima fecha), cumplirla, anular un registro, corregir la próxima fecha y activar, desactivar, editar o eliminar una mascota actualizan Inicio. Al empezar un día nuevo, Inicio se revalida con el reloj compartido confirmado por el backend, como el resto de sus tarjetas.
+
+## 🥬 Huerta (2026-10-26)
+
+Módulo NUEVO pedido explícitamente por el usuario: el prototipo no lo tenía. Primera versión con participantes, actividades, historial y Desempeño propios. **Fuera de alcance**: cultivos, cosechas, insumos, inventario, fotos y notificaciones.
+
+**Independencia de ✅ Tareas.** Datos, endpoints y caché propios: una actividad de la Huerta nunca se guarda en Tareas, ninguna tarea se copia, mueve ni clasifica como Huerta, y la Huerta no aparece en los listados, contadores, historial ni Desempeño de Tareas, ni en Inicio. El único acceso global es «🥬 Huerta» en la navegación. Comparte con Tareas solo las reglas: frecuencias, períodos, estados de «Una vez», sugerencias, orden y criterios de Desempeño son exactamente los mismos.
+
+**Participantes**
+
+- Un ADMIN los agrega y desactiva eligiendo **usuarios activos ya existentes** de la app: empleados y administradores, una sola vez por persona (aunque tenga usuario y ficha de empleado). La identidad es el usuario, nunca el nombre. No se crean usuarios ni empleados, y nada viene precargado: el módulo empieza vacío.
+- Participar no cambia el rol ni los permisos globales. Un ADMIN sin ficha de empleado puede participar y se muestra con su nombre real (Mi perfil).
+- Desactivar la participación conserva actividades e historial. Si tiene actividades activas asignadas, se rechaza con un mensaje claro («tiene N actividades activas asignadas. Reasignalas o desactivalas primero»); nada se reasigna ni se borra solo. Volver a agregar a quien fue desactivado reactiva la misma participación.
+- Suspender o deshabilitar la cuenta de una persona no borra su historia en la Huerta; deja de aparecer entre los candidatos.
+
+**Permisos**
+
+| Acción | ADMIN | Participante activo | Otro usuario |
+| --- | --- | --- | --- |
+| Abrir la Huerta y consultar actividades, historial, participantes | ✔ | ✔ | ✔ |
+| Agregar/desactivar participantes; crear, editar, asignar, activar/desactivar actividades | ✔ | — | — |
+| Completar | cualquiera, indicando quién la realizó (participante activo) | solo las asignadas a él, a su nombre | — |
+| Deshacer | cualquiera vigente, con motivo | lo que completó él, en el período vigente | — |
+| Desempeño | todos los participantes y el detalle de cada uno | solo lo suyo | nada (no participa) |
+
+Todo se valida también en el backend.
+
+**Actividades** — las mismas reglas que Tareas (§4–§5, "Tareas quincenales", "Fecha para realizar…", "Orden de realización…"): diaria, semanal (lunes a domingo), quincenal (1–15 y 16–último día), mensual, bimestral (ene–feb, mar–abr…), anual, urgente y «Una vez»; «Una vez» con fecha Programada/Para hoy/Vencida y sin fecha sin estado; cumplimiento anticipado permitido; una «Una vez» completada sale del listado activo y se consulta en el historial; sugerencias por frecuencia (el día que no existe toma el último del mes) que solo orientan; orden fecha → número (diarias y urgentes solo por número). Edición parcial: omitido conserva, `null` quita; cambiar la frecuencia limpia solo lo incompatible y el formulario lo avisa. Sin borrado físico desde la operación: se desactivan.
+
+**Ejecuciones e historial** — cada finalización guarda por separado el responsable esperado, quién la realizó y el usuario que la registró (siempre la sesión). Una sola ejecución vigente por actividad y período (también en la base). Deshacer es lógico y auditado. Reasignar, cambiar la frecuencia o reprogramar abren otra versión de la planificación: el pasado no se reescribe. El historial semanal usa el criterio del de Tareas y se filtra por participante.
+
+**Desempeño de la Huerta** — pestaña propia, sin conexión con el Desempeño general ni con Inicio. Mismos rangos (7, 14 y 30 días), obligaciones y métricas que Tareas → Desempeño, calculados por el backend con la planificación histórica de la Huerta. Una «Una vez» con fecha futura todavía no es exigible. Sin obligaciones, «Sin actividades previstas» (nunca un 0 %).
+
+*Ejemplo* (7 días, del 20 al 26/10/2026, visto el lunes 26 a las 18 h; participantes Pablo y una administradora):
+- «Regar almácigos», diaria de Pablo: la hizo él el 20, 21, 22 y 24; el 23 la hizo la administradora (cobertura); el 25 y el 26, sin completar → 7 obligaciones de Pablo: 4 propias, 1 cubierta, 2 pendientes.
+- «Ventilar invernadero», diaria reasignada el 24 al mediodía de Pablo a la administradora: del 20 al 23 es de Pablo (hizo el 20 y el 21) y del 24 al 26 de ella (hizo el 24 y el 25). Cada día cuenta una sola vez, para el responsable vigente al cierre de ese día.
+- «Desmalezar canteros», semanal de la administradora: la semana del 26 (la del 19 empezó antes del rango) → hecha.
+- «Revisar riego por goteo», «Una vez» para el 24, de Pablo, sin completar → pendiente. «Sembrar lechuga», «Una vez» para el 30 → todavía no cuenta.
+- Resultado: **Pablo** 12 asignadas, 6 propias, 1 le cubrieron, 5 sin completar → **50 %**. **Administradora** 4 asignadas, 3 propias, 1 sin completar, cubrió 1 → **75 %** (la cobertura no suma a su porcentaje). **Equipo** 16 asignadas, 9 propias → **56,3 %**. Un tercer participante sin actividades: «Sin actividades previstas».

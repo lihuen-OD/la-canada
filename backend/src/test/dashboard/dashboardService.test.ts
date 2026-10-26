@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   eggs: vi.fn(),
   news: vi.fn(),
   getPerformance: vi.fn(),
+  getPetDueAlerts: vi.fn(),
 }));
 
 vi.mock('../../tasks/tasksService', () => ({
@@ -19,6 +20,7 @@ vi.mock('../../performance/performanceService', () => ({
   getPerformance: mocks.getPerformance,
   defaultPerformanceRange: () => ({ from: '2026-09-19', to: '2026-09-25' }),
 }));
+vi.mock('../../pets/petService', () => ({ getPetDueAlerts: mocks.getPetDueAlerts }));
 vi.mock('../../lib/prisma', () => ({
   prisma: {
     stockItem: { findMany: mocks.stockItems },
@@ -62,6 +64,10 @@ describe('getDashboard', () => {
     mocks.stockItems.mockResolvedValue([]);
     mocks.eggs.mockResolvedValue({ _sum: { goodEggsCount: null } });
     mocks.news.mockResolvedValue([]);
+    mocks.getPetDueAlerts.mockResolvedValue({
+      counts: { overdue: 0, dueToday: 0, upcoming: 0 },
+      items: [],
+    });
   });
 
   it('calcula KPIs y avance con la finalización del período vigente', async () => {
@@ -182,5 +188,44 @@ describe('getDashboard', () => {
     expect(mocks.news).toHaveBeenCalledWith(expect.objectContaining({ take: 3 }));
     expect(mocks.stockItems).toHaveBeenCalledTimes(1);
     expect(mocks.eggs).toHaveBeenCalledTimes(1);
+  });
+
+  it('🐾 Atenciones de mascotas: el resumen de Mascotas tal cual, con el mismo «ahora» que el resto', async () => {
+    mocks.listTasks.mockResolvedValue({ tasks: [] });
+    const summary = {
+      counts: { overdue: 2, dueToday: 1, upcoming: 3 },
+      items: [
+        {
+          record: { id: 'r1', type: 'VACCINE', description: 'Antirrábica' },
+          pet: { id: 'p1', name: 'Mascota sintética' },
+          nextDue: { date: '2026-09-20', status: 'OVERDUE', daysUntil: -5 },
+        },
+      ],
+    };
+    mocks.getPetDueAlerts.mockResolvedValue(summary);
+    const now = new Date('2026-09-25T12:00:00.000Z');
+    const result = await getDashboard(actor, now);
+    expect(result.petDue).toEqual(summary);
+    expect(mocks.getPetDueAlerts).toHaveBeenCalledWith(actor, now);
+  });
+
+  it('si el resumen de mascotas falla, Inicio responde igual: `petDue` null y las demás tarjetas intactas', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mocks.listTasks.mockResolvedValue({ tasks: [] });
+    mocks.news.mockResolvedValue([
+      {
+        id: 'n1',
+        text: 'Portón revisado',
+        createdAt: new Date('2026-09-25T10:00:00.000Z'),
+        employee,
+      },
+    ]);
+    mocks.getPetDueAlerts.mockRejectedValue(new Error('timeout sintético'));
+    const result = await getDashboard(actor, new Date('2026-09-25T12:00:00.000Z'));
+    expect(result.petDue).toBeNull();
+    expect(result.latestNews).toHaveLength(1);
+    expect(result.performance).not.toBeNull();
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('mascotas'), 'timeout sintético');
+    logged.mockRestore();
   });
 });

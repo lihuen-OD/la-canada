@@ -13,8 +13,9 @@ export function usePetsCache() {
 
   /**
    * Registro nuevo, anulado o con su próxima fecha corregida: ficha/KPIs e
-   * historial de esa mascota, listado (último peso e indicadores) y
-   * Vencimientos (un cumplimiento o una anulación cambian los pendientes).
+   * historial de esa mascota, listado (último peso e indicadores),
+   * Vencimientos (un cumplimiento o una anulación cambian los pendientes) e
+   * Inicio (🐾 Atenciones de mascotas).
    */
   const afterRecordChange = useCallback(
     (petId: string) => {
@@ -22,6 +23,7 @@ export function usePetsCache() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.pets.records(userId, petId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.pets.listAll(userId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.pets.dueAll(userId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard(userId) });
     },
     [queryClient, userId],
   );
@@ -33,8 +35,10 @@ export function usePetsCache() {
         void queryClient.invalidateQueries({ queryKey: queryKeys.pets.detail(userId, petId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.pets.listAll(userId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.pets.typesAll(userId) });
-      // Activar o desactivar una mascota la suma o la saca de Vencimientos.
+      // Activar o desactivar una mascota la suma o la saca de Vencimientos y
+      // de 🐾 Atenciones de mascotas en Inicio (que además muestra su nombre).
       void queryClient.invalidateQueries({ queryKey: queryKeys.pets.dueAll(userId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard(userId) });
       // Los cumpleaños de mascotas se derivan en ☰ Más → Eventos (Etapa 5X).
       void queryClient.invalidateQueries({ queryKey: queryKeys.more.events(userId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.more.summary(userId) });

@@ -27,6 +27,21 @@ export function formatDate(
   return parts ? `${parts.day}/${parts.month}/${parts.year}` : '';
 }
 
+const WEEKDAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
+/**
+ * Fecha de calendario `YYYY-MM-DD` → «Lunes 26/10/2026». El día de la semana
+ * es el de ESA fecha (aritmética de calendario en UTC), nunca el de un
+ * instante en la zona del navegador. Inválida o vacía → `''`.
+ */
+export function formatDateWithWeekday(value: string | null | undefined): string {
+  const dateOnly = DATE_ONLY.exec(value?.trim() ?? '');
+  if (!dateOnly) return '';
+  const [, year, month, day] = dateOnly;
+  const weekday = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day))).getUTCDay();
+  return `${WEEKDAYS[weekday]} ${day}/${month}/${year}`;
+}
+
 /** Timestamp ISO → `dd/mm/aaaa HH:mm` en la zona de negocio (sin segundos). */
 export function formatDateTime(
   value: string | null | undefined,

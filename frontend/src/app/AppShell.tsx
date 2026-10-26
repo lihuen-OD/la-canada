@@ -9,6 +9,7 @@ import { HomeIcon, UsersIcon } from '../components/ui/icons';
 import { LogoutButton } from '../features/auth/LogoutButton';
 import { APP_ROUTES, getVisibleNavigation } from '../routes/navigation';
 import type { NavIconName } from '../routes/navigation';
+import { BusinessDayRefresh } from './BusinessDayRefresh';
 
 /** Emoji del prototipo — decorativo; el nombre accesible es siempre la etiqueta de texto. */
 function TasksNavEmoji() {
@@ -46,6 +47,15 @@ function PetsNavEmoji() {
   );
 }
 
+/** 🥬 Huerta — emoji decorativo; el nombre accesible es la etiqueta «Huerta». */
+function KitchenGardenNavEmoji() {
+  return (
+    <span className="nav-emoji" aria-hidden="true">
+      🥬
+    </span>
+  );
+}
+
 /** ☰ Más — símbolo del prototipo, decorativo. */
 function MoreNavEmoji() {
   return (
@@ -61,6 +71,7 @@ const NAV_ICONS: Record<NavIconName, ComponentType<{ size?: 'lg' }>> = {
   stock: StockNavEmoji,
   chickenCoop: ChickenCoopNavEmoji,
   pets: PetsNavEmoji,
+  kitchenGarden: KitchenGardenNavEmoji,
   more: MoreNavEmoji,
   users: UsersIcon,
 };
@@ -158,6 +169,8 @@ export function AppShell() {
 
       {/* Etapa 5R: aviso flotante de conectividad; nunca reemplaza ni desmonta la ruta. */}
       <ConnectionBanner />
+      {/* Cambio de día de negocio: un solo reloj para toda el área autenticada. */}
+      <BusinessDayRefresh />
     </div>
   );
 }

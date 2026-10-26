@@ -27,6 +27,22 @@ import {
   ValidationError,
 } from '../errors/AppError';
 import { runEntityDeletion } from '../lib/deletion';
+import {
+  assertScheduledDateFits,
+  scheduleStatusOf,
+  scheduledDateText,
+  scheduledDateValue,
+} from './taskSchedule';
+import { FREQUENCY_ORDER, compareOperationalOrder } from './taskOrder';
+import {
+  EMPTY_SUGGESTION,
+  SUGGESTION_FIELDS,
+  resolveSuggestion,
+  suggestedDateIn,
+  suggestedDatesInMonth,
+  type SuggestionField,
+  type SuggestionValues,
+} from './taskSuggestion';
 
 /**
  * Reglas del módulo Tareas (Etapa 4A) — ver docs/BUSINESS_RULES.md §2-§5 y
@@ -47,15 +63,25 @@ export interface TaskActor {
   employeeId: string | null;
 }
 
-/** Orden operativo del prototipo: urgente → única → diaria → semanal → mensual (quincenal, entre semanal y mensual). */
-const FREQUENCY_ORDER: Record<TaskFrequency, number> = {
-  URGENT: 0,
-  ONE_TIME: 1,
-  DAILY: 2,
-  WEEKLY: 3,
-  SEMI_MONTHLY: 4,
-  MONTHLY: 5,
-};
+const suggestionSelect = {
+  suggestedWeekday: true,
+  suggestedFirstHalfDay: true,
+  suggestedSecondHalfDay: true,
+  suggestedMonthDay: true,
+  suggestedMonth: true,
+} as const;
+
+const suggestionOf = (row: SuggestionValues): SuggestionValues => ({
+  suggestedWeekday: row.suggestedWeekday,
+  suggestedFirstHalfDay: row.suggestedFirstHalfDay,
+  suggestedSecondHalfDay: row.suggestedSecondHalfDay,
+  suggestedMonthDay: row.suggestedMonthDay,
+  suggestedMonth: row.suggestedMonth,
+});
+
+/** Solo los valores cargados (para auditar sin ruido). */
+const filledOf = (values: Partial<Record<string, number | null>>) =>
+  Object.fromEntries(Object.entries(values).filter(([, value]) => value !== null));
 
 const employeeSummarySelect = { id: true, displayName: true, colorHex: true } as const;
 
@@ -75,6 +101,9 @@ const taskSelect = {
   description: true,
   frequency: true,
   active: true,
+  scheduledDate: true,
+  executionOrder: true,
+  ...suggestionSelect,
   employee: { select: { ...employeeSummarySelect, active: true } },
 } as const;
 
@@ -132,13 +161,22 @@ function canRevertExecution(
   );
 }
 
+/**
+ * `scheduledDate`/`scheduleStatus`: «Fecha para realizar» de una «Una vez» y
+ * su estado de hoy en `BUSINESS_TIME_ZONE` (programada, para hoy o vencida).
+ * Completar ANTES de la fecha está permitido: `canComplete` no depende de ella.
+ */
 function serializeTask(
   task: TaskRow,
   periodKey: string,
   execution: ExecutionRow | null,
   actor: TaskActor,
+  today: LocalDate,
 ) {
   const canActOnTasks = actor.role === 'ADMIN' || actor.employeeId !== null;
+  const scheduledDate = scheduledDateText(task.scheduledDate);
+  const suggestion = suggestionOf(task);
+  const suggestedDate = suggestedDateIn(task.frequency, suggestion, today);
   return {
     id: task.id,
     description: task.description,
@@ -146,6 +184,12 @@ function serializeTask(
     active: task.active,
     assignee: task.employee,
     periodKey,
+    scheduledDate,
+    scheduleStatus: scheduleStatusOf(scheduledDate, today, execution !== null),
+    executionOrder: task.executionOrder,
+    ...suggestion,
+    // Fecha sugerida del período vigente: solo una sugerencia, nunca un vencimiento.
+    suggestedDate: suggestedDate ? formatLocalDate(suggestedDate) : null,
     currentExecution: execution
       ? serializeExecution(execution, canRevertExecution(actor, execution, periodKey))
       : null,
@@ -183,7 +227,13 @@ async function loadSerializedTask(
   if (!task) throw new NotFoundError('Tarea no encontrada.');
   const executions = await loadCurrentExecutions(prisma, [task], now);
   const periodKey = computePeriodKey(task.frequency, now, config.businessTimeZone);
-  return serializeTask(task, periodKey, executions.get(task.id) ?? null, actor);
+  return serializeTask(
+    task,
+    periodKey,
+    executions.get(task.id) ?? null,
+    actor,
+    toLocalDate(now, config.businessTimeZone),
+  );
 }
 
 // ── Consulta ──────────────────────────────────────────────────────────────
@@ -210,6 +260,7 @@ export async function listTasks(actor: TaskActor, filters: ListTasksFilters, now
   });
 
   const executions = await loadCurrentExecutions(prisma, tasks, now);
+  const today = toLocalDate(now, config.businessTimeZone);
   const serialized = tasks
     .map((task) =>
       serializeTask(
@@ -217,6 +268,7 @@ export async function listTasks(actor: TaskActor, filters: ListTasksFilters, now
         computePeriodKey(task.frequency, now, config.businessTimeZone),
         executions.get(task.id) ?? null,
         actor,
+        today,
       ),
     )
     // Una tarea única ya completada sale del listado operativo (como en el
@@ -226,18 +278,16 @@ export async function listTasks(actor: TaskActor, filters: ListTasksFilters, now
       (task) =>
         !(filters.status === 'active' && task.frequency === 'ONE_TIME' && task.currentExecution),
     )
-    .sort(
-      (a, b) =>
-        FREQUENCY_ORDER[a.frequency] - FREQUENCY_ORDER[b.frequency] ||
-        a.description.localeCompare(b.description, 'es'),
-    );
+    .sort(compareOperationalOrder);
 
-  const today = toLocalDate(now, config.businessTimeZone);
   return {
     period: {
       today: formatLocalDate(today),
       weekStart: formatLocalDate(startOfWeek(today)),
       timeZone: config.businessTimeZone,
+      // Hora del servidor: el reloj del día del frontend la usa para no
+      // depender de la hora del dispositivo (docs/ARCHITECTURE.md §39.1).
+      generatedAt: now.toISOString(),
     },
     tasks: serialized,
   };
@@ -271,10 +321,25 @@ async function requireActiveEmployee(
   if (!employee || !employee.active) throw new ValidationError(message);
 }
 
-export interface CreateTaskInput {
+/** Programación sugerida enviada: omitido = sin cambios (o vacío al crear), `null` = quitar. */
+type SuggestionInput = Partial<Record<SuggestionField, number | null>>;
+
+const suggestionInputOf = (input: SuggestionInput): SuggestionInput =>
+  Object.fromEntries(
+    SUGGESTION_FIELDS.filter((field) => input[field] !== undefined).map((field) => [
+      field,
+      input[field],
+    ]),
+  );
+
+export interface CreateTaskInput extends SuggestionInput {
   description: string;
   employeeId: string;
   frequency: TaskFrequency;
+  /** Solo `ONE_TIME`: `YYYY-MM-DD` (puede ser pasada). Omitida o `null`: sin fecha. */
+  scheduledDate?: string | null;
+  /** Orden de realización (1–9999, repetidos permitidos). Omitido o `null`: sin orden. */
+  executionOrder?: number | null;
 }
 
 export async function createTask(
@@ -284,6 +349,10 @@ export async function createTask(
   now = new Date(),
 ) {
   requireAdmin(actor);
+  assertScheduledDateFits(input.frequency, input.scheduledDate);
+  const suggestion = resolveSuggestion(input.frequency, EMPTY_SUGGESTION, suggestionInputOf(input));
+  const { scheduledDate = null, executionOrder = null, description, employeeId, frequency } = input;
+  const fields = { description, employeeId, frequency };
   let taskId: string;
   try {
     taskId = await prisma.$transaction(async (tx) => {
@@ -292,12 +361,21 @@ export async function createTask(
         input.employeeId,
         'El responsable no existe o no está activo.',
       );
-      const task = await tx.task.create({ data: input, select: { id: true } });
+      const task = await tx.task.create({
+        data: {
+          ...fields,
+          scheduledDate: scheduledDateValue(scheduledDate),
+          executionOrder,
+          ...suggestion,
+        },
+        select: { id: true },
+      });
       await tx.taskPlanningInterval.create({
         data: {
           taskId: task.id,
           employeeId: input.employeeId,
           frequency: input.frequency,
+          scheduledDate: scheduledDateValue(scheduledDate),
           validFrom: now,
         },
       });
@@ -306,7 +384,12 @@ export async function createTask(
         action: 'task.created',
         entityType: 'Task',
         entityId: task.id,
-        newState: { ...input, active: true },
+        newState: {
+          ...fields,
+          ...(scheduledDate ? { scheduledDate } : {}),
+          ...filledOf({ executionOrder, ...suggestion }),
+          active: true,
+        },
         ...meta,
       });
       return task.id;
@@ -318,15 +401,32 @@ export async function createTask(
   return { task: await loadSerializedTask(taskId, actor, now) };
 }
 
-export interface UpdateTaskInput {
+export interface UpdateTaskInput extends SuggestionInput {
   description?: string;
   employeeId?: string;
   frequency?: TaskFrequency;
+  /** Omitida: sin cambios. `null`: quitar la fecha. `YYYY-MM-DD`: fijarla (solo `ONE_TIME`). */
+  scheduledDate?: string | null;
+  /** Omitido: sin cambios. `null`: quitar el orden. Se conserva al cambiar de frecuencia. */
+  executionOrder?: number | null;
 }
 
 /**
- * Reasignar o cambiar la frecuencia nunca reescribe ejecuciones ya creadas:
- * cada una conserva su `assignedEmployeeId` (snapshot) y su `periodKey`.
+ * Reasignar, cambiar la frecuencia o reprogramar nunca reescribe ejecuciones
+ * ya creadas: cada una conserva su `assignedEmployeeId` (snapshot) y su
+ * `periodKey` (una «Una vez» sigue con la clave `ONE_TIME`, así que con la
+ * fecha nueva tampoco se puede completar dos veces). Cada uno de esos cambios
+ * cierra la versión de planificación vigente y abre otra, con la auditoría
+ * del valor anterior y el nuevo. Pasar de «Una vez» a otra frecuencia quita
+ * la fecha en la misma transacción (queda como antecedente en la versión
+ * cerrada y en la auditoría).
+ *
+ * Orden de realización y programación sugerida: omitido = se conserva,
+ * `null` = se quita; cambiar otro campo nunca los borra. Al cambiar de
+ * frecuencia se limpia SOLO la sugerencia que deja de valer
+ * (`resolveSuggestion`) y el orden se conserva. No cambian períodos ni
+ * cálculos, así que no abren una versión de planificación: su historia es la
+ * auditoría (valor anterior y nuevo).
  */
 export async function updateTask(
   actor: TaskActor,
@@ -340,7 +440,15 @@ export async function updateTask(
     await prisma.$transaction(async (tx) => {
       const current = await tx.task.findUnique({
         where: { id: taskId },
-        select: { description: true, employeeId: true, frequency: true, active: true },
+        select: {
+          description: true,
+          employeeId: true,
+          frequency: true,
+          active: true,
+          scheduledDate: true,
+          executionOrder: true,
+          ...suggestionSelect,
+        },
       });
       if (!current) throw new NotFoundError('Tarea no encontrada.');
 
@@ -353,6 +461,36 @@ export async function updateTask(
           (previous as Record<string, unknown>)[key] = current[key];
         }
       }
+
+      const frequency = changes.frequency ?? current.frequency;
+      assertScheduledDateFits(frequency, input.scheduledDate);
+      const currentDate = scheduledDateText(current.scheduledDate);
+      const nextDate =
+        frequency !== 'ONE_TIME'
+          ? null
+          : input.scheduledDate !== undefined
+            ? input.scheduledDate
+            : currentDate;
+      if (nextDate !== currentDate) {
+        changes.scheduledDate = nextDate;
+        previous.scheduledDate = currentDate;
+      }
+      if (input.executionOrder !== undefined && input.executionOrder !== current.executionOrder) {
+        changes.executionOrder = input.executionOrder;
+        previous.executionOrder = current.executionOrder;
+      }
+      const currentSuggestion = suggestionOf(current);
+      const nextSuggestion = resolveSuggestion(
+        frequency,
+        currentSuggestion,
+        suggestionInputOf(input),
+      );
+      for (const field of SUGGESTION_FIELDS) {
+        if (nextSuggestion[field] !== currentSuggestion[field]) {
+          changes[field] = nextSuggestion[field];
+          previous[field] = currentSuggestion[field];
+        }
+      }
       if (Object.keys(changes).length === 0) return;
 
       if (changes.employeeId) {
@@ -362,7 +500,10 @@ export async function updateTask(
           'El responsable no existe o no está activo.',
         );
       }
-      if (current.active && (changes.employeeId || changes.frequency)) {
+      if (
+        current.active &&
+        (changes.employeeId || changes.frequency || changes.scheduledDate !== undefined)
+      ) {
         await tx.taskPlanningInterval.updateMany({
           where: { taskId, validTo: null },
           data: { validTo: now },
@@ -371,12 +512,22 @@ export async function updateTask(
           data: {
             taskId,
             employeeId: changes.employeeId ?? current.employeeId,
-            frequency: changes.frequency ?? current.frequency,
+            frequency,
+            scheduledDate: scheduledDateValue(nextDate),
             validFrom: now,
           },
         });
       }
-      await tx.task.update({ where: { id: taskId }, data: changes });
+      const { scheduledDate, ...fields } = changes;
+      await tx.task.update({
+        where: { id: taskId },
+        data: {
+          ...fields,
+          ...(scheduledDate !== undefined
+            ? { scheduledDate: scheduledDateValue(scheduledDate) }
+            : {}),
+        },
+      });
       await recordAuditLog(tx, {
         actorUserId: actor.userId,
         action: 'task.updated',
@@ -406,7 +557,7 @@ export async function setTaskActive(
   await prisma.$transaction(async (tx) => {
     const current = await tx.task.findUnique({
       where: { id: taskId },
-      select: { active: true, employeeId: true, frequency: true },
+      select: { active: true, employeeId: true, frequency: true, scheduledDate: true },
     });
     if (!current) throw new NotFoundError('Tarea no encontrada.');
     if (current.active === active) return;
@@ -416,6 +567,7 @@ export async function setTaskActive(
           taskId,
           employeeId: current.employeeId,
           frequency: current.frequency,
+          scheduledDate: current.scheduledDate,
           validFrom: now,
         },
       });
@@ -455,18 +607,37 @@ export async function deleteTask(actor: TaskActor, taskId: string, meta: Request
     async (tx) => {
       const task = await tx.task.findUnique({
         where: { id: taskId },
-        select: { description: true, employeeId: true, frequency: true, active: true },
+        select: {
+          description: true,
+          employeeId: true,
+          frequency: true,
+          active: true,
+          scheduledDate: true,
+          executionOrder: true,
+          ...suggestionSelect,
+        },
       });
       if (!task) throw new TaskNotFoundError();
       const executions = await tx.taskExecution.count({ where: { taskId } });
       const files = await tx.fileAsset.count({ where: { taskId } });
       if (executions > 0 || files > 0) throw new TaskInUseError();
+      const { scheduledDate, executionOrder, description, employeeId, frequency, active } = task;
+      const snapshot = {
+        description,
+        employeeId,
+        frequency,
+        active,
+        ...filledOf({ executionOrder, ...suggestionOf(task) }),
+      };
       await recordAuditLog(tx, {
         actorUserId: actor.userId,
         action: 'task.deleted',
         entityType: 'Task',
         entityId: taskId,
-        previousState: { ...task },
+        previousState: {
+          ...snapshot,
+          ...(scheduledDate ? { scheduledDate: scheduledDateText(scheduledDate) } : {}),
+        },
         ...meta,
       });
       await tx.taskPlanningInterval.deleteMany({ where: { taskId } });
@@ -649,17 +820,31 @@ const historyTaskSelect = {
   frequency: true,
   active: true,
   createdAt: true,
+  scheduledDate: true,
   employee: { select: employeeSummarySelect },
 } as const;
+
+type HistoryTaskRow = Prisma.TaskGetPayload<{ select: typeof historyTaskSelect }>;
+
+function serializeHistoryTask(task: HistoryTaskRow) {
+  return {
+    id: task.id,
+    description: task.description,
+    frequency: task.frequency,
+    active: task.active,
+    assignee: task.employee,
+    scheduledDate: scheduledDateText(task.scheduledDate),
+  };
+}
 
 /**
  * Semana lunes-domingo en la zona de negocio. Diarias y semanales: un slot
  * por período esperado; "esperado" = la tarea está activa hoy, el período ya
  * empezó y la tarea ya existía. Así `completed / expected` es correcto y
- * nunca el 0% fijo del prototipo. Quincenales, mensuales, urgentes y únicas:
- * las finalizaciones cuya fecha local cae en la semana — una quincena no
- * entra en una grilla de lunes a domingo, así que (como la mensual) no suma
- * slots al denominador realizadas/esperadas. Solo ejecuciones
+ * nunca el 0% fijo del prototipo. Quincenales, mensuales, bimestrales,
+ * anuales, urgentes y únicas: las finalizaciones cuya fecha local cae en la
+ * semana — esos períodos no entran en una grilla de lunes a domingo, así que
+ * no suman slots al denominador realizadas/esperadas. Solo ejecuciones
  * vigentes (las revertidas quedan en la base y en la auditoría). Incluye
  * tareas hoy desactivadas si tuvieron ejecuciones esa semana.
  *
@@ -723,7 +908,9 @@ export async function getWeeklyHistory(
     where: {
       revertedAt: null,
       completedAt: { gte: rangeStart, lt: rangeEnd },
-      task: { frequency: { in: ['SEMI_MONTHLY', 'MONTHLY', 'URGENT', 'ONE_TIME'] } },
+      task: {
+        frequency: { in: ['SEMI_MONTHLY', 'MONTHLY', 'BIMONTHLY', 'ANNUAL', 'URGENT', 'ONE_TIME'] },
+      },
     },
     select: { ...executionSelect, task: { select: historyTaskSelect } },
     orderBy: { completedAt: 'asc' },
@@ -771,16 +958,7 @@ export async function getWeeklyHistory(
           };
         })
         .filter((slot): slot is NonNullable<typeof slot> => slot !== null);
-      return {
-        task: {
-          id: task.id,
-          description: task.description,
-          frequency: task.frequency,
-          active: task.active,
-          assignee: task.employee,
-        },
-        slots,
-      };
+      return { task: serializeHistoryTask(task), slots };
     })
     .filter((row) => row.slots.some((slot) => slot.expected || slot.execution));
 
@@ -789,13 +967,7 @@ export async function getWeeklyHistory(
       matchesEmployee(execution.assignedEmployee.id, execution.completedByEmployee?.id),
     )
     .map((execution) => ({
-      task: {
-        id: execution.task.id,
-        description: execution.task.description,
-        frequency: execution.task.frequency,
-        active: execution.task.active,
-        assignee: execution.task.employee,
-      },
+      task: serializeHistoryTask(execution.task),
       execution: serializeExecution(
         execution,
         canRevertExecution(
@@ -818,4 +990,45 @@ export async function getWeeklyHistory(
     recurring,
     others,
   };
+}
+
+// ── Calendario de Configuración ───────────────────────────────────────────
+
+/**
+ * Dónde ubicar en el calendario de un mes (`month` = `YYYY-MM`) las tareas
+ * activas con programación sugerida: sus fechas sugeridas desde el período
+ * vigente de cada una (`from`), una por período. Los días anteriores a `from`
+ * no se atribuyen a la configuración actual (el calendario los marca como
+ * siempre), y las tareas sin sugerencia no aparecen: siguen con la marca de
+ * su frecuencia. Una sola consulta; el cálculo es el de `taskSuggestion.ts`.
+ */
+export async function getTaskCalendar(month: string, now = new Date()) {
+  const [year, monthNumber] = month.split('-').map(Number) as [number, number];
+  const today = toLocalDate(now, config.businessTimeZone);
+  const tasks = await prisma.task.findMany({
+    where: {
+      active: true,
+      OR: SUGGESTION_FIELDS.map((field) => ({ [field]: { not: null } })),
+    },
+    select: { id: true, frequency: true, ...suggestionSelect },
+  });
+  const suggestions = tasks.flatMap((task) => {
+    const placement = suggestedDatesInMonth(
+      task.frequency,
+      suggestionOf(task),
+      year,
+      monthNumber,
+      today,
+    );
+    return placement
+      ? [
+          {
+            taskId: task.id,
+            from: formatLocalDate(placement.from),
+            dates: placement.dates.map(formatLocalDate),
+          },
+        ]
+      : [];
+  });
+  return { month, today: formatLocalDate(today), suggestions };
 }

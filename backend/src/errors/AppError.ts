@@ -615,6 +615,69 @@ export class TaskNotFoundError extends AppError {
   }
 }
 
+// ── 🥬 Huerta (códigos propios: nunca los de ✅ Tareas) ────────────────────
+
+export class GardenActivityNotFoundError extends AppError {
+  constructor() {
+    super('Actividad no encontrada.', 404, { code: 'GARDEN_ACTIVITY_NOT_FOUND' });
+  }
+}
+
+export class GardenActivityAlreadyCompletedError extends AppError {
+  constructor() {
+    super('Esta actividad ya fue completada para el período actual.', 409, {
+      code: 'GARDEN_ACTIVITY_ALREADY_COMPLETED',
+    });
+  }
+}
+
+export class GardenActivityInactiveError extends AppError {
+  constructor() {
+    super('La actividad está desactivada.', 409, { code: 'GARDEN_ACTIVITY_INACTIVE' });
+  }
+}
+
+export class GardenExecutionNotActiveError extends AppError {
+  constructor() {
+    super('Esta finalización ya fue revertida.', 409, { code: 'GARDEN_EXECUTION_NOT_ACTIVE' });
+  }
+}
+
+/** Mismo responsable con una actividad de descripción idéntica (`@@unique([participantId, description])`). */
+export class DuplicateGardenActivityError extends AppError {
+  constructor() {
+    super('Ese responsable ya tiene una actividad con la misma descripción.', 409, {
+      code: 'GARDEN_ACTIVITY_DUPLICATE',
+    });
+  }
+}
+
+export class GardenParticipantNotFoundError extends AppError {
+  constructor() {
+    super('Participante no encontrado.', 404, { code: 'GARDEN_PARTICIPANT_NOT_FOUND' });
+  }
+}
+
+/** Desactivar a quien todavía tiene actividades activas: primero hay que reasignarlas o desactivarlas. */
+export class GardenParticipantHasActivitiesError extends AppError {
+  constructor(count: number) {
+    super(
+      `No se puede desactivar: tiene ${count} ${count === 1 ? 'actividad activa asignada' : 'actividades activas asignadas'}. Reasignalas o desactivalas primero.`,
+      409,
+      { code: 'GARDEN_PARTICIPANT_HAS_ACTIVITIES' },
+    );
+  }
+}
+
+/** La persona elegida ya participa (activa) de la Huerta. */
+export class GardenParticipantAlreadyActiveError extends AppError {
+  constructor() {
+    super('Esa persona ya participa de la Huerta.', 409, {
+      code: 'GARDEN_PARTICIPANT_ALREADY_ACTIVE',
+    });
+  }
+}
+
 /** Mismo código que la desactivación con productos activos: el motivo es el mismo (tiene productos). */
 export class StockCategoryHasItemsError extends AppError {
   constructor() {

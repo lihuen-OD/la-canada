@@ -2,10 +2,17 @@ import type { ReactNode } from 'react';
 import type { TaskEmployee, TaskFrequency } from '../../api/taskTypes';
 import { Avatar } from '../../components/ui/Avatar';
 import { Chip } from '../../components/ui/Chip';
-import { FREQUENCY_FILTER_LABEL, FREQUENCY_FILTER_ORDER } from './taskLabels';
+import {
+  FREQUENCY_FILTER_LABEL,
+  FREQUENCY_FILTER_ORDER,
+  TASK_NOUN,
+  type ItemNoun,
+} from './taskLabels';
 
 export type PersonFilter = 'all' | string;
 export type FrequencyFilter = 'all' | TaskFrequency;
+/** Dentro de «Una vez»: todas (también las futuras y sin fecha), las de hoy o las vencidas. */
+export type ScheduleFilter = 'all' | 'DUE_TODAY' | 'OVERDUE';
 
 interface PersonFilterBarProps {
   employees: TaskEmployee[];
@@ -90,7 +97,48 @@ interface FrequencyFilterBarProps {
   onSelect: (value: FrequencyFilter) => void;
 }
 
-/** Todas las frecuencias reales del enum del backend, con las etiquetas y el orden de los chips del prototipo (Quincenales entre Semanales y Mensuales). */
+interface ScheduleFilterBarProps {
+  selected: ScheduleFilter;
+  counts: { DUE_TODAY: number; OVERDUE: number };
+  onSelect: (value: ScheduleFilter) => void;
+  /** «tarea» (por defecto) o «actividad» (🥬 Huerta): solo el nombre accesible. */
+  noun?: ItemNoun;
+}
+
+const SCHEDULE_CHIPS = [
+  ['DUE_TODAY', 'Hoy'],
+  ['OVERDUE', 'Vencidas'],
+] as const;
+
+/**
+ * Accesos de la vista «Una vez»: «Hoy» y «Vencidas» (estado que decide el
+ * backend). Se combinan con la persona elegida; tocar el elegido vuelve a
+ * todas, que incluye las programadas para más adelante y las sin fecha.
+ */
+export function ScheduleFilterBar({
+  selected,
+  counts,
+  onSelect,
+  noun = TASK_NOUN,
+}: ScheduleFilterBarProps) {
+  return (
+    <div className="filter-scroller" role="group" aria-label="Filtrar «Una vez» por fecha">
+      {SCHEDULE_CHIPS.map(([value, label]) => (
+        <Chip
+          key={value}
+          selected={selected === value}
+          onSelect={() => onSelect(selected === value ? 'all' : value)}
+          count={counts[value]}
+          accessibleLabel={`${label}, ${counts[value]} ${counts[value] === 1 ? noun.singular : noun.plural}`}
+        >
+          {label}
+        </Chip>
+      ))}
+    </div>
+  );
+}
+
+/** Todas las frecuencias reales del enum del backend, con las etiquetas y el orden de los chips del prototipo (Quincenales entre Semanales y Mensuales; Bimestrales y Anuales después de Mensuales). */
 export function FrequencyFilterBar({ selected, onSelect }: FrequencyFilterBarProps) {
   return (
     <div className="filter-scroller" role="group" aria-label="Filtrar por frecuencia">

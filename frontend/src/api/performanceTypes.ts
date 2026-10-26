@@ -34,12 +34,18 @@ export interface PerformanceOccurrence {
   assignedEmployee: (TaskEmployee & { role: string }) | null;
   completedByEmployee: (TaskEmployee & { role: string }) | null;
   completedAt: string | null;
+  /** Solo una «Una vez» con fecha: la de la planificación que usó el cálculo. */
+  scheduledDate?: string;
 }
 
 export interface PerformanceResponse {
+  /** Hora del servidor (ISO), para el reloj del día; ausente en un backend anterior. */
+  generatedAt?: string;
   range: {
     from: string;
     to: string;
+    /** Fecha de negocio del servidor (puede ser posterior a `to`). */
+    today?: string;
     timeZone: string;
     includesCurrentDay: boolean;
     maxDays: number;

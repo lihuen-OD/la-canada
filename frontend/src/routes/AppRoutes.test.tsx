@@ -93,6 +93,7 @@ describe('AppRoutes (con app shell real)', () => {
       performance: null,
       stockAlerts: [],
       upcomingEvents: [],
+      petDue: { counts: { overdue: 0, dueToday: 0, upcoming: 0 }, items: [] },
       latestNews: [],
     });
   });

@@ -8,6 +8,7 @@ import { accessTokenSecret } from '../../auth/config';
 import { generateRefreshToken, hashRefreshToken, signAccessToken } from '../../auth/tokens';
 import { config } from '../../config';
 import { addDays, formatLocalDate, toLocalDate } from '../../lib/businessTime';
+import { setDriveBackupConfigForTests } from '../../driveBackup/config';
 import { setObjectStorageForTests, type ObjectStorageClient } from '../../lib/objectStorage';
 
 /**
@@ -157,6 +158,9 @@ beforeAll(async () => {
   employee = await createActor('EMPLOYEE', 'emp', employeeId);
   perroId = (await prisma.animalType.findUniqueOrThrow({ where: { name: 'Perro' } })).id;
   setObjectStorageForTests(memoryStorage);
+  // Las fotos viven en memoria: nunca se encolan copias en Drive (eso lo
+  // prueba driveBackup.integration), aunque el `.env` local la tenga activa.
+  setDriveBackupConfigForTests(null);
 
   (pg.Client.prototype as unknown as { query: QueryFn }).query = function (
     this: unknown,
@@ -174,6 +178,7 @@ beforeAll(async () => {
 afterAll(async () => {
   (pg.Client.prototype as unknown as { query: QueryFn }).query = originalQuery;
   setObjectStorageForTests(undefined);
+  setDriveBackupConfigForTests(undefined);
   const animalIds = (
     await prisma.animal.findMany({ where: { name: { startsWith: RUN } }, select: { id: true } })
   ).map((row) => row.id);
@@ -198,6 +203,8 @@ afterAll(async () => {
       ],
     },
   });
+  // Defensa: un trabajo de copia de estas fotos (FK RESTRICT) impediría borrarlas.
+  await prisma.driveBackupJob.deleteMany({ where: { fileAsset: { animalId: { in: animalIds } } } });
   await prisma.fileAsset.deleteMany({ where: { animalId: { in: animalIds } } });
   await prisma.animalMedicalRecord.deleteMany({ where: { id: { in: recordIds } } });
   await prisma.animal.deleteMany({ where: { id: { in: animalIds } } });
