@@ -1,11 +1,30 @@
 import type { TaskFrequency, TaskScheduleStatus, TaskSuggestionField } from '../../api/taskTypes';
 import type { BadgeTone } from '../../components/ui/Badge';
 import {
+  NO_TASKS_LABEL,
   formatDate,
   formatDateRange,
   formatDateTime,
   formatDateWithWeekday,
 } from '../../utils/dateFormat';
+
+/**
+ * Sustantivo de lo que muestran los componentes compartidos: «tarea» en ✅
+ * Tareas (por defecto) y «actividad» en 🥬 Huerta. Solo cambia textos: las
+ * dos son femeninas, así que el resto de la frase no cambia.
+ */
+export interface ItemNoun {
+  singular: string;
+  plural: string;
+  /** Porcentaje sin obligaciones en el período (nunca un 0 % engañoso). */
+  noObligations: string;
+}
+
+export const TASK_NOUN: ItemNoun = {
+  singular: 'tarea',
+  plural: 'tareas',
+  noObligations: NO_TASKS_LABEL,
+};
 
 /** Orden operativo del prototipo (mismo que el backend): urgente → única → diaria → semanal → quincenal → mensual → bimestral → anual. */
 export const FREQUENCY_ORDER: readonly TaskFrequency[] = [

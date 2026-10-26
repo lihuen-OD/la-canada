@@ -2,7 +2,12 @@ import type { ReactNode } from 'react';
 import type { TaskEmployee, TaskFrequency } from '../../api/taskTypes';
 import { Avatar } from '../../components/ui/Avatar';
 import { Chip } from '../../components/ui/Chip';
-import { FREQUENCY_FILTER_LABEL, FREQUENCY_FILTER_ORDER } from './taskLabels';
+import {
+  FREQUENCY_FILTER_LABEL,
+  FREQUENCY_FILTER_ORDER,
+  TASK_NOUN,
+  type ItemNoun,
+} from './taskLabels';
 
 export type PersonFilter = 'all' | string;
 export type FrequencyFilter = 'all' | TaskFrequency;
@@ -96,6 +101,8 @@ interface ScheduleFilterBarProps {
   selected: ScheduleFilter;
   counts: { DUE_TODAY: number; OVERDUE: number };
   onSelect: (value: ScheduleFilter) => void;
+  /** «tarea» (por defecto) o «actividad» (🥬 Huerta): solo el nombre accesible. */
+  noun?: ItemNoun;
 }
 
 const SCHEDULE_CHIPS = [
@@ -108,7 +115,12 @@ const SCHEDULE_CHIPS = [
  * backend). Se combinan con la persona elegida; tocar el elegido vuelve a
  * todas, que incluye las programadas para más adelante y las sin fecha.
  */
-export function ScheduleFilterBar({ selected, counts, onSelect }: ScheduleFilterBarProps) {
+export function ScheduleFilterBar({
+  selected,
+  counts,
+  onSelect,
+  noun = TASK_NOUN,
+}: ScheduleFilterBarProps) {
   return (
     <div className="filter-scroller" role="group" aria-label="Filtrar «Una vez» por fecha">
       {SCHEDULE_CHIPS.map(([value, label]) => (
@@ -117,7 +129,7 @@ export function ScheduleFilterBar({ selected, counts, onSelect }: ScheduleFilter
           selected={selected === value}
           onSelect={() => onSelect(selected === value ? 'all' : value)}
           count={counts[value]}
-          accessibleLabel={`${label}, ${counts[value]} ${counts[value] === 1 ? 'tarea' : 'tareas'}`}
+          accessibleLabel={`${label}, ${counts[value]} ${counts[value] === 1 ? noun.singular : noun.plural}`}
         >
           {label}
         </Chip>

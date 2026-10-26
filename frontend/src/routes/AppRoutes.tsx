@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from '../auth/useAuth';
 import { AppShell } from '../app/AppShell';
@@ -13,9 +14,13 @@ import { StockModule } from '../features/stock/StockModule';
 import { ChickenCoopScreen } from '../features/chickenCoop/ChickenCoopScreen';
 import { PetsModule } from '../features/pets/PetsModule';
 import { MoreModule } from '../features/more/MoreModule';
+import { LoadingState } from '../components/ui/StateMessage';
 import { APP_ROUTES } from './navigation';
 import { ProtectedRoute } from './ProtectedRoute';
 import { RequireRole } from './RequireRole';
+
+/** 🥬 Huerta en diferido: su código solo se descarga al entrar al módulo. */
+const KitchenGardenModule = lazy(() => import('../features/kitchenGarden/KitchenGardenModule'));
 
 /**
  * `bootstrapping`/`sessionError` se resuelven ACÁ, antes de cualquier
@@ -58,6 +63,15 @@ export function AppRoutes() {
           <Route path={APP_ROUTES.chickenCoop.path} element={<ChickenCoopScreen />} />
           {/* Listado y ficha de Mascotas como rutas descendientes. */}
           <Route path={`${APP_ROUTES.pets.path}/*`} element={<PetsModule />} />
+          {/* 🥬 Huerta: Actividades, Historial, Desempeño y Participantes. */}
+          <Route
+            path={`${APP_ROUTES.kitchenGarden.path}/*`}
+            element={
+              <Suspense fallback={<LoadingState label="Cargando Huerta…" />}>
+                <KitchenGardenModule />
+              </Suspense>
+            }
+          />
           {/* ☰ Más y sus submódulos como rutas descendientes. */}
           <Route path={`${APP_ROUTES.more.path}/*`} element={<MoreModule />} />
           <Route

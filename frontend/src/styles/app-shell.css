@@ -131,6 +131,14 @@
   color: var(--color-text);
 }
 
+/* Siete destinos (con 🥬 Huerta) en un teléfono angosto: menos relleno lateral
+   para que todos entren sin cortarse. Desde 390 px, la barra de siempre. */
+@media (max-width: 389px) {
+  .app-nav__link {
+    padding-inline: var(--space-1);
+  }
+}
+
 .app-nav__link[aria-current='page'] {
   color: var(--color-brand-accent);
 }

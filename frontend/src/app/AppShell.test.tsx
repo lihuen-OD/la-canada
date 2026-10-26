@@ -8,7 +8,15 @@ vi.mock('../auth/useAuth', () => ({ useAuth: useAuthMock }));
 
 import { AppShell } from './AppShell';
 
-const IMPLEMENTED_PATHS = ['/', '/tasks', '/stock', '/chicken-coop', '/pets', '/more'];
+const IMPLEMENTED_PATHS = [
+  '/',
+  '/tasks',
+  '/stock',
+  '/chicken-coop',
+  '/pets',
+  '/kitchen-garden',
+  '/more',
+];
 
 function mockUser(
   role: SystemRole,
@@ -53,7 +61,7 @@ describe('AppShell', () => {
     );
   });
 
-  it('ADMIN: la barra del prototipo — Inicio, Tareas, Stock, Gallinero, Mascotas y Más', () => {
+  it('ADMIN: la barra del prototipo más 🥬 Huerta — Inicio, Tareas, Stock, Gallinero, Mascotas, Huerta y Más', () => {
     mockUser('ADMIN');
     renderShell();
 
@@ -64,8 +72,12 @@ describe('AppShell', () => {
       '/stock',
       '/chicken-coop',
       '/pets',
+      '/kitchen-garden',
       '/more',
     ]);
+    // 🥬 decorativo: el nombre accesible es el texto.
+    const garden = within(getNav()).getByRole('link', { name: 'Huerta' });
+    expect(garden).toHaveTextContent('🥬');
     expect(within(getNav()).getByRole('link', { name: 'Tareas' })).toBeInTheDocument();
     expect(within(getNav()).getByRole('link', { name: 'Stock' })).toBeInTheDocument();
   });

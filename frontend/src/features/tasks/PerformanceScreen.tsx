@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useEffect, useState, type ReactNode } from 'react';
+import { keepPreviousData, useQuery, type QueryKey } from '@tanstack/react-query';
 import { fetchEmployeePerformance, fetchPerformance } from '../../api/performanceApi';
 import { STALE_TIME } from '../../api/queryClient';
 import { queryKeys } from '../../api/queryKeys';
@@ -13,8 +13,8 @@ import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateM
 import { useBusinessToday } from '../../connectivity/useBusinessToday';
 import { formatDateWithWeekday, formatPercentage } from '../../utils/dateFormat';
 import { TasksSubnav } from './TasksSubnav';
-import { FREQUENCY_LABEL, formatPeriodKey } from './taskLabels';
-import type { PerformanceOccurrence } from '../../api/performanceTypes';
+import { FREQUENCY_LABEL, TASK_NOUN, formatPeriodKey, type ItemNoun } from './taskLabels';
+import type { PerformanceOccurrence, PerformanceResponse } from '../../api/performanceTypes';
 
 /** Rótulo del estado que ya calculó el backend, visto desde la persona del detalle. */
 function occurrenceLabel(item: PerformanceOccurrence, personId: string): string {
@@ -71,7 +71,37 @@ function occurrencePeriod(item: PerformanceOccurrence): string {
     ? FREQUENCY_LABEL[item.frequency]
     : `${formatPeriodKey(item.periodKey)} · ${FREQUENCY_LABEL[item.frequency]}`;
 }
-const percentageLabel = formatPercentage;
+
+/**
+ * De dónde salen las métricas: ✅ Tareas → Desempeño por defecto; 🥬 Huerta
+ * pasa sus endpoints y claves de caché (adaptados a esta forma). La pantalla
+ * solo presenta: el backend calcula todo.
+ */
+export interface PerformanceSource {
+  summaryKey: (userId: string, from: string, to: string) => QueryKey;
+  fetchSummary: (from: string, to: string) => Promise<PerformanceResponse>;
+  detailKey: (userId: string, personId: string, from: string, to: string) => QueryKey;
+  fetchDetail: (personId: string, from: string, to: string) => Promise<PerformanceResponse>;
+}
+
+const TASKS_PERFORMANCE: PerformanceSource = {
+  summaryKey: queryKeys.performance.summary,
+  fetchSummary: fetchPerformance,
+  detailKey: queryKeys.performance.employee,
+  fetchDetail: fetchEmployeePerformance,
+};
+
+interface PerformanceScreenProps {
+  source?: PerformanceSource;
+  /** Pestañas del módulo (por defecto, las de Tareas). */
+  subnav?: ReactNode;
+  /** «tarea» (por defecto) o «actividad» (🥬 Huerta): textos sin obligaciones. */
+  noun?: ItemNoun;
+  /** Lista de personas vacía (por defecto, la de Tareas). */
+  emptyPeopleTitle?: string;
+  /** Título de la pantalla (por defecto, 🏆 Desempeño). */
+  title?: ReactNode;
+}
 
 const isUnauthorized = (reason: unknown) =>
   Boolean(reason && typeof reason === 'object' && 'status' in reason && reason.status === 401);
@@ -82,7 +112,19 @@ const isUnauthorized = (reason: unknown) =>
  * métricas. Cambiar de período conserva el resumen anterior visible hasta
  * que llega el nuevo; completar o revertir tareas lo invalida.
  */
-export function PerformanceScreen() {
+export function PerformanceScreen({
+  source = TASKS_PERFORMANCE,
+  subnav = <TasksSubnav />,
+  noun = TASK_NOUN,
+  emptyPeopleTitle = 'Sin información para este período.',
+  title = (
+    <>
+      <span aria-hidden="true">🏆 </span>Desempeño
+    </>
+  ),
+}: PerformanceScreenProps = {}) {
+  const percentageLabel = (value: number | null) =>
+    value === null ? noun.noObligations : formatPercentage(value);
   const { user, logout } = useAuth();
   const { userId, enabled } = useSessionScope();
   const [preset, setPreset] = useState<Preset>(7);
@@ -91,15 +133,15 @@ export function PerformanceScreen() {
   const range = presetRange(preset, today);
 
   const summary = useQuery({
-    queryKey: queryKeys.performance.summary(userId, range.from, range.to),
-    queryFn: () => fetchPerformance(range.from, range.to),
+    queryKey: source.summaryKey(userId, range.from, range.to),
+    queryFn: () => source.fetchSummary(range.from, range.to),
     enabled,
     staleTime: STALE_TIME.metrics,
     placeholderData: keepPreviousData,
   });
   const detailQuery = useQuery({
-    queryKey: queryKeys.performance.employee(userId, selected ?? '', range.from, range.to),
-    queryFn: () => fetchEmployeePerformance(selected ?? '', range.from, range.to),
+    queryKey: source.detailKey(userId, selected ?? '', range.from, range.to),
+    queryFn: () => source.fetchDetail(selected ?? '', range.from, range.to),
     enabled: enabled && selected !== null,
     staleTime: STALE_TIME.metrics,
   });
@@ -116,15 +158,8 @@ export function PerformanceScreen() {
 
   return (
     <div className="performance">
-      <PageHeader
-        title={
-          <>
-            <span aria-hidden="true">🏆 </span>Desempeño
-          </>
-        }
-        refreshing={Boolean(data) && summary.isFetching}
-      />
-      <TasksSubnav />
+      <PageHeader title={title} refreshing={Boolean(data) && summary.isFetching} />
+      {subnav}
       <div className="filter-scroller" role="group" aria-label="Período">
         {PRESETS.map((days) => (
           <Chip
@@ -193,7 +228,7 @@ export function PerformanceScreen() {
             }
           >
             {data.employees.length === 0 ? (
-              <EmptyState title="Sin información para este período." />
+              <EmptyState title={emptyPeopleTitle} />
             ) : (
               <ul className="performance-list">
                 {data.employees.map((row) => (

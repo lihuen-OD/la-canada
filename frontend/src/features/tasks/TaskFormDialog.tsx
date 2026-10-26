@@ -26,6 +26,8 @@ import {
   SUGGESTION_INPUTS,
   SUGGESTION_LAST_DAY_HINT,
   SUGGESTION_PAIR_ERROR,
+  TASK_NOUN,
+  type ItemNoun,
 } from './taskLabels';
 import { useSubmitGuard } from './useSubmitGuard';
 
@@ -84,6 +86,8 @@ interface TaskFormDialogProps {
   onUpdate: (taskId: string, body: UpdateTaskRequest) => Promise<void>;
   /** Solo en edición (ADMIN): abre la confirmación de eliminación definitiva. */
   onDelete?: (task: TaskItem) => void;
+  /** «tarea» (por defecto) o «actividad» (🥬 Huerta): solo títulos y botón. */
+  noun?: ItemNoun;
 }
 
 export function TaskFormDialog({
@@ -93,6 +97,7 @@ export function TaskFormDialog({
   onCreate,
   onUpdate,
   onDelete,
+  noun = TASK_NOUN,
 }: TaskFormDialogProps) {
   const titleId = useId();
   const [description, setDescription] = useState(task?.description ?? '');
@@ -207,7 +212,7 @@ export function TaskFormDialog({
     <Modal titleId={titleId} onRequestClose={handleCancel} closeDisabled={isSubmitting}>
       <form className="dialog dialog--prototype" onSubmit={handleSubmit} noValidate>
         <h2 id={titleId} className="dialog__title">
-          {isEdit ? 'Editar tarea' : 'Nueva tarea'}
+          {isEdit ? `Editar ${noun.singular}` : `Nueva ${noun.singular}`}
         </h2>
 
         <div className="field">
@@ -393,7 +398,7 @@ export function TaskFormDialog({
             Cancelar
           </Button>
           <Button type="submit" loading={isSubmitting}>
-            {isEdit ? 'Guardar cambios' : 'Crear tarea'}
+            {isEdit ? 'Guardar cambios' : `Crear ${noun.singular}`}
           </Button>
         </div>
 

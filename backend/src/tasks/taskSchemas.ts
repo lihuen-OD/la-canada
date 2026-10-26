@@ -29,7 +29,7 @@ export function normalizeText(value: string): string {
  * igual lo renderiza como texto, esto es defensa en profundidad) y
  * caracteres de control.
  */
-function plainText(label: string, min: number, max: number) {
+export function plainText(label: string, min: number, max: number) {
   return z
     .string({ message: `${label} es obligatoria.` })
     .transform(normalizeText)
@@ -51,9 +51,9 @@ const CONTROL_CHARACTERS = new RegExp(
   `[${String.fromCharCode(0)}-${String.fromCharCode(31)}${String.fromCharCode(127)}]`,
 );
 
-const descriptionSchema = plainText('La descripción', 3, TASK_DESCRIPTION_MAX_LENGTH);
-const frequencySchema = z.enum(TASK_FREQUENCIES, { message: 'Frecuencia inválida.' });
-const uuidSchema = z.string().uuid('Identificador inválido.');
+export const descriptionSchema = plainText('La descripción', 3, TASK_DESCRIPTION_MAX_LENGTH);
+export const frequencySchema = z.enum(TASK_FREQUENCIES, { message: 'Frecuencia inválida.' });
+export const uuidSchema = z.string().uuid('Identificador inválido.');
 
 /**
  * «Fecha para realizar» (solo «Una vez»): fecha de calendario `YYYY-MM-DD`,
@@ -61,7 +61,7 @@ const uuidSchema = z.string().uuid('Identificador inválido.');
  * atrasada). `null` = sin fecha; que la frecuencia la admita lo decide el
  * servicio (`assertScheduledDateFits`), que conoce la frecuencia resultante.
  */
-const scheduledDateSchema = z
+export const scheduledDateSchema = z
   .string({ message: 'La fecha para realizar debe tener formato YYYY-MM-DD.' })
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha para realizar debe tener formato YYYY-MM-DD.')
   .refine((value) => parseLocalDate(value) !== null, 'La fecha para realizar no existe.')
@@ -95,7 +95,7 @@ const suggestionValueSchema = z
   .nullable()
   .optional();
 
-const orderAndSuggestionFields = {
+export const orderAndSuggestionFields = {
   executionOrder: executionOrderSchema.optional(),
   suggestedWeekday: suggestionValueSchema,
   suggestedFirstHalfDay: suggestionValueSchema,

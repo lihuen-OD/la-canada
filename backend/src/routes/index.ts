@@ -9,6 +9,7 @@ import { chickenCoopRouter } from './chickenCoopRoutes';
 import { dashboardRouter } from './dashboardRoutes';
 import { petsRouter } from './petsRoutes';
 import { participantsRouter } from './participantsRoutes';
+import { kitchenGardenRouter } from './kitchenGardenRoutes';
 import {
   employeesRouter,
   eventsRouter,
@@ -32,6 +33,8 @@ apiV1Router.use('/dashboard', dashboardRouter);
 apiV1Router.use('/pets', petsRouter);
 // Personas elegibles como participante de una actividad (empleados y administradores).
 apiV1Router.use('/participants', participantsRouter);
+// 🥬 Huerta: módulo propio (participantes, actividades, historial y Desempeño).
+apiV1Router.use('/kitchen-garden', kitchenGardenRouter);
 // ☰ Más (Etapa 5X): Novedades, Eventos, Clima, Fotos, Configuración y Mi perfil.
 apiV1Router.use('/more', moreRouter);
 apiV1Router.use('/news', newsRouter);

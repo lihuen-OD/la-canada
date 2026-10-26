@@ -47,7 +47,7 @@ export function defaultPerformanceRange(now = new Date()) {
   };
 }
 
-function rangeOrThrow(fromText: string, toText: string, now: Date) {
+export function rangeOrThrow(fromText: string, toText: string, now: Date) {
   const from = parseLocalDate(fromText);
   const requestedTo = parseLocalDate(toText);
   if (!from || !requestedTo || compareLocalDates(from, requestedTo) > 0) {
@@ -75,7 +75,7 @@ function rangeOrThrow(fromText: string, toText: string, now: Date) {
  * `buildRecurringOccurrences`. No son fechas, así que no entran en el filtro
  * `gte/lte` de las claves diarias.
  */
-function calendarKeysInRange(from: LocalDate, to: LocalDate): string[] {
+export function calendarKeysInRange(from: LocalDate, to: LocalDate): string[] {
   const keys: string[] = [];
   for (let day = from; compareLocalDates(day, to) <= 0; day = addDays(day, 1)) {
     if (day.day === 1 || day.day === SECOND_HALF_FIRST_DAY) keys.push(semiMonthlyPeriodKey(day));

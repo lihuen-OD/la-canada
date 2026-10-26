@@ -1,6 +1,10 @@
 import { useEffect } from 'react';
 import { useQueryClient, type QueryKey } from '@tanstack/react-query';
 import type { DashboardResponse } from '../api/dashboardTypes';
+import type {
+  GardenActivitiesResponse,
+  GardenPerformanceResponse,
+} from '../api/kitchenGardenTypes';
 import type { PerformanceResponse } from '../api/performanceTypes';
 import { queryKeys } from '../api/queryKeys';
 import type { TasksListResponse } from '../api/taskTypes';
@@ -51,12 +55,16 @@ export function BusinessDayRefresh(): null {
       queryKeys.tasks.listAll(userId),
       queryKeys.dashboard(userId),
       queryKeys.performance.all(userId),
+      // 🥬 Huerta: solo existen en caché si se entró al módulo.
+      queryKeys.kitchenGarden.activitiesAll(userId),
+      queryKeys.kitchenGarden.performanceAll(userId),
     ];
     const dayDependent = [
       ...reporting,
       queryKeys.tasks.historyAll(userId),
       // Fechas sugeridas del calendario: dependen del período vigente.
       queryKeys.tasks.calendarAll(userId),
+      queryKeys.kitchenGarden.historyAll(userId),
     ];
 
     /**
@@ -76,6 +84,15 @@ export function BusinessDayRefresh(): null {
         time = dashboard.generatedAt;
       } else if (startsWith(key, queryKeys.performance.all(userId))) {
         const performance = (data ?? {}) as Partial<PerformanceResponse>;
+        day = performance.range?.today;
+        time = performance.generatedAt;
+      } else if (startsWith(key, queryKeys.kitchenGarden.activitiesAll(userId))) {
+        const { period } = (data ?? {}) as Partial<GardenActivitiesResponse>;
+        day = period?.today;
+        time = period?.generatedAt;
+      } else if (startsWith(key, queryKeys.kitchenGarden.performanceAll(userId))) {
+        // La pantalla guarda la respuesta ya adaptada, con el mismo `range`/`generatedAt`.
+        const performance = (data ?? {}) as Partial<GardenPerformanceResponse>;
         day = performance.range?.today;
         time = performance.generatedAt;
       }

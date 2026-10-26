@@ -240,6 +240,13 @@ La implementación React actual debe reconciliarse visualmente con esta referenc
 - «🐾 Atenciones de mascotas» (pedido del usuario, 2026-10-26), entre «⚠️ Stock crítico» y «📅 Próximos eventos»: la misma tarjeta (`DashboardCard`) con «Ver vencimientos»; resumen de totales en texto secundario; hasta 5 filas tocables (nombre en negrita, tipo · descripción en una línea con elipsis, «Programada: dd/mm/aaaa · Hace N días» con el tono de 📅 Vencimientos) y la etiqueta de estado (`Badge`) a la derecha. Los enlaces de las tarjetas no se cortan en dos líneas: el título se ajusta.
 - Cada resumen debe provenir de datos reales; no mostrar métricas mock.
 
+### 🥬 Huerta
+
+- Misma estética que 📋 Tareas (filas, chips de persona y frecuencia, «Hoy»/«Vencidas», diálogos, historial y Desempeño), con el título «🥬 Huerta» y pestañas `pill-nav`: 🌱 Actividades, 📅 Historial, 🏆 Desempeño y 👥 Participantes.
+- Participantes: fila con avatar, nombre, puesto (o «Administrador»), etiquetas de estado con texto («Activo», «Inactivo», «Cuenta suspendida») y la acción del ADMIN.
+- Estados vacíos con el botón real debajo («Agregar participante», «Crear actividad»), nunca dentro de `EmptyState`.
+- Barra inferior con 7 destinos: debajo de 390 px el relleno lateral de cada enlace baja a `--space-1` para que entren todos sin cortarse.
+
 ### Tareas
 
 Desempeño se integra mediante navegación secundaria en chips `📋 Tareas | 🏆 Desempeño` (emojis exactos del prototipo; el destino principal también usa 📋), sin destino principal nuevo. Reutiliza tarjetas blancas, cifras Fraunces, avatares, chips desplazables y barras; apila a 360 px y usa grilla desde 768 px.

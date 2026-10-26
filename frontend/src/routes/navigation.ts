@@ -1,6 +1,7 @@
 import type { SystemRole } from '../api/types';
 
-export type NavIconName = 'home' | 'tasks' | 'stock' | 'chickenCoop' | 'pets' | 'more' | 'users';
+export type NavIconName =
+  'home' | 'tasks' | 'stock' | 'chickenCoop' | 'pets' | 'kitchenGarden' | 'more' | 'users';
 
 export interface AppRouteDefinition {
   path: string;
@@ -32,6 +33,8 @@ export const APP_ROUTES = {
   stock: { path: '/stock', label: 'Stock', icon: 'stock' },
   chickenCoop: { path: '/chicken-coop', label: 'Gallinero', icon: 'chickenCoop' },
   pets: { path: '/pets', label: 'Mascotas', icon: 'pets' },
+  /** 🥬 Huerta (2026-10-26): módulo propio pedido por el usuario; el único acceso global es este. */
+  kitchenGarden: { path: '/kitchen-garden', label: 'Huerta', icon: 'kitchenGarden' },
   more: { path: '/more', label: 'Más', icon: 'more', activeFor: ['/admin'] },
   adminUsers: { path: '/admin/users', label: 'Usuarios', icon: 'users', requiredRole: 'ADMIN' },
 } as const satisfies Record<string, AppRouteDefinition>;
@@ -42,6 +45,7 @@ const NAVIGATION_ORDER: readonly AppRouteDefinition[] = [
   APP_ROUTES.stock,
   APP_ROUTES.chickenCoop,
   APP_ROUTES.pets,
+  APP_ROUTES.kitchenGarden,
   APP_ROUTES.more,
 ];
 

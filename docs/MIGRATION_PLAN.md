@@ -340,6 +340,15 @@ Con el código de esta etapa ya validado (ver checklist más abajo), crear el pr
 - **Hallazgo**: `pets.integration`/`more.integration` encolaban copias en Drive con la copia activada en el `.env` local y su limpieza fallaba por la FK de la cola. Se limpiaron por id los residuos de esa corrida (ninguna copia llegó a Drive: `SOURCE_MISSING`) y ambas pruebas fijan ahora la copia desactivada y limpian la cola de sus archivos.
 - **Pendiente**: publicar el código de `demo` (merge a `main` y despliegue), con autorización propia. Migraciones: todas aplicadas en `production` (§41.1).
 
+### 🥬 Huerta — primera versión 🟢 implementada y validada en `demo` (2026-10-26)
+
+- **Alcance** (pedido explícito del usuario): módulo propio con participantes configurables, actividades con el comportamiento de Tareas, historial y Desempeño propios. Fuera de alcance: cultivos, cosechas, insumos, inventario, fotos y notificaciones. Solo `demo`: sin PR, merge ni despliegue. Reglas en `docs/BUSINESS_RULES.md`, "🥬 Huerta"; detalle técnico en `docs/ARCHITECTURE.md` §43.
+- **Decisiones**: tablas, endpoints y caché propios (nada en las de Tareas, Inicio ni Desempeño general); participantes = usuarios activos existentes, una vez por persona; mismas reglas que Tareas reutilizando solo funciones puras y componentes de presentación (props opcionales con el comportamiento de Tareas por defecto); Desempeño con el mismo calculador; módulo en diferido.
+- **Migración**: `20261027120000_kitchen_garden_module` (4 tablas nuevas, 9 FK `RESTRICT`, 12 CHECK, 2 índices únicos parciales), generada offline con `prisma migrate diff` y revisada; sin datos. Aplicada **solo a `demo`** el 2026-10-26 con `db:migrate:deploy` (guarda `DATABASE_TARGET=demo`): 20 de 20 al día. La captura inmediatamente posterior a la migración mantuvo idénticas las huellas previas de tareas, ejecuciones, mascotas, registros, archivos, empleados y usuarios, sin residuos sintéticos. Después de las pruebas, un uso real de la app dejó 1 participante y 1 actividad; se conservan.
+- **Validación**: backend 90/1339, frontend 59/787, lint/typecheck/build/format en verde; integración `kitchenGarden` 15/15; revisión visual en 360, 390 y 1366 px.
+- **Pendiente para `production`** (con autorización propia, antes de publicar este código): aplicar `20261027120000_kitchen_garden_module` con `db:migrate:deploy`. Las 19 anteriores ya están aplicadas allí (salida compartida por el usuario el 2026-10-26).
+- **Para empezar a usarla**: ver `docs/BUSINESS_RULES.md`, "🥬 Huerta" (un ADMIN agrega a los participantes desde la app; nada viene precargado).
+
 ## Etapa 6 — Integrar Neon Object Storage (fotografías y archivos)
 
 - **Objetivo**: conectar `FileAsset` (ya modelado en la Etapa 2, adaptado a Neon Object Storage en la Etapa 2.2) con el Object Storage real de Neon, gestionado desde el backend.

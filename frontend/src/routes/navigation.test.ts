@@ -6,7 +6,7 @@ const as = (role: SystemRole) => (required: SystemRole) => required === role;
 
 describe('navigation', () => {
   it.each(['ADMIN', 'EMPLOYEE'] as const)(
-    '%s: la barra del prototipo — Inicio, Tareas, Stock, Gallinero, Mascotas y Más',
+    '%s: la barra del prototipo más 🥬 Huerta (pedido explícito) — Inicio, Tareas, Stock, Gallinero, Mascotas, Huerta y Más',
     (role) => {
       expect(getVisibleNavigation(as(role)).map((item) => item.path)).toEqual([
         '/',
@@ -14,6 +14,7 @@ describe('navigation', () => {
         '/stock',
         '/chicken-coop',
         '/pets',
+        '/kitchen-garden',
         '/more',
       ]);
     },
@@ -28,6 +29,7 @@ describe('navigation', () => {
     expect('requiredRole' in APP_ROUTES.stock).toBe(false);
     expect('requiredRole' in APP_ROUTES.chickenCoop).toBe(false);
     expect('requiredRole' in APP_ROUTES.pets).toBe(false);
+    expect('requiredRole' in APP_ROUTES.kitchenGarden).toBe(false);
     expect('requiredRole' in APP_ROUTES.more).toBe(false);
   });
 
@@ -43,6 +45,7 @@ describe('navigation', () => {
       '/stock',
       '/chicken-coop',
       '/pets',
+      '/kitchen-garden',
       '/more',
       '/admin/users',
     ]);

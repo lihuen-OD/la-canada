@@ -468,3 +468,41 @@ Función nueva pedida explícitamente por el usuario: el Inicio del prototipo no
 - **Navegación**: «Ver vencimientos» abre 📅 Vencimientos; tocar una atención abre la ficha de esa mascota ubicada en «Próximas atenciones» (desde ahí se registra la aplicación o el control, como siempre).
 - **Sin resultados**: «No hay atenciones vencidas ni previstas para los próximos 30 días», con «Ver vencimientos». Si este resumen no se pudo calcular, la tarjeta lo dice y ofrece reintentar; nunca muestra el mensaje vacío por una falla, y las demás tarjetas de Inicio se ven igual.
 - **Actualización**: registrar una atención (con o sin próxima fecha), cumplirla, anular un registro, corregir la próxima fecha y activar, desactivar, editar o eliminar una mascota actualizan Inicio. Al empezar un día nuevo, Inicio se revalida con el reloj compartido confirmado por el backend, como el resto de sus tarjetas.
+
+## 🥬 Huerta (2026-10-26)
+
+Módulo NUEVO pedido explícitamente por el usuario: el prototipo no lo tenía. Primera versión con participantes, actividades, historial y Desempeño propios. **Fuera de alcance**: cultivos, cosechas, insumos, inventario, fotos y notificaciones.
+
+**Independencia de ✅ Tareas.** Datos, endpoints y caché propios: una actividad de la Huerta nunca se guarda en Tareas, ninguna tarea se copia, mueve ni clasifica como Huerta, y la Huerta no aparece en los listados, contadores, historial ni Desempeño de Tareas, ni en Inicio. El único acceso global es «🥬 Huerta» en la navegación. Comparte con Tareas solo las reglas: frecuencias, períodos, estados de «Una vez», sugerencias, orden y criterios de Desempeño son exactamente los mismos.
+
+**Participantes**
+
+- Un ADMIN los agrega y desactiva eligiendo **usuarios activos ya existentes** de la app: empleados y administradores, una sola vez por persona (aunque tenga usuario y ficha de empleado). La identidad es el usuario, nunca el nombre. No se crean usuarios ni empleados, y nada viene precargado: el módulo empieza vacío.
+- Participar no cambia el rol ni los permisos globales. Un ADMIN sin ficha de empleado puede participar y se muestra con su nombre real (Mi perfil).
+- Desactivar la participación conserva actividades e historial. Si tiene actividades activas asignadas, se rechaza con un mensaje claro («tiene N actividades activas asignadas. Reasignalas o desactivalas primero»); nada se reasigna ni se borra solo. Volver a agregar a quien fue desactivado reactiva la misma participación.
+- Suspender o deshabilitar la cuenta de una persona no borra su historia en la Huerta; deja de aparecer entre los candidatos.
+
+**Permisos**
+
+| Acción | ADMIN | Participante activo | Otro usuario |
+| --- | --- | --- | --- |
+| Abrir la Huerta y consultar actividades, historial, participantes | ✔ | ✔ | ✔ |
+| Agregar/desactivar participantes; crear, editar, asignar, activar/desactivar actividades | ✔ | — | — |
+| Completar | cualquiera, indicando quién la realizó (participante activo) | solo las asignadas a él, a su nombre | — |
+| Deshacer | cualquiera vigente, con motivo | lo que completó él, en el período vigente | — |
+| Desempeño | todos los participantes y el detalle de cada uno | solo lo suyo | nada (no participa) |
+
+Todo se valida también en el backend.
+
+**Actividades** — las mismas reglas que Tareas (§4–§5, "Tareas quincenales", "Fecha para realizar…", "Orden de realización…"): diaria, semanal (lunes a domingo), quincenal (1–15 y 16–último día), mensual, bimestral (ene–feb, mar–abr…), anual, urgente y «Una vez»; «Una vez» con fecha Programada/Para hoy/Vencida y sin fecha sin estado; cumplimiento anticipado permitido; una «Una vez» completada sale del listado activo y se consulta en el historial; sugerencias por frecuencia (el día que no existe toma el último del mes) que solo orientan; orden fecha → número (diarias y urgentes solo por número). Edición parcial: omitido conserva, `null` quita; cambiar la frecuencia limpia solo lo incompatible y el formulario lo avisa. Sin borrado físico desde la operación: se desactivan.
+
+**Ejecuciones e historial** — cada finalización guarda por separado el responsable esperado, quién la realizó y el usuario que la registró (siempre la sesión). Una sola ejecución vigente por actividad y período (también en la base). Deshacer es lógico y auditado. Reasignar, cambiar la frecuencia o reprogramar abren otra versión de la planificación: el pasado no se reescribe. El historial semanal usa el criterio del de Tareas y se filtra por participante.
+
+**Desempeño de la Huerta** — pestaña propia, sin conexión con el Desempeño general ni con Inicio. Mismos rangos (7, 14 y 30 días), obligaciones y métricas que Tareas → Desempeño, calculados por el backend con la planificación histórica de la Huerta. Una «Una vez» con fecha futura todavía no es exigible. Sin obligaciones, «Sin actividades previstas» (nunca un 0 %).
+
+*Ejemplo* (7 días, del 20 al 26/10/2026, visto el lunes 26 a las 18 h; participantes Pablo y una administradora):
+- «Regar almácigos», diaria de Pablo: la hizo él el 20, 21, 22 y 24; el 23 la hizo la administradora (cobertura); el 25 y el 26, sin completar → 7 obligaciones de Pablo: 4 propias, 1 cubierta, 2 pendientes.
+- «Ventilar invernadero», diaria reasignada el 24 al mediodía de Pablo a la administradora: del 20 al 23 es de Pablo (hizo el 20 y el 21) y del 24 al 26 de ella (hizo el 24 y el 25). Cada día cuenta una sola vez, para el responsable vigente al cierre de ese día.
+- «Desmalezar canteros», semanal de la administradora: la semana del 26 (la del 19 empezó antes del rango) → hecha.
+- «Revisar riego por goteo», «Una vez» para el 24, de Pablo, sin completar → pendiente. «Sembrar lechuga», «Una vez» para el 30 → todavía no cuenta.
+- Resultado: **Pablo** 12 asignadas, 6 propias, 1 le cubrieron, 5 sin completar → **50 %**. **Administradora** 4 asignadas, 3 propias, 1 sin completar, cubrió 1 → **75 %** (la cobertura no suma a su porcentaje). **Equipo** 16 asignadas, 9 propias → **56,3 %**. Un tercer participante sin actividades: «Sin actividades previstas».

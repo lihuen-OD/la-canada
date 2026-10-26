@@ -277,6 +277,12 @@ model User {
   participatedStockMovements StockMovement[] @relation("StockMovementParticipantUser")
   participatedEggCollections EggCollection[] @relation("EggCollectionParticipantUser")
 
+  /// 🥬 Huerta — su participación (a lo sumo una) y las ejecuciones que
+  /// registró o revirtió desde su sesión. Participar no cambia rol ni permisos.
+  kitchenGardenParticipant        KitchenGardenParticipant? @relation("KitchenGardenParticipantUser")
+  recordedKitchenGardenExecutions KitchenGardenExecution[]  @relation("KitchenGardenExecutionRecordedBy")
+  revertedKitchenGardenExecutions KitchenGardenExecution[]  @relation("KitchenGardenExecutionRevertedBy")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -1392,4 +1398,124 @@ model PropertyLocation {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("property_locations")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 🥬 Huerta (2026-10-26) — módulo PROPIO, independiente de ✅ Tareas: sus
+// actividades, planificación histórica, ejecuciones y participantes viven en
+// tablas `kitchen_garden_*` y nunca en las de Tareas. Solo comparte el enum
+// `TaskFrequency` (mismas frecuencias y períodos) y las reglas puras de
+// fechas (`lib/businessTime.ts`, `tasks/taskSchedule.ts`,
+// `tasks/taskSuggestion.ts`). CHECKs en la migración `kitchen_garden_module`.
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Participante de la Huerta: un usuario EXISTENTE (empleado o
+/// administrador), una sola vez por persona (`userId` único). La identidad es
+/// el usuario, nunca el nombre. Desactivar la participación conserva sus
+/// actividades e historial; participar no cambia el rol ni los permisos.
+model KitchenGardenParticipant {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String  @unique @map("user_id") @db.Uuid
+  user   User    @relation("KitchenGardenParticipantUser", fields: [userId], references: [id])
+  active Boolean @default(true)
+
+  activities          KitchenGardenActivity[]
+  planningIntervals   KitchenGardenPlanningInterval[]
+  assignedExecutions  KitchenGardenExecution[]        @relation("KitchenGardenExecutionAssignedTo")
+  completedExecutions KitchenGardenExecution[]        @relation("KitchenGardenExecutionCompletedBy")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("kitchen_garden_participants")
+}
+
+/// Actividad de la Huerta: mismas frecuencias, fecha de «Una vez», orden de
+/// realización y programación sugerida que una tarea (mismas reglas y los
+/// mismos CHECK), con un participante de la Huerta como responsable.
+model KitchenGardenActivity {
+  id                     String                   @id @default(uuid()) @db.Uuid
+  description            String
+  participantId          String                   @map("participant_id") @db.Uuid
+  participant            KitchenGardenParticipant @relation(fields: [participantId], references: [id])
+  frequency              TaskFrequency
+  active                 Boolean                  @default(true)
+  /// «Fecha para realizar» opcional, solo `ONE_TIME` (versionada en la planificación).
+  scheduledDate          DateTime?                @map("scheduled_date") @db.Date
+  /// «Orden de realización» opcional (1–9999); solo ordena, no versiona.
+  executionOrder         Int?                     @map("execution_order") @db.SmallInt
+  /// Programación SUGERIDA de las recurrentes (ver `tasks/taskSuggestion.ts`).
+  suggestedWeekday       Int?                     @map("suggested_weekday") @db.SmallInt
+  suggestedFirstHalfDay  Int?                     @map("suggested_first_half_day") @db.SmallInt
+  suggestedSecondHalfDay Int?                     @map("suggested_second_half_day") @db.SmallInt
+  suggestedMonthDay      Int?                     @map("suggested_month_day") @db.SmallInt
+  suggestedMonth         Int?                     @map("suggested_month") @db.SmallInt
+
+  executions        KitchenGardenExecution[]
+  planningIntervals KitchenGardenPlanningInterval[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  /// Mismo responsable con una actividad de descripción idéntica: duplicado.
+  @@unique([participantId, description])
+  @@map("kitchen_garden_activities")
+}
+
+/// Versión de la planificación de una actividad (responsable, frecuencia y
+/// fecha de «Una vez»): reasignar, cambiar la frecuencia o reprogramar cierra
+/// la vigente y abre otra, así que Desempeño nunca reescribe el pasado.
+model KitchenGardenPlanningInterval {
+  id            String                   @id @default(uuid()) @db.Uuid
+  activityId    String                   @map("activity_id") @db.Uuid
+  activity      KitchenGardenActivity    @relation(fields: [activityId], references: [id])
+  participantId String                   @map("participant_id") @db.Uuid
+  participant   KitchenGardenParticipant @relation(fields: [participantId], references: [id])
+  frequency     TaskFrequency
+  scheduledDate DateTime?                @map("scheduled_date") @db.Date
+  validFrom     DateTime                 @map("valid_from")
+  validTo       DateTime?                @map("valid_to")
+  createdAt     DateTime                 @default(now()) @map("created_at")
+
+  /// A lo sumo UNA versión abierta por actividad.
+  @@unique([activityId], map: "kitchen_garden_planning_intervals_one_open_per_activity", where: raw("valid_to IS NULL"))
+  @@index([activityId, validFrom])
+  @@index([participantId, validFrom])
+  @@map("kitchen_garden_planning_intervals")
+}
+
+/// Un evento de finalización de una actividad en un período. Guarda por
+/// separado el responsable esperado (snapshot), quién la realizó y el usuario
+/// de la sesión que la registró. Revertir la marca (nunca la borra) y volver
+/// a completar crea una fila nueva.
+model KitchenGardenExecution {
+  id         String                @id @default(uuid()) @db.Uuid
+  activityId String                @map("activity_id") @db.Uuid
+  activity   KitchenGardenActivity @relation(fields: [activityId], references: [id])
+
+  periodKey   String   @map("period_key")
+  completed   Boolean  @default(true)
+  completedAt DateTime @map("completed_at")
+
+  assignedParticipantId    String                   @map("assigned_participant_id") @db.Uuid
+  assignedParticipant      KitchenGardenParticipant @relation("KitchenGardenExecutionAssignedTo", fields: [assignedParticipantId], references: [id])
+  completedByParticipantId String                   @map("completed_by_participant_id") @db.Uuid
+  completedByParticipant   KitchenGardenParticipant @relation("KitchenGardenExecutionCompletedBy", fields: [completedByParticipantId], references: [id])
+  recordedByUserId         String                   @map("recorded_by_user_id") @db.Uuid
+  recordedByUser           User                     @relation("KitchenGardenExecutionRecordedBy", fields: [recordedByUserId], references: [id])
+
+  revertedAt       DateTime? @map("reverted_at")
+  revertedByUserId String?   @map("reverted_by_user_id") @db.Uuid
+  revertedByUser   User?     @relation("KitchenGardenExecutionRevertedBy", fields: [revertedByUserId], references: [id], onDelete: Restrict)
+  revertReason     String?   @map("revert_reason")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  /// Una sola ejecución VIGENTE por actividad y período (defensa final ante concurrencia).
+  @@unique([activityId, periodKey], where: raw("reverted_at IS NULL"))
+  @@index([assignedParticipantId])
+  @@index([completedByParticipantId])
+  @@index([completedAt])
+  @@map("kitchen_garden_executions")
 }

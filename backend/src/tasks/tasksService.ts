@@ -33,6 +33,7 @@ import {
   scheduledDateText,
   scheduledDateValue,
 } from './taskSchedule';
+import { FREQUENCY_ORDER, compareOperationalOrder } from './taskOrder';
 import {
   EMPTY_SUGGESTION,
   SUGGESTION_FIELDS,
@@ -60,70 +61,6 @@ export interface TaskActor {
   role: AuthContext['role'];
   /** Empleado vinculado y ACTIVO del usuario autenticado, o null (p. ej. el admin inicial). */
   employeeId: string | null;
-}
-
-/**
- * Orden operativo del prototipo: urgente → única → diaria → semanal → mensual
- * (quincenal, entre semanal y mensual; bimestral y anual, después de mensual).
- */
-const FREQUENCY_ORDER: Record<TaskFrequency, number> = {
-  URGENT: 0,
-  ONE_TIME: 1,
-  DAILY: 2,
-  WEEKLY: 3,
-  SEMI_MONTHLY: 4,
-  MONTHLY: 5,
-  BIMONTHLY: 6,
-  ANNUAL: 7,
-};
-
-/** Fechas `YYYY-MM-DD`: primero las que tienen fecha (la más antigua arriba), después las sin fecha. */
-function compareDates(a: string | null, b: string | null): number {
-  if (a === b) return 0;
-  if (a === null) return 1;
-  if (b === null) return -1;
-  return a.localeCompare(b);
-}
-
-/** «Orden de realización»: primero las numeradas, de menor a mayor; después las sin orden. */
-function compareExecutionOrder(a: number | null, b: number | null): number {
-  if (a === b) return 0;
-  if (a === null) return 1;
-  if (b === null) return -1;
-  return a - b;
-}
-
-/**
- * Fecha que ordena dentro de la frecuencia: la «Fecha para realizar» de una
- * «Una vez» o la fecha sugerida del período vigente de una recurrente (ambas
- * del backend). Diarias y urgentes se ordenan solo por número.
- */
-function sortDateOf(task: Pick<SerializedTask, 'frequency' | 'scheduledDate' | 'suggestedDate'>) {
-  switch (task.frequency) {
-    case 'DAILY':
-    case 'URGENT':
-      return null;
-    case 'ONE_TIME':
-      return task.scheduledDate;
-    default:
-      return task.suggestedDate;
-  }
-}
-
-/**
- * Orden operativo (docs/BUSINESS_RULES.md, "Orden de realización y
- * programación sugerida"): frecuencia → fecha (sin fecha al final) → orden de
- * realización (sin número al final) → descripción → id (desempate estable).
- * Nunca por estado ni cumplimiento.
- */
-function compareOperationalOrder(a: SerializedTask, b: SerializedTask): number {
-  return (
-    FREQUENCY_ORDER[a.frequency] - FREQUENCY_ORDER[b.frequency] ||
-    compareDates(sortDateOf(a), sortDateOf(b)) ||
-    compareExecutionOrder(a.executionOrder, b.executionOrder) ||
-    a.description.localeCompare(b.description, 'es') ||
-    a.id.localeCompare(b.id)
-  );
 }
 
 const suggestionSelect = {

@@ -47,6 +47,15 @@ function PetsNavEmoji() {
   );
 }
 
+/** 🥬 Huerta — emoji decorativo; el nombre accesible es la etiqueta «Huerta». */
+function KitchenGardenNavEmoji() {
+  return (
+    <span className="nav-emoji" aria-hidden="true">
+      🥬
+    </span>
+  );
+}
+
 /** ☰ Más — símbolo del prototipo, decorativo. */
 function MoreNavEmoji() {
   return (
@@ -62,6 +71,7 @@ const NAV_ICONS: Record<NavIconName, ComponentType<{ size?: 'lg' }>> = {
   stock: StockNavEmoji,
   chickenCoop: ChickenCoopNavEmoji,
   pets: PetsNavEmoji,
+  kitchenGarden: KitchenGardenNavEmoji,
   more: MoreNavEmoji,
   users: UsersIcon,
 };

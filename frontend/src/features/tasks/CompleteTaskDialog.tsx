@@ -6,6 +6,7 @@ import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { AlertIcon } from '../../components/ui/icons';
 import { errorMessageOf } from './dialogErrors';
+import { TASK_NOUN, type ItemNoun } from './taskLabels';
 import { useSubmitGuard } from './useSubmitGuard';
 
 interface CompleteTaskDialogProps {
@@ -14,6 +15,8 @@ interface CompleteTaskDialogProps {
   employees: TaskEmployee[];
   onCancel: () => void;
   onConfirm: (employeeId: string) => Promise<void>;
+  /** «tarea» (por defecto) o «actividad» (🥬 Huerta): solo textos. */
+  noun?: ItemNoun;
 }
 
 /**
@@ -26,6 +29,7 @@ export function CompleteTaskDialog({
   employees,
   onCancel,
   onConfirm,
+  noun = TASK_NOUN,
 }: CompleteTaskDialogProps) {
   const titleId = useId();
   const descriptionId = useId();
@@ -36,7 +40,7 @@ export function CompleteTaskDialog({
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     if (!employeeId) {
-      setErrorMessage('Elegí quién realizó la tarea.');
+      setErrorMessage(`Elegí quién realizó la ${noun.singular}.`);
       return;
     }
     void run(async () => {
@@ -62,7 +66,7 @@ export function CompleteTaskDialog({
     >
       <form className="dialog dialog--prototype" onSubmit={handleSubmit}>
         <h2 id={titleId} className="dialog__title">
-          ✅ Registrar tarea completada
+          ✅ Registrar {noun.singular} completada
         </h2>
         <p id={descriptionId} className="dialog__description">
           «{task.description}» quedará registrada como realizada por la persona que elijas. En la
