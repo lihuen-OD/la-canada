@@ -234,6 +234,7 @@ La implementación React actual debe reconciliarse visualmente con esta referenc
 ### Inicio
 
 - Grilla de KPI: dos columnas en móvil y cuatro en escritorio.
+- Tarjetas (2026-10-26): una sola secuencia en orden de lectura (Urgentes, Desempeño, Stock crítico, Atenciones de mascotas, Próximos eventos, Novedades). En móvil y tablet (< 900 px), una columna. En escritorio, dos columnas que se llenan de arriba abajo y que el navegador equilibra (multi-columna CSS, `break-inside: avoid`): ninguna queda vacía mientras la otra acumula tarjetas, sin alturas fijas ni tarjetas estiradas, y el orden visual (columna por columna) coincide con el del DOM y el teclado.
 - Cifras en Fraunces.
 - Bloques resumidos para tareas urgentes, progreso del equipo, alertas de stock, próximos eventos y novedades.
 - «🐾 Atenciones de mascotas» (pedido del usuario, 2026-10-26), entre «⚠️ Stock crítico» y «📅 Próximos eventos»: la misma tarjeta (`DashboardCard`) con «Ver vencimientos»; resumen de totales en texto secundario; hasta 5 filas tocables (nombre en negrita, tipo · descripción en una línea con elipsis, «Programada: dd/mm/aaaa · Hace N días» con el tono de 📅 Vencimientos) y la etiqueta de estado (`Badge`) a la derecha. Los enlaces de las tarjetas no se cortan en dos líneas: el título se ajusta.

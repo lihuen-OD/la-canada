@@ -119,142 +119,140 @@ function DashboardContent({
         />
         <KpiLink to="/chicken-coop" tone="info" value={kpis.goodEggsToday} label="🥚 Huevos hoy" />
       </nav>
+      {/* Una sola secuencia de tarjetas, en orden de lectura: en escritorio se
+          reparte en dos columnas equilibradas (home.css), sin reordenar. */}
       <div className="home-dashboard">
-        <div className="home-dashboard__column">
-          <DashboardCard title="🚨 Urgentes" to="/tasks" linkLabel="Ver tareas">
-            {data.urgentTasks.length ? (
-              <ul className="home-list">
-                {data.urgentTasks.map((task) => (
-                  <li className="home-task" key={task.id}>
-                    <Avatar
-                      name={task.assignee.displayName}
-                      colorHex={task.assignee.colorHex}
-                      size="sm"
-                    />
-                    <span>
-                      <strong>{task.description}</strong>
-                      <small>{task.assignee.displayName}</small>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <EmptyText>Sin urgentes 🎉</EmptyText>
-            )}
-          </DashboardCard>
-          <PerformanceCard performance={data.performance} />
-        </div>
-        <div className="home-dashboard__column">
-          {/* Solo críticos (en el mínimo o por debajo), igual que Compras: los bajos quedan en Stock. */}
-          <DashboardCard title="⚠️ Stock crítico" to="/stock/purchases" linkLabel="Ver compras">
-            {data.stockAlerts.length ? (
-              <ul className="home-list">
-                {data.stockAlerts.map((item) => {
-                  const percent = stockBarPercent(
-                    item.currentQuantity,
-                    item.minimumQuantity,
-                    item.targetQuantity,
-                  );
-                  return (
-                    <li className="home-stock" key={item.id}>
-                      <span className="home-stock__body">
-                        <strong>
-                          {item.name} <small>({areaLabel(item.area)})</small>
-                        </strong>
-                        <span className="home-stock__row">
-                          {percent !== null ? (
-                            <span className="home-stock__bar" aria-hidden="true">
-                              <span
-                                className={`is-${item.stockLevel}`}
-                                style={{ width: `${percent}%` }}
-                              />
-                            </span>
-                          ) : null}
-                          <small>
-                            {item.currentQuantity}
-                            {item.targetQuantity !== null ? `/${item.targetQuantity}` : ''}{' '}
-                            {item.unit} · mín. {item.minimumQuantity}
-                          </small>
-                        </span>
+        <DashboardCard title="🚨 Urgentes" to="/tasks" linkLabel="Ver tareas">
+          {data.urgentTasks.length ? (
+            <ul className="home-list">
+              {data.urgentTasks.map((task) => (
+                <li className="home-task" key={task.id}>
+                  <Avatar
+                    name={task.assignee.displayName}
+                    colorHex={task.assignee.colorHex}
+                    size="sm"
+                  />
+                  <span>
+                    <strong>{task.description}</strong>
+                    <small>{task.assignee.displayName}</small>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <EmptyText>Sin urgentes 🎉</EmptyText>
+          )}
+        </DashboardCard>
+        <PerformanceCard performance={data.performance} />
+        {/* Solo críticos (en el mínimo o por debajo), igual que Compras: los bajos quedan en Stock. */}
+        <DashboardCard title="⚠️ Stock crítico" to="/stock/purchases" linkLabel="Ver compras">
+          {data.stockAlerts.length ? (
+            <ul className="home-list">
+              {data.stockAlerts.map((item) => {
+                const percent = stockBarPercent(
+                  item.currentQuantity,
+                  item.minimumQuantity,
+                  item.targetQuantity,
+                );
+                return (
+                  <li className="home-stock" key={item.id}>
+                    <span className="home-stock__body">
+                      <strong>
+                        {item.name} <small>({areaLabel(item.area)})</small>
+                      </strong>
+                      <span className="home-stock__row">
+                        {percent !== null ? (
+                          <span className="home-stock__bar" aria-hidden="true">
+                            <span
+                              className={`is-${item.stockLevel}`}
+                              style={{ width: `${percent}%` }}
+                            />
+                          </span>
+                        ) : null}
                         <small>
-                          {item.suggestedPurchaseQuantity !== null
-                            ? `Comprar: ${item.suggestedPurchaseQuantity} ${item.unit}`
-                            : COMPLETE_TARGET_TEXT}
+                          {item.currentQuantity}
+                          {item.targetQuantity !== null ? `/${item.targetQuantity}` : ''}{' '}
+                          {item.unit} · mín. {item.minimumQuantity}
                         </small>
                       </span>
-                      <span className={`home-stock__badge is-${item.stockLevel}`}>
-                        {LEVEL_LABEL[item.stockLevel]}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : (
-              <EmptyText>Ningún producto en stock crítico ✅</EmptyText>
-            )}
-          </DashboardCard>
-          <PetDueCard petDue={data.petDue} onRetry={onRetry} />
-          <DashboardCard title="📅 Próximos eventos" to="/more/events" linkLabel="Ver todos">
-            {data.upcomingEvents.length ? (
-              <ul className="home-list">
-                {data.upcomingEvents.map((event) => {
-                  const date = new Date(`${event.date}T00:00:00.000Z`);
-                  const day = date.getUTCDate();
-                  const when =
-                    event.daysUntil === 0
-                      ? 'Hoy'
-                      : event.daysUntil === 1
-                        ? 'Mañana'
-                        : `En ${event.daysUntil} días`;
-                  const monthLabel = new Intl.DateTimeFormat('es-AR', {
-                    month: 'short',
-                    timeZone: 'UTC',
-                  })
-                    .format(date)
-                    .replace('.', '');
-                  return (
-                    <li className="home-event" key={event.id}>
-                      <time dateTime={event.date}>
-                        <strong>{day}</strong>
-                        <small>{monthLabel}</small>
-                      </time>
-                      <span>
-                        <strong>
-                          {EVENT_ICON[event.type]} {event.title}
-                        </strong>
-                        <small>{when}</small>
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : (
-              <EmptyText>Sin eventos próximos</EmptyText>
-            )}
-          </DashboardCard>
-          <DashboardCard title="📝 Últimas novedades" to="/more/news" linkLabel="Ver novedades">
-            {data.latestNews.length ? (
-              <ul className="home-list">
-                {data.latestNews.map((news) => (
-                  <li className="home-news" key={news.id}>
-                    <span className="home-news__header">
-                      <Avatar
-                        name={news.employee.displayName}
-                        colorHex={news.employee.colorHex}
-                        size="sm"
-                      />
-                      <strong>{news.employee.displayName}</strong>
-                      <small>{newsAge(news.createdAt)}</small>
+                      <small>
+                        {item.suggestedPurchaseQuantity !== null
+                          ? `Comprar: ${item.suggestedPurchaseQuantity} ${item.unit}`
+                          : COMPLETE_TARGET_TEXT}
+                      </small>
                     </span>
-                    <p>{news.text}</p>
+                    <span className={`home-stock__badge is-${item.stockLevel}`}>
+                      {LEVEL_LABEL[item.stockLevel]}
+                    </span>
                   </li>
-                ))}
-              </ul>
-            ) : (
-              <EmptyText>Sin novedades</EmptyText>
-            )}
-          </DashboardCard>
-        </div>
+                );
+              })}
+            </ul>
+          ) : (
+            <EmptyText>Ningún producto en stock crítico ✅</EmptyText>
+          )}
+        </DashboardCard>
+        <PetDueCard petDue={data.petDue} onRetry={onRetry} />
+        <DashboardCard title="📅 Próximos eventos" to="/more/events" linkLabel="Ver todos">
+          {data.upcomingEvents.length ? (
+            <ul className="home-list">
+              {data.upcomingEvents.map((event) => {
+                const date = new Date(`${event.date}T00:00:00.000Z`);
+                const day = date.getUTCDate();
+                const when =
+                  event.daysUntil === 0
+                    ? 'Hoy'
+                    : event.daysUntil === 1
+                      ? 'Mañana'
+                      : `En ${event.daysUntil} días`;
+                const monthLabel = new Intl.DateTimeFormat('es-AR', {
+                  month: 'short',
+                  timeZone: 'UTC',
+                })
+                  .format(date)
+                  .replace('.', '');
+                return (
+                  <li className="home-event" key={event.id}>
+                    <time dateTime={event.date}>
+                      <strong>{day}</strong>
+                      <small>{monthLabel}</small>
+                    </time>
+                    <span>
+                      <strong>
+                        {EVENT_ICON[event.type]} {event.title}
+                      </strong>
+                      <small>{when}</small>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <EmptyText>Sin eventos próximos</EmptyText>
+          )}
+        </DashboardCard>
+        <DashboardCard title="📝 Últimas novedades" to="/more/news" linkLabel="Ver novedades">
+          {data.latestNews.length ? (
+            <ul className="home-list">
+              {data.latestNews.map((news) => (
+                <li className="home-news" key={news.id}>
+                  <span className="home-news__header">
+                    <Avatar
+                      name={news.employee.displayName}
+                      colorHex={news.employee.colorHex}
+                      size="sm"
+                    />
+                    <strong>{news.employee.displayName}</strong>
+                    <small>{newsAge(news.createdAt)}</small>
+                  </span>
+                  <p>{news.text}</p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <EmptyText>Sin novedades</EmptyText>
+          )}
+        </DashboardCard>
       </div>
     </div>
   );
@@ -468,11 +466,8 @@ function DashboardSkeleton() {
         ))}
       </div>
       <div className="home-dashboard">
-        {Array.from({ length: 2 }, (_, index) => (
-          <div className="home-dashboard__column" key={index}>
-            <div className="card home-skeleton home-skeleton--card" />
-            <div className="card home-skeleton home-skeleton--card" />
-          </div>
+        {Array.from({ length: 4 }, (_, index) => (
+          <div className="card home-skeleton home-skeleton--card" key={index} />
         ))}
       </div>
       <span className="sr-only">Cargando Inicio…</span>

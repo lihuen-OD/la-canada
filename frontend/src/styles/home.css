@@ -48,14 +48,10 @@
   background: var(--color-info-bg);
   color: var(--color-info);
 }
-.home-dashboard,
-.home-dashboard__column {
+.home-dashboard {
   display: grid;
   gap: var(--space-3);
   min-width: 0;
-}
-.home-dashboard__column {
-  align-content: start;
 }
 .home-card-link {
   display: inline-flex;
@@ -337,10 +333,19 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
+/* Escritorio: dos columnas que se llenan de arriba abajo en el orden del DOM
+   y que el navegador equilibra (multi-columna): ninguna queda vacía mientras
+   la otra acumula tarjetas. Cada tarjeta conserva su altura natural y nunca
+   se parte entre columnas. */
 @media (min-width: 900px) {
   .home-dashboard {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: start;
+    display: block;
+    columns: 2;
+    column-gap: var(--space-3);
+  }
+  .home-dashboard > * {
+    break-inside: avoid;
+    margin-bottom: var(--space-3);
   }
 }
 /* Sin tareas en el período: barra neutra y texto en lugar de cifra. */
