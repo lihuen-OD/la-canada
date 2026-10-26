@@ -30,6 +30,7 @@ const db = vi.hoisted(() => {
       findUniqueOrThrow: fn(),
     },
     idempotencyRecord: { findUnique: fn(), create: fn(), update: fn() },
+    driveBackupJob: { create: fn() },
     employeeProfile: { findUnique: fn(), upsert: fn() },
     employeeChild: { findMany: fn(), findFirst: fn(), create: fn(), deleteMany: fn() },
     propertyLocation: { findUnique: fn() },
@@ -42,6 +43,7 @@ vi.mock('../../lib/prisma', () => ({ prisma: db }));
 import { createHash } from 'node:crypto';
 import { Prisma } from '../../generated/prisma/client';
 import { canonicalRequestHash } from '../../lib/idempotency';
+import { setDriveBackupConfigForTests } from '../../driveBackup/config';
 import { setObjectStorageForTests, type ObjectStorageClient } from '../../lib/objectStorage';
 import type { TaskActor } from '../../tasks/tasksService';
 import { createNews } from '../../more/newsService';
@@ -59,6 +61,12 @@ const ADMIN: TaskActor = { userId: 'user-a', role: 'ADMIN', employeeId: null };
 const NOW = new Date('2026-09-26T02:30:00Z'); // 23:30 del 25/09 en Buenos Aires
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
 const audits = () => db.auditLog.create.mock.calls.map((call) => call[0].data);
+/** Copia en Drive activada (Etapa 5Z); la subida nunca lee las credenciales. */
+const DRIVE_DEMO = {
+  destinationId: 'shared-drive-root-1',
+  environment: 'DEMO' as const,
+  credentialsFile: '/no/existe/credenciales.json',
+};
 
 function fakeStorage(overrides: Partial<ObjectStorageClient> = {}) {
   return {
@@ -78,8 +86,13 @@ beforeEach(() => {
   db.$transaction.mockImplementation((run: (tx: typeof db) => unknown) => run(db));
   db.auditLog.create.mockResolvedValue({});
   setObjectStorageForTests(null);
+  // La copia en Drive la fija cada prueba, nunca el `.env` de la máquina.
+  setDriveBackupConfigForTests(null);
 });
-afterEach(() => setObjectStorageForTests(undefined));
+afterEach(() => {
+  setObjectStorageForTests(undefined);
+  setDriveBackupConfigForTests(undefined);
+});
 
 describe('📝 Novedades — "¿Quién reporta?" según la sesión', () => {
   const row = (employeeId: string) => ({
@@ -221,6 +234,60 @@ describe('📸 Fotos — subida validada, idempotente y borrado solo ADMIN', () 
       data: { status: 'AVAILABLE' },
     });
     expect(audits()[0]).toMatchObject({ action: 'photo.uploaded', actorUserId: 'user-e' });
+    // Copia en Drive desactivada: sin trabajo de copia.
+    expect(db.driveBackupJob.create).not.toHaveBeenCalled();
+  });
+
+  it('copia en Drive activada: el trabajo se registra DENTRO de la transacción, después de AVAILABLE y antes de la auditoría', async () => {
+    setDriveBackupConfigForTests(DRIVE_DEMO);
+    setObjectStorageForTests(fakeStorage());
+    let inTransaction = false;
+    db.$transaction.mockImplementation(async (run: (tx: typeof db) => unknown) => {
+      inTransaction = true;
+      try {
+        return await run(db);
+      } finally {
+        inTransaction = false;
+      }
+    });
+    const enqueuedInTransaction: boolean[] = [];
+    db.driveBackupJob.create.mockImplementation(async () => {
+      enqueuedInTransaction.push(inTransaction);
+      return {};
+    });
+    db.fileAsset.create.mockResolvedValue({ id: ID });
+    db.fileAsset.updateMany.mockResolvedValue({ count: 1 });
+    db.fileAsset.findUniqueOrThrow.mockResolvedValue(saved);
+
+    await expect(upload(EMPLOYEE)).resolves.toMatchObject({ kind: 'created' });
+    expect(db.driveBackupJob.create).toHaveBeenCalledTimes(1);
+    expect(db.driveBackupJob.create).toHaveBeenCalledWith({
+      data: { fileAssetId: ID, module: 'fotos', environment: 'DEMO' },
+    });
+    expect(enqueuedInTransaction).toEqual([true]);
+    const [available] = db.fileAsset.updateMany.mock.invocationCallOrder;
+    const [enqueued] = db.driveBackupJob.create.mock.invocationCallOrder;
+    const [audited] = db.auditLog.create.mock.invocationCallOrder;
+    expect(available).toBeLessThan(enqueued!);
+    expect(enqueued).toBeLessThan(audited!);
+  });
+
+  it('si no se puede registrar la copia, la foto no se confirma: el error sube y la subida se descarta', async () => {
+    setDriveBackupConfigForTests(DRIVE_DEMO);
+    const storage = fakeStorage();
+    setObjectStorageForTests(storage);
+    db.fileAsset.create.mockResolvedValue({ id: ID });
+    db.fileAsset.updateMany.mockResolvedValue({ count: 1 });
+    db.driveBackupJob.create.mockRejectedValue(new Error('cola no disponible'));
+
+    await expect(upload(EMPLOYEE)).rejects.toThrow('cola no disponible');
+    expect(db.auditLog.create).not.toHaveBeenCalled();
+    const key = db.fileAsset.create.mock.calls[0]?.[0].data.objectKey as string;
+    expect(db.fileAsset.updateMany.mock.calls[1]?.[0]).toMatchObject({
+      where: { id: ID },
+      data: { status: 'PENDING_DELETION' },
+    });
+    expect(storage.deleteObject).toHaveBeenCalledWith(key);
   });
 
   it('el proveedor falla: UPLOAD_FAILED y 502 reintentable', async () => {

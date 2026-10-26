@@ -591,9 +591,12 @@ describe('quincenales — Desempeño e Inicio (servicio)', () => {
       expect.objectContaining({ assigned: 1, completedPersonally: 0, pending: 1 }),
     ]);
     const list = await listTasks(adminActor(), { status: 'active' }, now);
-    expect(dashboard.kpis.tasksTotal).toBe(list.tasks.length);
+    // El KPI operativo no cuenta las «Una vez» programadas para después de hoy
+    // (docs/BUSINESS_RULES.md, "Fecha para realizar…"); `demo` puede tenerlas.
+    const operational = list.tasks.filter((row) => row.scheduleStatus !== 'SCHEDULED');
+    expect(dashboard.kpis.tasksTotal).toBe(operational.length);
     expect(dashboard.kpis.tasksCompleted).toBe(
-      list.tasks.filter((row) => row.currentExecution !== null).length,
+      operational.filter((row) => row.currentExecution !== null).length,
     );
     expect(list.tasks.find((row) => row.id === task.id)).toMatchObject({
       periodKey: '2026-10-Q2',

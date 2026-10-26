@@ -37,6 +37,7 @@ const db = vi.hoisted(() => {
       count: fn(),
     },
     fileAsset: { create: fn(), update: fn(), updateMany: fn(), findMany: fn(), findFirst: fn() },
+    driveBackupJob: { create: fn() },
     auditLog: { create: fn() },
     $queryRaw: fn(),
     $transaction: fn(),
@@ -44,6 +45,7 @@ const db = vi.hoisted(() => {
 });
 vi.mock('../../lib/prisma', () => ({ prisma: db }));
 
+import { setDriveBackupConfigForTests } from '../../driveBackup/config';
 import { setObjectStorageForTests, type ObjectStorageClient } from '../../lib/objectStorage';
 import {
   createPet,
@@ -68,6 +70,12 @@ const ADMIN: PetActor = { userId: 'user-a', role: 'ADMIN', employeeId: null };
 /** 23:30 del 25/09 en Buenos Aires = 02:30 UTC del 26/09. */
 const NOW = new Date('2026-09-26T02:30:00Z');
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+/** Copia en Drive activada (Etapa 5Z); la subida nunca lee las credenciales. */
+const DRIVE_DEMO = {
+  destinationId: 'shared-drive-root-1',
+  environment: 'DEMO' as const,
+  credentialsFile: '/no/existe/credenciales.json',
+};
 
 function fakeStorage(overrides: Partial<ObjectStorageClient> = {}) {
   return {
@@ -87,8 +95,13 @@ beforeEach(() => {
   db.$transaction.mockImplementation((run: (tx: typeof db) => unknown) => run(db));
   db.auditLog.create.mockResolvedValue({});
   setObjectStorageForTests(null);
+  // La copia en Drive la fija cada prueba, nunca el `.env` de la máquina.
+  setDriveBackupConfigForTests(null);
 });
-afterEach(() => setObjectStorageForTests(undefined));
+afterEach(() => {
+  setObjectStorageForTests(undefined);
+  setDriveBackupConfigForTests(undefined);
+});
 
 describe('permisos ADMIN (admin-only del prototipo)', () => {
   it.each([
@@ -398,6 +411,78 @@ describe('fotos', () => {
     expect(db.fileAsset.updateMany.mock.calls[1]?.[0]).toEqual({
       where: { id: 'file-old', status: 'PENDING_DELETION' },
       data: { status: 'DELETED' },
+    });
+    // Copia en Drive desactivada: sin trabajo de copia.
+    expect(db.driveBackupJob.create).not.toHaveBeenCalled();
+  });
+
+  describe('copia en Drive activada', () => {
+    const arrange = () => {
+      setDriveBackupConfigForTests(DRIVE_DEMO);
+      const storage = fakeStorage();
+      setObjectStorageForTests(storage);
+      db.animal.findUnique.mockResolvedValue({ id: PET_ID, active: true });
+      db.fileAsset.create.mockResolvedValue({ id: 'file-new' });
+      db.$queryRaw.mockResolvedValue([{ id: PET_ID }]);
+      db.fileAsset.findMany.mockResolvedValue([{ id: 'file-old', objectKey: 'animals/x/old.jpg' }]);
+      db.fileAsset.updateMany.mockResolvedValue({ count: 1 });
+      db.fileAsset.update.mockResolvedValue({});
+      return storage;
+    };
+    const upload = () =>
+      uploadPetPhoto(
+        ADMIN,
+        PET_ID,
+        { body: JPEG, declaredType: 'image/jpeg', filename: 'rex.jpg' },
+        META,
+        NOW,
+      );
+
+    it('el trabajo se registra DENTRO de la transacción, después de AVAILABLE y antes de la auditoría', async () => {
+      arrange();
+      let inTransaction = false;
+      db.$transaction.mockImplementation(async (run: (tx: typeof db) => unknown) => {
+        inTransaction = true;
+        try {
+          return await run(db);
+        } finally {
+          inTransaction = false;
+        }
+      });
+      const enqueuedInTransaction: boolean[] = [];
+      db.driveBackupJob.create.mockImplementation(async () => {
+        enqueuedInTransaction.push(inTransaction);
+        return {};
+      });
+
+      await expect(upload()).resolves.toEqual({ photo: { id: 'file-new' } });
+      expect(db.driveBackupJob.create).toHaveBeenCalledTimes(1);
+      expect(db.driveBackupJob.create).toHaveBeenCalledWith({
+        data: { fileAssetId: 'file-new', module: 'mascotas', environment: 'DEMO' },
+      });
+      expect(enqueuedInTransaction).toEqual([true]);
+      const available = db.fileAsset.update.mock.calls.findIndex(
+        ([args]) => args.data.status === 'AVAILABLE',
+      );
+      const [enqueued] = db.driveBackupJob.create.mock.invocationCallOrder;
+      const [audited] = db.auditLog.create.mock.invocationCallOrder;
+      expect(db.fileAsset.update.mock.invocationCallOrder[available]).toBeLessThan(enqueued!);
+      expect(enqueued).toBeLessThan(audited!);
+    });
+
+    it('si no se puede registrar la copia, la foto nueva no queda vinculada y la vigente no se borra', async () => {
+      const storage = arrange();
+      db.driveBackupJob.create.mockRejectedValue(new Error('cola no disponible'));
+
+      await expect(upload()).rejects.toThrow('cola no disponible');
+      expect(db.auditLog.create).not.toHaveBeenCalled();
+      const created = db.fileAsset.create.mock.calls[0]?.[0].data;
+      expect(db.fileAsset.update).toHaveBeenLastCalledWith({
+        where: { id: 'file-new' },
+        data: { status: 'PENDING_DELETION', deletedAt: NOW },
+      });
+      expect(storage.deleteObject).toHaveBeenCalledWith(created.objectKey);
+      expect(storage.deleteObject).not.toHaveBeenCalledWith('animals/x/old.jpg');
     });
   });
 

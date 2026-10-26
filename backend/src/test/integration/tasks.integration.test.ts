@@ -7,6 +7,12 @@ import { accessTokenSecret } from '../../auth/config';
 import { generateRefreshToken, hashRefreshToken, signAccessToken } from '../../auth/tokens';
 import { config } from '../../config';
 import { addDays, computePeriodKey, formatLocalDate, toLocalDate } from '../../lib/businessTime';
+import {
+  assertNoSyntheticWritesOnRealData,
+  assertRealTaskStateUnchanged,
+  captureRealTaskState,
+  type RealTaskState,
+} from './realTaskDataGuard';
 
 /**
  * Módulo Tareas contra Neon real (`demo`), por HTTP real (app Express
@@ -14,10 +20,13 @@ import { addDays, computePeriodKey, formatLocalDate, toLocalDate } from '../../l
  * SINTÉTICOS). Reglas de datos:
  *  - todo lo creado lleva el prefijo `[test-4a-<RUN_ID>]` / `test-4a-<RUN_ID>`;
  *  - nunca se completa, reasigna ni edita ninguna tarea preexistente
- *    (solo aparecen en respuestas de lectura);
- *  - `afterAll` borra ejecuciones, auditorías, tareas, sesiones, usuarios y
- *    empleados sintéticos, y verifica que los conteos globales y las tareas
- *    reales vuelven exactamente a su estado inicial.
+ *    (solo aparecen en respuestas de lectura) y ninguna comprobación depende
+ *    de cuántas tareas reales hay ni de su estado: `demo` puede estar en uso;
+ *  - `afterAll` borra solo ejecuciones, auditorías, tareas, sesiones, usuarios
+ *    y empleados sintéticos, y verifica con `realTaskDataGuard` que no quedan
+ *    residuos, que ningún actor sintético escribió sobre datos reales y que
+ *    las tareas reales (las que nadie más editó mientras corría) quedan
+ *    idénticas.
  */
 
 const RUN = `test-4a-${Date.now()}`;
@@ -38,31 +47,7 @@ let empB: string;
 let empInactive: string;
 const syntheticUserIds: string[] = [];
 const syntheticEmployeeIds: string[] = [];
-
-let baseline: {
-  tasks: number;
-  executions: number;
-  audits: number;
-  users: number;
-  sessions: number;
-  employees: number;
-};
-let realTasksBefore: unknown;
-
-async function snapshotRealTasks() {
-  return prisma.task.findMany({
-    where: { NOT: { description: { startsWith: '[test-4a-' } } },
-    select: {
-      id: true,
-      description: true,
-      employeeId: true,
-      frequency: true,
-      active: true,
-      updatedAt: true,
-    },
-    orderBy: { id: 'asc' },
-  });
-}
+let realState: RealTaskState;
 
 async function createEmployee(suffix: string, active = true): Promise<string> {
   const employee = await prisma.employee.create({
@@ -135,15 +120,8 @@ function expectCleanError(body: unknown) {
 }
 
 beforeAll(async () => {
-  baseline = {
-    tasks: await prisma.task.count(),
-    executions: await prisma.taskExecution.count(),
-    audits: await prisma.auditLog.count(),
-    users: await prisma.user.count(),
-    sessions: await prisma.session.count(),
-    employees: await prisma.employee.count(),
-  };
-  realTasksBefore = await snapshotRealTasks();
+  expect(process.env.DATABASE_TARGET).toBe('demo');
+  realState = await captureRealTaskState();
 
   app = createApp();
   empA = await createEmployee('A');
@@ -152,7 +130,7 @@ beforeAll(async () => {
   admin = await createActor('ADMIN', 'admin');
   employeeA = await createActor('EMPLOYEE', 'emp-a', empA);
   employeeB = await createActor('EMPLOYEE', 'emp-b', empB);
-});
+}, 60_000);
 
 afterAll(async () => {
   const testTasks = await prisma.task.findMany({
@@ -160,15 +138,21 @@ afterAll(async () => {
     select: { id: true },
   });
   const taskIds = testTasks.map((task) => task.id);
-  const executions = await prisma.taskExecution.findMany({
-    where: { taskId: { in: taskIds } },
-    select: { id: true },
-  });
+  const executionIds = (
+    await prisma.taskExecution.findMany({
+      where: { taskId: { in: taskIds } },
+      select: { id: true },
+    })
+  ).map((execution) => execution.id);
+  await assertNoSyntheticWritesOnRealData(realState, syntheticUserIds, [
+    ...taskIds,
+    ...executionIds,
+  ]);
   await prisma.auditLog.deleteMany({
     where: {
       OR: [
         { actorUserId: { in: syntheticUserIds } },
-        { entityId: { in: [...taskIds, ...executions.map((execution) => execution.id)] } },
+        { entityId: { in: [...taskIds, ...executionIds] } },
       ],
     },
   });
@@ -179,28 +163,40 @@ afterAll(async () => {
   await prisma.user.deleteMany({ where: { id: { in: syntheticUserIds } } });
   await prisma.employee.deleteMany({ where: { id: { in: syntheticEmployeeIds } } });
 
-  expect(await prisma.task.count()).toBe(baseline.tasks);
-  expect(await prisma.taskExecution.count()).toBe(baseline.executions);
-  expect(await prisma.auditLog.count()).toBe(baseline.audits);
-  expect(await prisma.user.count()).toBe(baseline.users);
-  expect(await prisma.session.count()).toBe(baseline.sessions);
-  expect(await prisma.employee.count()).toBe(baseline.employees);
-  expect(await snapshotRealTasks()).toEqual(realTasksBefore);
-  expect(
-    await prisma.task.count({ where: { NOT: { description: { startsWith: '[test-4a-' } } } }),
-  ).toBe((realTasksBefore as unknown[]).length);
-});
+  await assertRealTaskStateUnchanged(realState, syntheticUserIds, RUN);
+}, 60_000);
 
 describe('tareas — visibilidad y filtros', () => {
-  it('EMPLOYEE lista las tareas activas preexistentes, sin modificarlas', async () => {
+  it('EMPLOYEE ve las tareas activas de todo el equipo; la «Una vez» pendiente sí, la completada no', async () => {
+    const own = await createTask('visible propia', empA, 'DAILY');
+    const ofOther = await createTask('visible de B', empB, 'WEEKLY');
+    const pending = await createTask('única pendiente', empB, 'ONE_TIME');
+    const done = await createTask('única completada', empA, 'ONE_TIME');
+    expect((await complete(employeeA, done.id)).status).toBe(201);
+
     const response = await request(app).get('/api/v1/tasks').set(as(employeeA));
     expect(response.status).toBe(200);
-    expect(response.body.tasks.length).toBeGreaterThanOrEqual(
-      (realTasksBefore as unknown[]).length,
-    );
-    expect(response.body.tasks.every((task: { active: boolean }) => task.active)).toBe(true);
     expect(response.body.period.timeZone).toBe(TZ);
-  });
+    const tasks = response.body.tasks as {
+      id: string;
+      active: boolean;
+      canComplete: boolean;
+      currentExecution: unknown;
+    }[];
+    expect(tasks.every((task) => task.active)).toBe(true);
+    const byId = new Map(tasks.map((task) => [task.id, task]));
+    // Como en el prototipo, cada persona ve las tareas de todo el equipo y puede completarlas.
+    for (const visible of [own, ofOther, pending]) {
+      expect(byId.get(visible.id)).toMatchObject({ canComplete: true, currentExecution: null });
+    }
+    // Una «Una vez» completada sale del listado operativo (regla vigente)...
+    expect(byId.has(done.id)).toBe(false);
+    // ...pero se conserva: un ADMIN la sigue viendo con `status=all`.
+    const adminAll = await request(app).get('/api/v1/tasks?status=all').set(as(admin));
+    expect(
+      (adminAll.body.tasks as { id: string }[]).find((task) => task.id === done.id),
+    ).toMatchObject({ currentExecution: { periodKey: 'ONE_TIME' } });
+  }, 60_000);
 
   it('EMPLOYEE no puede listar desactivadas; ADMIN sí', async () => {
     const task = await createTask('para desactivar', empA, 'DAILY');
