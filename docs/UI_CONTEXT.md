@@ -281,7 +281,7 @@ Desempeño se integra mediante navegación secundaria en chips `📋 Tareas | �
 
 #### Conversaciones — ajuste visual en `demo` (2026-10-30)
 
-- Historial centrado en una sola columna de lectura acotada (72 `ch` más el padding de la tarjeta), sin alturas rígidas ni scroll interno. La novedad conserva avatar, autor, fecha y texto; su barra reúne «Responder», abrir/cerrar con contador y última respuesta.
+- Historial en una sola columna, sin alturas rígidas ni scroll interno. La novedad conserva avatar, autor, fecha y texto; su barra reúne «Responder», abrir/cerrar con contador y última respuesta. (Distribución actualizada el 2026-10-30, ver «Distribución adaptable».)
 - Comentarios sobre blanco, separados por una línea suave; avatar compartido pequeño con el color neutro existente (el contrato de respuestas solo ofrece nombre), nombre destacado y fecha junto al nombre. Texto de 15 px con saltos de línea y corte de palabras largas; sangría solo en escritorio.
 - Orden de lectura: encabezado del autor → cita → texto nuevo → «Responder». La cita usa fondo suave y borde verde; la vista previa se limita a dos líneas con CSS, conservando todo el texto en el DOM.
 - Compositor separado por una línea: «Tu respuesta», textarea de tres filas ampliable, botón «Enviar» compacto a la derecha, cita con cancelación accesible y errores asociados al campo. Controles de al menos 44 × 44 px y foco visible.
@@ -290,6 +290,13 @@ Desempeño se integra mediante navegación secundaria en chips `📋 Tareas | �
 - Validación local: Chrome headless con API interceptada y datos identificados como sintéticos, sin backend ni base de datos. Revisadas capturas en 360, 390, 768 y 1366 px: vacío, varias respuestas, nombres/textos largos y sin espacios, citas, compositor normal/citando, error y envío. Sin overflow horizontal ni scroll interno; controles ≥ 44 px, previews ≤ 2 líneas. Carga anterior: desplazamiento de la fila de lectura de 0 px en los cuatro tamaños. Borrador/cita conservados al cerrar; cancelación conserva texto; doble clic durante envío produce un solo POST. Navegación Más → Novedades sin nuevo refresh ni `/auth/me`.
 - Validaciones de frontend: typecheck, lint, build y las 68 pruebas de `MoreModule.test.tsx` + `navigationPerformance.test.tsx` en verde. El test de reintento comprueba que cerrar/abrir conserva la clave; el de citas comprueba texto completo de más de 180 caracteres, borrador y cancelación. No se ejecutaron pruebas de backend ni integraciones.
 - Rendimiento: 0 requests adicionales, caché operativa de 30 s y actualización tras envío sin cambios, sin dependencias nuevas ni impacto en consultas/índices de Render/Neon. Bundle principal: 513,40 kB (139,81 kB gzip); sigue el aviso preexistente de Vite por superar 500 kB. Sin PR, merge ni deploy en este alcance; no quedan pendientes de implementación visual.
+
+#### Distribución adaptable (2026-10-30)
+
+- Encabezado, formulario «Registrar novedad» e historial comparten un contenedor (`.news-page`) con el mismo ancho y borde izquierdo. Máximo en escritorio: el del layout (`--content-max-width`, 1200 px); en móvil, todo el ancho con el margen habitual de la página. Antes el historial quedaba centrado y más angosto que el formulario.
+- El ancho de lectura (72 `ch`, `--news-reading-width`) se acota solo en los textos dentro de las tarjetas: texto de la novedad, de cada respuesta y de las citas. Encabezados, barras de acciones y campos ocupan el ancho de la tarjeta.
+- Sin columnas nuevas, alturas fijas, scrolls internos ni dependencias; solo reglas con prefijo `news-` en `more.css` (ningún estilo global).
+- Revisión con API interceptada y datos sintéticos en 360, 390, 768 y 1366 px: encabezado, formulario e historial con el mismo borde y ancho en los cuatro tamaños, sin desborde horizontal.
 
 ### Eventos
 

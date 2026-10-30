@@ -175,13 +175,20 @@
   list-style: none;
 }
 
+/* Contenedor común de encabezado, formulario e historial: mismo ancho y
+   alineación (el máximo de escritorio es el del layout, 1200 px). El ancho
+   de lectura se acota solo en los textos, dentro de las tarjetas. */
+.news-page {
+  --news-reading-width: 72ch;
+  width: 100%;
+  max-width: var(--content-max-width);
+  margin-inline: auto;
+}
+
 .news-history {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  width: 100%;
-  max-width: calc(72ch + 2 * var(--space-4));
-  margin-inline: auto;
   font-size: var(--font-size-md);
 }
 
@@ -213,6 +220,13 @@
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   white-space: nowrap;
+}
+
+.news-item__text,
+.news-reply__text,
+.news-reply__quote,
+.news-reply-form__quote {
+  max-width: var(--news-reading-width);
 }
 
 .news-item__text {

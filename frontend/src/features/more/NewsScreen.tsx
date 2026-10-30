@@ -54,7 +54,7 @@ export function NewsScreen() {
   );
 
   return (
-    <div className="more">
+    <div className="more news-page">
       <PageHeader
         title={
           <>
