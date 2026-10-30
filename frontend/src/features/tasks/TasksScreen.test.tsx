@@ -935,3 +935,26 @@ describe('TasksScreen — orden de realización y fecha sugerida', () => {
     ]);
   });
 });
+
+describe('TasksScreen — semana en curso registrada desde Desempeño (carga olvidada)', () => {
+  it('muestra el día real y el del registro, sin una hora que nadie indicó', async () => {
+    asEmployee();
+    await renderLoaded([
+      makeTask({
+        ...WEEKLY_B,
+        assignee: { ...PERSON_A, active: true },
+        currentExecution: makeExecution({
+          periodKey: '2026-09-21',
+          performedOn: '2026-09-22',
+          completedAt: '2026-09-24T13:00:00.000Z',
+        }),
+        canComplete: false,
+      }),
+    ]);
+    const item = screen.getByText('Tarea sintética semanal').closest('li') as HTMLElement;
+    expect(item).toHaveTextContent(
+      'Completada por Persona sintética A · Realizada el 22/09 · Registrada el 24/09',
+    );
+    expect(item.textContent).not.toMatch(/\d{2}:\d{2}/);
+  });
+});

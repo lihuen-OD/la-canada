@@ -571,7 +571,16 @@ model TaskExecution {
 
   periodKey   String    @map("period_key")
   completed   Boolean   @default(false)
+  /// Momento REAL en que se registró la finalización en el sistema (nunca se
+  /// adelanta ni se atrasa para simular otra fecha).
   completedAt DateTime? @map("completed_at")
+  /// Fecha REAL de realización, solo de una carga olvidada registrada desde
+  /// Desempeño → Detalle (migración `task_execution_performed_on`): fecha de
+  /// calendario sin hora en `BUSINESS_TIME_ZONE`, dentro del período. NULL en
+  /// toda finalización del flujo normal (y en las anteriores): se realizó
+  /// cuando se registró (`completedAt`). Nunca se completa con una hora
+  /// inventada.
+  performedOn DateTime? @map("performed_on") @db.Date
 
   /// Snapshot obligatorio de `Task.employeeId` al momento de crear esta
   /// ejecución — ver el comentario del modelo. Nunca se reescribe.

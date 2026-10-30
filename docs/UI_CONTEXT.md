@@ -259,6 +259,7 @@ Desempeño se integra mediante navegación secundaria en chips `📋 Tareas | �
 - Casilla cuadrada del prototipo (`.tck`, 22 px visibles dentro de 44 px táctiles); ✏️/✕ del ADMIN como botones de icono a la derecha.
 - Frecuencia y responsable como metadatos secundarios.
 - Historial semanal separado de la operación actual.
+- Desempeño → Detalle (solo Tareas): cada fila conserva su rótulo de estado a la derecha y, debajo, su acción si el backend la habilita — «Marcar como realizada» (botón secundario chico), «Completar en Tareas» (enlace fantasma) o «Deshacer»/«Corregir» (fantasma). En pantallas angostas la acción baja a su línea sin desbordar. El diálogo «✅ Marcar como realizada» usa el modal de siempre (hoja inferior en móvil): diaria = una pregunta de confirmación; períodos largos = «Período» como rango y «Fecha en que la realizaste» vacía con el día de la semana debajo; ADMIN = lista de personas como en «Registrar tarea completada». Una carga olvidada se lee «Realizada el 29/10 · Registrada el 30/10» como metadato secundario.
 - Acciones administrativas claras y no disponibles para empleados sin permiso.
 
 ### Stock

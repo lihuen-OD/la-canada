@@ -255,3 +255,118 @@ describe('getPerformance — regla personal y permisos', () => {
     for (const row of result.employees) expect(row).not.toHaveProperty('dailyStreak');
   });
 });
+
+describe('getPerformance — acciones del detalle (carga olvidada), decididas en el backend', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.employeeFindUnique.mockResolvedValue({ id: JUAN });
+    mocks.employeeFindMany.mockResolvedValue(employees);
+    mocks.taskCount.mockResolvedValue(0);
+    scenario();
+  });
+
+  const pendingOf = (result: Awaited<ReturnType<typeof getPerformance>>) =>
+    result.occurrences!.filter((o) => o.status === 'pending');
+
+  it('EMPLOYEE: su diaria pendiente del 24/09 se puede marcar, con la fecha fijada por la fila', async () => {
+    const result = await getPerformance(juanActor, RANGE, undefined, NOW);
+    const [pending] = pendingOf(result);
+    expect(pending).toMatchObject({
+      periodKey: '2026-09-24',
+      lateCompletion: {
+        periodStart: '2026-09-24',
+        periodEnd: '2026-09-24',
+        earliest: '2026-09-24',
+        latest: '2026-09-24',
+      },
+    });
+    // Las realizadas o cubiertas no tienen acción.
+    for (const done of result.occurrences!.filter((o) => o.status !== 'pending')) {
+      expect(done).not.toHaveProperty('lateCompletion');
+      expect(done).not.toHaveProperty('completeInTasks');
+    }
+  });
+
+  it('ADMIN ve la misma acción en el detalle de cualquier persona; el resumen sin detalle no trae filas', async () => {
+    const detail = await getPerformance(admin, RANGE, JUAN, NOW);
+    expect(pendingOf(detail)[0]).toHaveProperty('lateCompletion');
+    expect((await getPerformance(admin, RANGE, undefined, NOW)).occurrences).toBeUndefined();
+  });
+
+  it('obligaciones fuera de los 30 días del rango más largo: sin acción', async () => {
+    // "Ahora" el 30/10: el período del 24/09 quedó fuera de la ventana (01/10–30/10).
+    const result = await getPerformance(
+      juanActor,
+      { from: '2026-09-11', to: '2026-09-24' },
+      undefined,
+      new Date('2026-10-30T15:00:00Z'),
+    );
+    expect(pendingOf(result)[0]).not.toHaveProperty('lateCompletion');
+  });
+
+  it('carga olvidada registrada: fecha real, momento de registro y quién la puede deshacer', async () => {
+    mocks.executions.mockResolvedValue([
+      {
+        id: 'x-late',
+        taskId: 't-juan',
+        periodKey: '2026-09-24',
+        assignedEmployeeId: JUAN,
+        completedByEmployeeId: JUAN,
+        completedAt: new Date('2026-09-28T13:00:00Z'),
+        performedOn: new Date('2026-09-24T00:00:00.000Z'),
+        recordedByUserId: 'u-juan',
+      },
+    ]);
+    const own = await getPerformance(juanActor, RANGE, undefined, NOW);
+    const row = own.occurrences!.find((o) => o.periodKey === '2026-09-24')!;
+    expect(row).toMatchObject({
+      status: 'personal',
+      lateRegistration: {
+        executionId: 'x-late',
+        performedOn: '2026-09-24',
+        recordedAt: '2026-09-28T13:00:00.000Z',
+        canRevert: true,
+      },
+    });
+    expect(row).not.toHaveProperty('lateCompletion');
+    // Al día siguiente el EMPLOYEE ya no la deshace; un ADMIN sí (con motivo).
+    const nextDay = new Date('2026-09-29T15:00:00Z');
+    const later = await getPerformance(
+      juanActor,
+      { from: '2026-09-12', to: '2026-09-25' },
+      undefined,
+      nextDay,
+    );
+    expect(
+      later.occurrences!.find((o) => o.periodKey === '2026-09-24')!.lateRegistration,
+    ).toMatchObject({ canRevert: false });
+    const byAdmin = await getPerformance(admin, RANGE, JUAN, nextDay);
+    expect(
+      byAdmin.occurrences!.find((o) => o.periodKey === '2026-09-24')!.lateRegistration,
+    ).toMatchObject({ canRevert: true });
+  });
+
+  it('«Una vez» y urgentes pendientes se completan en Tareas (si siguen activas); nunca con período inventado', async () => {
+    const single = (taskId: string, frequency: 'URGENT' | 'ONE_TIME', validTo: Date | null) => ({
+      id: `p-${taskId}`,
+      taskId,
+      employeeId: JUAN,
+      frequency,
+      validFrom: new Date('2026-09-16T12:00:00Z'),
+      validTo,
+      task: { description: `${frequency} ${taskId} (sintética)` },
+    });
+    mocks.plans.mockResolvedValue([
+      single('t-u', 'URGENT', null),
+      single('t-o', 'ONE_TIME', null),
+      single('t-off', 'ONE_TIME', new Date('2026-09-20T12:00:00Z')),
+    ]);
+    mocks.executions.mockResolvedValue([]);
+    const result = await getPerformance(juanActor, RANGE, undefined, NOW);
+    const byTask = new Map(result.occurrences!.map((o) => [o.taskId, o]));
+    expect(byTask.get('t-u')).toMatchObject({ completeInTasks: true });
+    expect(byTask.get('t-o')).toMatchObject({ completeInTasks: true });
+    expect(byTask.get('t-off')).not.toHaveProperty('completeInTasks');
+    for (const row of byTask.values()) expect(row).not.toHaveProperty('lateCompletion');
+  });
+});

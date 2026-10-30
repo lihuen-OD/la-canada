@@ -8,6 +8,7 @@ import {
   SCHEDULE_STATUS_LABEL,
   SCHEDULE_STATUS_TONE,
   formatCompletedAt,
+  formatLateRegistration,
   formatSuggestedDate,
 } from './taskLabels';
 
@@ -133,9 +134,11 @@ export function TaskItem({
               <span aria-hidden="true">✓ </span>
               {assignedDiffers ? `Asignada a ${execution.assignedEmployee.displayName} · ` : ''}
               Completada por <strong>{completedBy.displayName}</strong>
-              {execution.completedAt
-                ? ` · ${formatCompletedAt(execution.completedAt, timeZone, today)}`
-                : ''}
+              {execution.performedOn && execution.completedAt
+                ? ` · ${formatLateRegistration(execution.performedOn, execution.completedAt, timeZone)}`
+                : execution.completedAt
+                  ? ` · ${formatCompletedAt(execution.completedAt, timeZone, today)}`
+                  : ''}
             </span>
           ) : null}
         </div>

@@ -166,6 +166,26 @@ export class TaskAlreadyCompletedError extends AppError {
   }
 }
 
+/** Carga olvidada: la obligación elegida ya tiene una ejecución vigente (también si otra persona la registró mientras tanto). */
+export class TaskObligationAlreadyCompletedError extends AppError {
+  constructor() {
+    super('Esta tarea ya figura como realizada en ese período. Actualizamos los datos.', 409, {
+      code: 'TASK_OBLIGATION_ALREADY_COMPLETED',
+    });
+  }
+}
+
+/** Carga olvidada: la obligación ya no está entre las que se pueden registrar (fuera de la ventana, planificación cambiada o inexistente). */
+export class TaskObligationUnavailableError extends AppError {
+  constructor() {
+    super(
+      'Esta tarea ya no se puede registrar para ese período desde Desempeño. Actualizamos los datos.',
+      409,
+      { code: 'TASK_OBLIGATION_UNAVAILABLE' },
+    );
+  }
+}
+
 /** Una tarea desactivada no se puede completar hasta reactivarla. */
 export class TaskInactiveError extends AppError {
   constructor() {

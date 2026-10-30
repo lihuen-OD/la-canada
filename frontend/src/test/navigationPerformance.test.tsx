@@ -92,7 +92,7 @@ function body(path: string): unknown {
   }
   if (path.startsWith('/tasks/history')) return emptyHistory();
   if (path.startsWith('/tasks')) return listResponse([makeTask()]);
-  if (path.startsWith('/performance')) return PERF;
+  if (path.startsWith('/performance')) return performanceBody;
   if (path.startsWith('/stock/categories')) return categoriesResponse();
   if (path.startsWith('/stock/destinations')) return { destinations: [] };
   if (path.startsWith('/stock/reports/summary')) return emptyReportSummary();
@@ -124,6 +124,9 @@ function body(path: string): unknown {
   return {};
 }
 
+/** Respuesta de Desempeño (resumen y detalle); un caso la cambia para tener filas con acciones. */
+let performanceBody: unknown = PERF;
+
 let calls: string[] = [];
 /** Headers `Idempotency-Key` recibidos por el `fetch` simulado, en orden. */
 let idempotencyKeys: (string | undefined)[] = [];
@@ -145,6 +148,7 @@ const gardenContentCalls = () =>
 beforeEach(() => {
   calls = [];
   idempotencyKeys = [];
+  performanceBody = PERF;
   window.history.replaceState(null, '', '/');
   // jsdom no implementa object URLs: sin esto la descarga del binario (fotos,
   // planos) fallaría y el query quedaría en error, que SI se reintenta al
@@ -617,5 +621,81 @@ describe('logout — nada de la sesión sobrevive', () => {
     await waitFor(() => expect(count('/auth/logout')).toBe(1));
     expect(screen.queryByRole('list', { name: 'Tareas del período' })).not.toBeInTheDocument();
     expect(screen.queryByText(makeTask().description)).not.toBeInTheDocument();
+  });
+});
+
+describe('Desempeño → Detalle: carga olvidada y enlace a Tareas sin reiniciar la sesión', () => {
+  it('registrar una obligación pasada revalida Desempeño y Tareas; «Completar en Tareas» es navegación SPA', async () => {
+    const person = { ...PERSON_A, role: 'Doméstica' };
+    const row = {
+      description: 'Tarea sintética olvidada',
+      frequency: 'DAILY',
+      status: 'pending',
+      periodKey: '2026-09-23',
+      assignedEmployeeId: PERSON_A.id,
+      completed: false,
+      completedByEmployeeId: null,
+      assignedEmployee: person,
+      completedByEmployee: null,
+      completedAt: null,
+    };
+    performanceBody = {
+      ...PERF,
+      employees: [{ employee: person, ...PERF.team }],
+      occurrences: [
+        {
+          ...row,
+          taskId: 't-olvidada',
+          lateCompletion: {
+            periodStart: '2026-09-23',
+            periodEnd: '2026-09-23',
+            earliest: '2026-09-23',
+            latest: '2026-09-23',
+          },
+        },
+        {
+          ...row,
+          taskId: 't-una-vez',
+          description: 'Tarea sintética una vez',
+          frequency: 'ONE_TIME',
+          periodKey: 'ONE_TIME',
+          completeInTasks: true,
+        },
+      ],
+    };
+    const user = userEvent.setup();
+    await bootToHome();
+    await user.click(within(mainNav()).getByRole('link', { name: 'Tareas' }));
+    await screen.findByRole('list', { name: 'Tareas del período' });
+    await user.click(within(tasksNav()).getByRole('link', { name: /Desempeño/ }));
+    await user.click(await screen.findByRole('button', { name: /Persona sintética A/ }));
+    await user.click(await screen.findByRole('button', { name: /Marcar como realizada/ }));
+    const dialog = await screen.findByRole('dialog');
+    // ADMIN: elige explícitamente quién la realizó.
+    await user.click(await within(dialog).findByRole('radio', { name: /Persona sintética A/ }));
+    const detailsBefore = count('/performance/employees/');
+    const listsBefore = taskListCalls();
+    await user.click(within(dialog).getByRole('button', { name: 'Confirmar' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    expect(calls.filter((call) => /^POST \/tasks/.test(call))).toEqual([
+      'POST /tasks/t-olvidada/late-completion',
+    ]);
+    // Revalida el detalle visible (invalidación de Desempeño); el listado de Tareas,
+    // que no está en pantalla, queda marcado para la próxima visita.
+    await waitFor(() => expect(count('/performance/employees/')).toBeGreaterThan(detailsBefore));
+    expect(taskListCalls()).toBe(listsBefore);
+
+    const prevented: boolean[] = [];
+    const listener = (event: MouseEvent) => prevented.push(event.defaultPrevented);
+    window.addEventListener('click', listener);
+    await user.click(screen.getByRole('link', { name: /Completar en Tareas/ }));
+    window.removeEventListener('click', listener);
+    await screen.findByRole('list', { name: 'Tareas del período' });
+    expect(prevented).toEqual([true]);
+    // Al volver, Tareas se revalida una vez (estaba invalidada) sin reiniciar la sesión.
+    await waitFor(() => expect(taskListCalls()).toBe(listsBefore + 1));
+    expect(count('/auth/refresh')).toBe(1);
+    expect(count('/auth/me')).toBe(1);
   });
 });

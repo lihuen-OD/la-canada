@@ -1,6 +1,8 @@
 import { apiRequest } from './httpClient';
 import type {
   CreateTaskRequest,
+  LateCompletionRequest,
+  LateCompletionResponse,
   TaskCalendarResponse,
   TaskEmployeesResponse,
   TaskHistoryResponse,
@@ -81,6 +83,18 @@ export async function completeTask(
   return apiRequest<TaskMutationResponse>(`/tasks/${taskId}/complete`, {
     method: 'POST',
     body: employeeId ? { employeeId } : {},
+    authenticated: true,
+  });
+}
+
+/** Carga olvidada (Desempeño → Detalle): nunca usa el período vigente. */
+export async function registerLateCompletion(
+  taskId: string,
+  body: LateCompletionRequest,
+): Promise<LateCompletionResponse> {
+  return apiRequest<LateCompletionResponse>(`/tasks/${taskId}/late-completion`, {
+    method: 'POST',
+    body,
     authenticated: true,
   });
 }

@@ -16,12 +16,14 @@ import {
   compareLocalDates,
   formatLocalDate,
   isBimesterStart,
+  computePeriodKey,
   parseLocalDate,
   semiMonthlyPeriodKey,
   startOfLocalDay,
   toLocalDate,
   type LocalDate,
 } from '../lib/businessTime';
+import { canRevertExecution, lateCompletionBounds } from '../tasks/completionRules';
 import { scheduledDateText } from '../tasks/taskSchedule';
 import type { TaskActor } from '../tasks/tasksService';
 import {
@@ -30,6 +32,7 @@ import {
   computeMetrics,
   occurrenceStatus,
   percentage,
+  type Occurrence,
 } from './performanceCalculator';
 
 /** Únicos rangos públicos de Desempeño (chips "7 días", "14 días", "30 días"). */
@@ -87,6 +90,154 @@ export function calendarKeysInRange(from: LocalDate, to: LocalDate): string[] {
 
 const employeeSelect = { id: true, displayName: true, role: true, colorHex: true } as const;
 
+/**
+ * Ventana de «Marcar como realizada» (carga olvidada): el rango público más
+ * largo de Desempeño (30 días) hasta hoy, en `BUSINESS_TIME_ZONE`. Es lo que
+ * el detalle puede mostrar; no amplía los rangos.
+ */
+export function lateCompletionWindow(now: Date) {
+  const today = toLocalDate(now, config.businessTimeZone);
+  return { from: addDays(today, -(MAX_RANGE_DAYS - 1)), to: today, today };
+}
+
+/**
+ * ÚNICA lectura de las obligaciones de Tareas: la planificación que se
+ * superpone con el rango y las ejecuciones vigentes de sus períodos. La usan
+ * Desempeño (todas las tareas) y la carga olvidada (una tarea, `taskId`), así
+ * que las dos validan exactamente las mismas obligaciones.
+ */
+export async function loadObligationInputs(
+  range: { from: LocalDate; to: LocalDate; rangeStart: Date; rangeEnd: Date },
+  taskId?: string,
+) {
+  const timeZone = config.businessTimeZone;
+  const { from, to, rangeStart, rangeEnd } = range;
+  const ofTask = taskId ? { taskId } : {};
+  const planOverlapsRange = {
+    validFrom: { lt: rangeEnd },
+    OR: [{ validTo: null }, { validTo: { gte: rangeStart } }],
+  };
+  const [plans, executions] = await Promise.all([
+    prisma.taskPlanningInterval.findMany({
+      where: { ...planOverlapsRange, ...ofTask },
+      select: {
+        id: true,
+        taskId: true,
+        employeeId: true,
+        frequency: true,
+        scheduledDate: true,
+        validFrom: true,
+        validTo: true,
+        task: { select: { description: true } },
+      },
+      orderBy: { validFrom: 'asc' },
+    }),
+    // Una sola sentencia: las ejecuciones vigentes de los períodos del rango
+    // (fechas, quincenas, bimestres y años) y, para URGENT/ONE_TIME, la finalización vigente
+    // (a lo sumo una por tarea) de las tareas planificadas en el rango — hace
+    // falta aunque sea anterior al rango, para saber que ya no estaba pendiente.
+    prisma.taskExecution.findMany({
+      where: {
+        revertedAt: null,
+        ...ofTask,
+        OR: [
+          { periodKey: { gte: formatLocalDate(from), lte: formatLocalDate(to) } },
+          {
+            periodKey: { in: [URGENT_PERIOD_KEY, ONE_TIME_PERIOD_KEY] },
+            task: {
+              planningIntervals: {
+                some: { ...planOverlapsRange, frequency: { in: ['URGENT', 'ONE_TIME'] } },
+              },
+            },
+          },
+          { periodKey: { in: calendarKeysInRange(from, to) } },
+        ],
+      },
+      select: {
+        id: true,
+        taskId: true,
+        periodKey: true,
+        assignedEmployeeId: true,
+        completedByEmployeeId: true,
+        completedAt: true,
+        performedOn: true,
+        recordedByUserId: true,
+      },
+    }),
+  ]);
+
+  // Una «Una vez» con fecha recién es exigible desde el primer instante de ese
+  // día de negocio, según la versión de planificación de cada momento.
+  const planRows = plans.map(({ scheduledDate, ...plan }) => {
+    const text = scheduledDateText(scheduledDate ?? null);
+    const due = text ? parseLocalDate(text) : null;
+    return {
+      ...plan,
+      description: plan.task.description,
+      scheduledDate: text,
+      dueFrom: due ? startOfLocalDay(due, timeZone) : null,
+    };
+  });
+  const completedExecutions = executions.filter(
+    (
+      execution,
+    ): execution is typeof execution & { completedAt: Date; completedByEmployeeId: string } =>
+      execution.completedAt !== null && execution.completedByEmployeeId !== null,
+  );
+  return { planRows, executions: completedExecutions };
+}
+
+type ObligationInputs = Awaited<ReturnType<typeof loadObligationInputs>>;
+
+/**
+ * Datos de acción del detalle de Tareas → Desempeño, calculados acá (el
+ * frontend no decide nada): `lateCompletion` = la obligación pendiente se
+ * puede registrar ahora como realizada, con sus fechas admitidas;
+ * `completeInTasks` = una «Una vez» o urgente pendiente se completa con su
+ * flujo normal, en Tareas; `lateRegistration` = la ejecución fue una carga
+ * olvidada (fecha real, momento del registro y si quien mira la puede
+ * deshacer).
+ */
+function detailActions(inputs: ObligationInputs, actor: TaskActor, now: Date) {
+  const timeZone = config.businessTimeZone;
+  const { from: windowFrom, today } = lateCompletionWindow(now);
+  const executionByKey = new Map(
+    inputs.executions.map((row) => [`${row.taskId}:${row.periodKey}`, row]),
+  );
+  return (item: Occurrence) => {
+    const execution = executionByKey.get(`${item.taskId}:${item.periodKey}`);
+    const plans = inputs.planRows.filter((plan) => plan.taskId === item.taskId);
+    if (item.completed) {
+      if (!execution?.performedOn) return {};
+      const currentFrequency = plans.at(-1)?.frequency ?? item.frequency;
+      return {
+        lateRegistration: {
+          executionId: execution.id,
+          performedOn: scheduledDateText(execution.performedOn)!,
+          recordedAt: execution.completedAt.toISOString(),
+          canRevert: canRevertExecution(
+            actor,
+            { ...execution, completedByEmployee: { id: execution.completedByEmployeeId } },
+            computePeriodKey(currentFrequency, now, timeZone),
+            today,
+            timeZone,
+          ),
+        },
+      };
+    }
+    if (item.frequency === 'URGENT' || item.frequency === 'ONE_TIME') {
+      const active = plans.some((plan) => plan.validTo === null);
+      const canComplete = actor.role === 'ADMIN' || actor.employeeId !== null;
+      return active && !execution && canComplete ? { completeInTasks: true as const } : {};
+    }
+    const mayRegister = actor.role === 'ADMIN' || item.assignedEmployeeId === actor.employeeId;
+    const bounds = mayRegister
+      ? lateCompletionBounds({ occurrence: item, plans, windowFrom, today, now, timeZone })
+      : null;
+    return bounds ? { lateCompletion: bounds } : {};
+  };
+}
+
 export async function getPerformance(
   actor: TaskActor,
   query: { from: string; to: string },
@@ -110,59 +261,13 @@ export async function getPerformance(
     if (!exists) throw new NotFoundError('Empleado no encontrado.');
   }
 
-  const planOverlapsRange = {
-    validFrom: { lt: rangeEnd },
-    OR: [{ validTo: null }, { validTo: { gte: rangeStart } }],
-  };
-  const [employees, plans, executions, urgentPending] = await Promise.all([
+  const [employees, inputs, urgentPending] = await Promise.all([
     prisma.employee.findMany({
       where: {},
       select: employeeSelect,
       orderBy: { displayName: 'asc' },
     }),
-    prisma.taskPlanningInterval.findMany({
-      where: planOverlapsRange,
-      select: {
-        id: true,
-        taskId: true,
-        employeeId: true,
-        frequency: true,
-        scheduledDate: true,
-        validFrom: true,
-        validTo: true,
-        task: { select: { description: true } },
-      },
-      orderBy: { validFrom: 'asc' },
-    }),
-    // Una sola sentencia: las ejecuciones vigentes de los períodos del rango
-    // (fechas, quincenas, bimestres y años) y, para URGENT/ONE_TIME, la finalización vigente
-    // (a lo sumo una por tarea) de las tareas planificadas en el rango — hace
-    // falta aunque sea anterior al rango, para saber que ya no estaba pendiente.
-    prisma.taskExecution.findMany({
-      where: {
-        revertedAt: null,
-        OR: [
-          { periodKey: { gte: formatLocalDate(from), lte: formatLocalDate(to) } },
-          {
-            periodKey: { in: [URGENT_PERIOD_KEY, ONE_TIME_PERIOD_KEY] },
-            task: {
-              planningIntervals: {
-                some: { ...planOverlapsRange, frequency: { in: ['URGENT', 'ONE_TIME'] } },
-              },
-            },
-          },
-          { periodKey: { in: calendarKeysInRange(from, to) } },
-        ],
-      },
-      select: {
-        id: true,
-        taskId: true,
-        periodKey: true,
-        assignedEmployeeId: true,
-        completedByEmployeeId: true,
-        completedAt: true,
-      },
-    }),
+    loadObligationInputs({ from, to, rangeStart, rangeEnd }),
     prisma.task.count({
       where: {
         active: true,
@@ -173,28 +278,10 @@ export async function getPerformance(
     }),
   ]);
 
-  // Una «Una vez» con fecha recién es exigible desde el primer instante de ese
-  // día de negocio, según la versión de planificación de cada momento.
-  const planRows = plans.map(({ scheduledDate, ...plan }) => {
-    const text = scheduledDateText(scheduledDate ?? null);
-    const due = text ? parseLocalDate(text) : null;
-    return {
-      ...plan,
-      description: plan.task.description,
-      scheduledDate: text,
-      dueFrom: due ? startOfLocalDay(due, timeZone) : null,
-    };
-  });
-  const completedExecutions = executions.filter(
-    (
-      execution,
-    ): execution is typeof execution & { completedAt: Date; completedByEmployeeId: string } =>
-      execution.completedAt !== null && execution.completedByEmployeeId !== null,
-  );
   const occurrences = [
     ...buildRecurringOccurrences({
-      plans: planRows,
-      executions: completedExecutions,
+      plans: inputs.planRows,
+      executions: inputs.executions,
       from,
       to,
       today,
@@ -202,8 +289,8 @@ export async function getPerformance(
       timeZone,
     }),
     ...buildSingleOccurrences({
-      plans: planRows,
-      executions: completedExecutions,
+      plans: inputs.planRows,
+      executions: inputs.executions,
       rangeStart,
       rangeEnd,
       now,
@@ -258,6 +345,7 @@ export async function getPerformance(
       };
     });
 
+  const actionsOf = detailActions(inputs, actor, now);
   return {
     // `today` y `generatedAt`: fecha de negocio y hora del servidor, para que
     // el reloj del día del frontend no dé por empezado un día que el backend
@@ -289,6 +377,7 @@ export async function getPerformance(
                 ? (employees.find((employee) => employee.id === item.completedByEmployeeId) ?? null)
                 : null,
             completedAt: item.completedAt?.toISOString() ?? null,
+            ...actionsOf(item),
           }))
         : undefined,
   };

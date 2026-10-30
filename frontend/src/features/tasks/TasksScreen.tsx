@@ -41,6 +41,7 @@ import { TaskFormDialog } from './TaskFormDialog';
 import { TaskHistory } from './TaskHistory';
 import { TaskItem } from './TaskItem';
 import { TasksSubnav } from './TasksSubnav';
+import { invalidateTaskViews } from './taskCache';
 
 type LoadState =
   | { status: 'loading' }
@@ -144,14 +145,13 @@ export function TasksScreen() {
   }, [tasksQuery, employeesQuery]);
 
   /**
-   * Invalidación selectiva tras una mutación: lista e historial de Tareas y
-   * Desempeño (completar/revertir cambia el cumplimiento). Nada más.
+   * Invalidación selectiva tras una mutación: lista e historial de Tareas,
+   * Desempeño (completar/revertir cambia el cumplimiento) e Inicio. Nada más.
    */
-  const refresh = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(userId) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.performance.all(userId) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard(userId) });
-  }, [queryClient, userId]);
+  const refresh = useCallback(
+    () => invalidateTaskViews(queryClient, userId),
+    [queryClient, userId],
+  );
 
   const closeDialog = useCallback(() => setDialog({ type: 'none' }), []);
 

@@ -36,6 +36,30 @@ export interface PerformanceOccurrence {
   completedAt: string | null;
   /** Solo una «Una vez» con fecha: la de la planificación que usó el cálculo. */
   scheduledDate?: string;
+  /**
+   * Solo ✅ Tareas, decidido por el backend: la obligación pendiente se puede
+   * marcar ahora como realizada (carga olvidada), con las fechas admitidas
+   * (`YYYY-MM-DD`). Ausente: no se ofrece la acción.
+   */
+  lateCompletion?: LateCompletionBounds;
+  /** «Una vez» o urgente pendiente y activa: se completa con su flujo normal, en Tareas. */
+  completeInTasks?: true;
+  /** La ejecución fue una carga olvidada: fecha real, momento del registro y si se puede deshacer. */
+  lateRegistration?: {
+    executionId: string;
+    performedOn: string;
+    recordedAt: string;
+    canRevert: boolean;
+  };
+}
+
+export interface LateCompletionBounds {
+  periodStart: string;
+  periodEnd: string;
+  /** Primer día admitido (inicio del período o desde que la tarea tuvo esa frecuencia). */
+  earliest: string;
+  /** Último día admitido (fin del período u hoy: nunca futuro). */
+  latest: string;
 }
 
 export interface PerformanceResponse {

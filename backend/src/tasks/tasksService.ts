@@ -24,8 +24,12 @@ import {
   TaskInactiveError,
   TaskInUseError,
   TaskNotFoundError,
+  TaskObligationAlreadyCompletedError,
+  TaskObligationUnavailableError,
   ValidationError,
 } from '../errors/AppError';
+import { loadObligationInputs, lateCompletionWindow } from '../performance/performanceService';
+import { buildRecurringOccurrences } from '../performance/performanceCalculator';
 import { runEntityDeletion } from '../lib/deletion';
 import {
   assertScheduledDateFits,
@@ -34,6 +38,7 @@ import {
   scheduledDateValue,
 } from './taskSchedule';
 import { FREQUENCY_ORDER, compareOperationalOrder } from './taskOrder';
+import { canRevertExecution, executionFrequency, lateCompletionBounds } from './completionRules';
 import {
   EMPTY_SUGGESTION,
   SUGGESTION_FIELDS,
@@ -89,6 +94,7 @@ const executionSelect = {
   id: true,
   periodKey: true,
   completedAt: true,
+  performedOn: true,
   recordedByUserId: true,
   assignedEmployee: { select: employeeSummarySelect },
   completedByEmployee: { select: employeeSummarySelect },
@@ -133,31 +139,37 @@ export async function resolveActor(auth: AuthContext): Promise<TaskActor> {
 
 // ── Serialización ─────────────────────────────────────────────────────────
 
+/**
+ * `completedAt` = momento real del registro; `performedOn` = fecha real de
+ * realización de una carga olvidada (solo el día, sin hora), `null` en el
+ * flujo normal (se realizó cuando se registró).
+ */
 function serializeExecution(execution: ExecutionRow, canRevert: boolean) {
   return {
     id: execution.id,
     periodKey: execution.periodKey,
     completedAt: execution.completedAt?.toISOString() ?? null,
+    performedOn: scheduledDateText(execution.performedOn),
     assignedEmployee: execution.assignedEmployee,
     completedByEmployee: execution.completedByEmployee,
     canRevert,
   };
 }
 
-/**
- * Un EMPLOYEE revierte solo lo que él mismo completó y solo en el período
- * vigente de la tarea; un ADMIN puede corregir cualquier ejecución vigente.
- */
-function canRevertExecution(
+/** Regla compartida (`completionRules.canRevertExecution`) con el día de negocio de `now`. */
+function canRevertAt(
   actor: TaskActor,
-  execution: { periodKey: string; completedByEmployee: { id: string } | null },
+  execution: ExecutionRow,
   currentPeriodKey: string,
+  now: Date,
 ): boolean {
-  if (actor.role === 'ADMIN') return true;
-  return (
-    actor.employeeId !== null &&
-    execution.completedByEmployee?.id === actor.employeeId &&
-    execution.periodKey === currentPeriodKey
+  const timeZone = config.businessTimeZone;
+  return canRevertExecution(
+    actor,
+    execution,
+    currentPeriodKey,
+    toLocalDate(now, timeZone),
+    timeZone,
   );
 }
 
@@ -191,7 +203,10 @@ function serializeTask(
     // Fecha sugerida del período vigente: solo una sugerencia, nunca un vencimiento.
     suggestedDate: suggestedDate ? formatLocalDate(suggestedDate) : null,
     currentExecution: execution
-      ? serializeExecution(execution, canRevertExecution(actor, execution, periodKey))
+      ? serializeExecution(
+          execution,
+          canRevertExecution(actor, execution, periodKey, today, config.businessTimeZone),
+        )
       : null,
     canComplete: task.active && execution === null && canActOnTasks,
   };
@@ -760,6 +775,9 @@ export async function revertTaskCompletion(
         taskId: true,
         periodKey: true,
         revertedAt: true,
+        completedAt: true,
+        performedOn: true,
+        recordedByUserId: true,
         completedByEmployee: { select: { id: true } },
         task: { select: { frequency: true } },
       },
@@ -774,9 +792,17 @@ export async function revertTaskCompletion(
       now,
       config.businessTimeZone,
     );
-    if (!canRevertExecution(actor, execution, currentPeriodKey)) {
+    if (
+      !canRevertExecution(
+        actor,
+        execution,
+        currentPeriodKey,
+        toLocalDate(now, config.businessTimeZone),
+        config.businessTimeZone,
+      )
+    ) {
       throw new ForbiddenError(
-        'Solo podés deshacer una tarea que completaste vos, dentro del período vigente.',
+        'Solo podés deshacer una tarea que completaste vos, dentro del período vigente o el mismo día en que la registraste desde Desempeño.',
       );
     }
 
@@ -812,6 +838,177 @@ export async function revertTaskCompletion(
   return { task: await loadSerializedTask(taskId, actor, now) };
 }
 
+// ── Carga olvidada (Desempeño → Detalle) ──────────────────────────────────
+
+export interface LateCompletionInput {
+  /** Período de la obligación elegida en el detalle: el servidor lo vuelve a validar. */
+  periodKey: string;
+  /** Fecha real de realización (`YYYY-MM-DD`, `BUSINESS_TIME_ZONE`). */
+  performedOn: string;
+  /** Solo ADMIN (obligatorio): quién la realizó. */
+  employeeId?: string;
+}
+
+/**
+ * «Marcar como realizada» una obligación recurrente que se hizo y no se
+ * marcó (docs/BUSINESS_RULES.md, "Tareas realizadas que se olvidaron
+ * marcar"). Nunca usa el período vigente como `completeTask`: reconstruye la
+ * obligación pedida con la MISMA lectura y el MISMO calculador que Desempeño
+ * (`loadObligationInputs` + `buildRecurringOccurrences`, ventana de 30 días)
+ * y no confía en nada del cliente salvo la identificación (tarea + período)
+ * y la fecha: responsable y frecuencia salen de la planificación histórica,
+ * el estado pendiente de las ejecuciones vigentes, y si ya no está pendiente
+ * o dejó de existir se responde 409.
+ *
+ * - EMPLOYEE: solo una obligación que le correspondía (responsable
+ *   histórico), a su nombre; nunca la de otra persona.
+ * - ADMIN: elige explícitamente quién la realizó (empleado activo); si no es
+ *   el responsable, queda como cobertura.
+ * - Fecha: dentro del período, nunca futura ni anterior a que la tarea
+ *   tuviera esa frecuencia (`lateCompletionBounds`). Se guarda sin hora en
+ *   `performedOn`; `completedAt` es el momento real del registro y el autor
+ *   sale de la sesión.
+ * - Una sola ejecución vigente por tarea y período: la unicidad parcial es la
+ *   defensa final (doble clic, solicitudes simultáneas o alguien que la
+ *   completó mientras tanto → 409, nunca se reemplaza otra ejecución).
+ * - Una desactivación posterior no la invalida: cuenta la planificación de
+ *   ese período.
+ */
+export async function registerLateCompletion(
+  actor: TaskActor,
+  taskId: string,
+  input: LateCompletionInput,
+  meta: RequestMeta,
+  now = new Date(),
+) {
+  let executorId: string;
+  if (actor.role === 'ADMIN') {
+    if (!input.employeeId) throw new ValidationError('Indicá quién realizó la tarea.');
+    executorId = input.employeeId;
+  } else {
+    if (!actor.employeeId) {
+      throw new ForbiddenError('Tu usuario no está vinculado a un empleado activo.');
+    }
+    if (input.employeeId !== undefined && input.employeeId !== actor.employeeId) {
+      throw new ForbiddenError('Solo podés registrar tareas realizadas por vos.');
+    }
+    executorId = actor.employeeId;
+  }
+
+  const timeZone = config.businessTimeZone;
+  const window = lateCompletionWindow(now);
+  const performedOn = parseLocalDate(input.performedOn);
+  if (!performedOn) throw new ValidationError('La fecha en que se realizó no es válida.');
+  if (compareLocalDates(performedOn, window.today) > 0) {
+    throw new ValidationError('La fecha en que se realizó no puede ser futura.');
+  }
+
+  const task = await prisma.task.findUnique({ where: { id: taskId }, select: { id: true } });
+  if (!task) throw new NotFoundError('Tarea no encontrada.');
+
+  const inputs = await loadObligationInputs(
+    {
+      from: window.from,
+      to: window.to,
+      rangeStart: startOfLocalDay(window.from, timeZone),
+      rangeEnd: startOfLocalDay(addDays(window.to, 1), timeZone),
+    },
+    taskId,
+  );
+  const occurrence = buildRecurringOccurrences({
+    plans: inputs.planRows,
+    executions: inputs.executions,
+    from: window.from,
+    to: window.to,
+    today: window.today,
+    now,
+    timeZone,
+  }).find((item) => item.periodKey === input.periodKey);
+  if (!occurrence) throw new TaskObligationUnavailableError();
+  if (occurrence.completed) throw new TaskObligationAlreadyCompletedError();
+  if (actor.role !== 'ADMIN' && occurrence.assignedEmployeeId !== actor.employeeId) {
+    throw new ForbiddenError('Solo podés registrar tareas que te correspondían a vos.');
+  }
+  const bounds = lateCompletionBounds({
+    occurrence,
+    plans: inputs.planRows,
+    windowFrom: window.from,
+    today: window.today,
+    now,
+    timeZone,
+  });
+  if (!bounds) throw new TaskObligationUnavailableError();
+  if (input.performedOn < bounds.periodStart || input.performedOn > bounds.periodEnd) {
+    throw new ValidationError('La fecha tiene que estar dentro del período de la tarea.');
+  }
+  if (input.performedOn < bounds.earliest) {
+    throw new ValidationError(
+      `Ese día la tarea todavía no estaba planificada así. Elegí una fecha desde el ${formatDisplayDate(bounds.earliest)}.`,
+    );
+  }
+
+  const status = executorId === occurrence.assignedEmployeeId ? 'personal' : 'covered';
+  try {
+    await prisma.$transaction(async (tx) => {
+      if (actor.role === 'ADMIN') {
+        await requireActiveEmployee(
+          tx,
+          executorId,
+          'El empleado indicado no existe o no está activo.',
+        );
+      }
+      const execution = await tx.taskExecution.create({
+        data: {
+          taskId,
+          periodKey: occurrence.periodKey,
+          completed: true,
+          completedAt: now,
+          performedOn: scheduledDateValue(input.performedOn),
+          assignedEmployeeId: occurrence.assignedEmployeeId,
+          completedByEmployeeId: executorId,
+          recordedByUserId: actor.userId,
+        },
+        select: { id: true },
+      });
+      await recordAuditLog(tx, {
+        actorUserId: actor.userId,
+        action: 'task.completed_late',
+        entityType: 'TaskExecution',
+        entityId: execution.id,
+        newState: {
+          taskId,
+          periodKey: occurrence.periodKey,
+          frequency: occurrence.frequency,
+          performedOn: input.performedOn,
+          assignedEmployeeId: occurrence.assignedEmployeeId,
+          completedByEmployeeId: executorId,
+          actorRole: actor.role,
+          registeredOnBehalf: executorId !== actor.employeeId,
+        },
+        ...meta,
+      });
+    });
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new TaskObligationAlreadyCompletedError();
+    throw error;
+  }
+  return {
+    completion: {
+      taskId,
+      periodKey: occurrence.periodKey,
+      frequency: occurrence.frequency,
+      performedOn: input.performedOn,
+      recordedAt: now.toISOString(),
+      assignedEmployeeId: occurrence.assignedEmployeeId,
+      completedByEmployeeId: executorId,
+      status,
+    },
+  };
+}
+
+/** `YYYY-MM-DD` → `dd/mm/aaaa` (mensajes de error). */
+const formatDisplayDate = (date: string) => date.split('-').reverse().join('/');
+
 // ── Historial semanal ─────────────────────────────────────────────────────
 
 const historyTaskSelect = {
@@ -826,11 +1023,12 @@ const historyTaskSelect = {
 
 type HistoryTaskRow = Prisma.TaskGetPayload<{ select: typeof historyTaskSelect }>;
 
-function serializeHistoryTask(task: HistoryTaskRow) {
+/** `frequency`: la de la fila (la que tenía la tarea en esas ejecuciones), no necesariamente la actual. */
+function serializeHistoryTask(task: HistoryTaskRow, frequency: TaskFrequency = task.frequency) {
   return {
     id: task.id,
     description: task.description,
-    frequency: task.frequency,
+    frequency,
     active: task.active,
     assignee: task.employee,
     scheduledDate: scheduledDateText(task.scheduledDate),
@@ -838,15 +1036,38 @@ function serializeHistoryTask(task: HistoryTaskRow) {
 }
 
 /**
+ * Instante con el que se ubica y ordena una finalización: el registro en el
+ * flujo normal; en una carga olvidada, el último instante del día en que se
+ * realizó (solo se conoce el día).
+ */
+function realizationInstant(
+  execution: { completedAt: Date | null; performedOn: Date | null },
+  timeZone: string,
+): number {
+  const performedOn = execution.performedOn
+    ? parseLocalDate(scheduledDateText(execution.performedOn) ?? '')
+    : null;
+  if (performedOn) return startOfLocalDay(addDays(performedOn, 1), timeZone).getTime() - 1;
+  return execution.completedAt?.getTime() ?? 0;
+}
+
+/**
  * Semana lunes-domingo en la zona de negocio. Diarias y semanales: un slot
- * por período esperado; "esperado" = la tarea está activa hoy, el período ya
- * empezó y la tarea ya existía. Así `completed / expected` es correcto y
- * nunca el 0% fijo del prototipo. Quincenales, mensuales, bimestrales,
- * anuales, urgentes y únicas: las finalizaciones cuya fecha local cae en la
- * semana — esos períodos no entran en una grilla de lunes a domingo, así que
- * no suman slots al denominador realizadas/esperadas. Solo ejecuciones
- * vigentes (las revertidas quedan en la base y en la auditoría). Incluye
- * tareas hoy desactivadas si tuvieron ejecuciones esa semana.
+ * por período; "esperado" = la tarea está activa hoy con esa frecuencia, el
+ * período ya empezó y la tarea ya existía. Así `completed / expected` es
+ * correcto y nunca el 0% fijo del prototipo. Quincenales, mensuales,
+ * bimestrales, anuales, urgentes y únicas: las finalizaciones REALIZADAS en
+ * la semana (fecha real de una carga olvidada, o el registro) — esos
+ * períodos no entran en una grilla de lunes a domingo, así que no suman slots
+ * al denominador realizadas/esperadas. Solo ejecuciones vigentes (las
+ * revertidas quedan en la base y en la auditoría). Incluye tareas hoy
+ * desactivadas si tuvieron ejecuciones esa semana.
+ *
+ * Cada ejecución se interpreta con la frecuencia que tenía la tarea cuando se
+ * registró (`executionFrequency`, sobre su planificación histórica), nunca
+ * solo con la actual: si cambió de frecuencia, sus ejecuciones anteriores
+ * quedan en una fila propia (o entre las finalizaciones) y no ocupan un slot
+ * de la frecuencia nueva.
  *
  * Filtro por persona: un slot pertenece a quien lo tenía asignado (snapshot
  * de la ejecución, o el responsable actual si todavía no se completó) o a
@@ -873,74 +1094,105 @@ export async function getWeeklyHistory(
   const days = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
   const dayKeys = days.map(formatLocalDate);
   const weekKey = dayKeys[0] as string;
-  const periodKeys = Array.from(new Set([...dayKeys, weekKey]));
-
-  const recurringTasks = await prisma.task.findMany({
-    where: {
-      frequency: { in: ['DAILY', 'WEEKLY'] },
-      OR: [
-        { active: true },
-        { executions: { some: { revertedAt: null, periodKey: { in: periodKeys } } } },
-      ],
-    },
-    select: historyTaskSelect,
-  });
-  const recurringExecutions = recurringTasks.length
-    ? await prisma.taskExecution.findMany({
-        where: {
-          revertedAt: null,
-          taskId: { in: recurringTasks.map((task) => task.id) },
-          periodKey: { in: periodKeys },
-        },
-        select: { ...executionSelect, taskId: true },
-      })
-    : [];
-  const executionByKey = new Map(
-    recurringExecutions.map((execution) => [
-      `${execution.taskId}|${execution.periodKey}`,
-      execution,
-    ]),
-  );
-
+  const weekEnd = dayKeys[6] as string;
   const rangeStart = startOfLocalDay(weekStart, timeZone);
   const rangeEnd = startOfLocalDay(addDays(weekStart, 7), timeZone);
-  const otherExecutions = await prisma.taskExecution.findMany({
-    where: {
-      revertedAt: null,
-      completedAt: { gte: rangeStart, lt: rangeEnd },
-      task: {
-        frequency: { in: ['SEMI_MONTHLY', 'MONTHLY', 'BIMONTHLY', 'ANNUAL', 'URGENT', 'ONE_TIME'] },
+
+  const [currentTasks, executions] = await Promise.all([
+    prisma.task.findMany({
+      where: { active: true, frequency: { in: ['DAILY', 'WEEKLY'] } },
+      select: historyTaskSelect,
+    }),
+    // Las ejecuciones vigentes con clave de un día de la semana (diarias,
+    // semanales y mensuales del 1) o realizadas en la semana.
+    prisma.taskExecution.findMany({
+      where: {
+        revertedAt: null,
+        OR: [
+          { periodKey: { in: dayKeys } },
+          { performedOn: null, completedAt: { gte: rangeStart, lt: rangeEnd } },
+          {
+            performedOn: {
+              gte: scheduledDateValue(weekKey) as Date,
+              lte: scheduledDateValue(weekEnd) as Date,
+            },
+          },
+        ],
       },
-    },
-    select: { ...executionSelect, task: { select: historyTaskSelect } },
-    orderBy: { completedAt: 'asc' },
-  });
+      select: { ...executionSelect, taskId: true, task: { select: historyTaskSelect } },
+      orderBy: { completedAt: 'asc' },
+    }),
+  ]);
+  const plans = executions.length
+    ? await prisma.taskPlanningInterval.findMany({
+        where: { taskId: { in: Array.from(new Set(executions.map((row) => row.taskId))) } },
+        select: { taskId: true, frequency: true, validFrom: true },
+      })
+    : [];
 
   const matchesEmployee = (assigneeId: string, completedById: string | undefined): boolean =>
     !params.employeeId || assigneeId === params.employeeId || completedById === params.employeeId;
 
+  type RowFrequency = 'DAILY' | 'WEEKLY';
+  const rowKey = (taskId: string, frequency: RowFrequency) => `${taskId}|${frequency}`;
+  const rows = new Map<
+    string,
+    { task: HistoryTaskRow; frequency: RowFrequency; expected: boolean }
+  >();
+  for (const task of currentTasks) {
+    const frequency = task.frequency as RowFrequency;
+    rows.set(rowKey(task.id, frequency), { task, frequency, expected: true });
+  }
+  const slotExecutions = new Map<string, (typeof executions)[number]>();
+  const others: { execution: (typeof executions)[number]; frequency: TaskFrequency }[] = [];
+  for (const execution of executions) {
+    const frequency = executionFrequency(
+      plans.filter((plan) => plan.taskId === execution.taskId),
+      execution,
+      execution.task.frequency,
+      timeZone,
+    );
+    if (frequency === 'DAILY' || frequency === 'WEEKLY') {
+      const inWeek =
+        frequency === 'DAILY'
+          ? dayKeys.includes(execution.periodKey)
+          : execution.periodKey === weekKey;
+      if (!inWeek) continue;
+      const key = rowKey(execution.taskId, frequency);
+      if (!rows.has(key)) rows.set(key, { task: execution.task, frequency, expected: false });
+      slotExecutions.set(`${key}|${execution.periodKey}`, execution);
+      continue;
+    }
+    const realized = realizationInstant(execution, timeZone);
+    if (realized >= rangeStart.getTime() && realized < rangeEnd.getTime()) {
+      others.push({ execution, frequency });
+    }
+  }
+
   let expected = 0;
   let completed = 0;
-  const recurring = recurringTasks
+  const recurring = Array.from(rows.values())
     .sort(
       (a, b) =>
         FREQUENCY_ORDER[a.frequency] - FREQUENCY_ORDER[b.frequency] ||
-        a.description.localeCompare(b.description, 'es'),
+        a.task.description.localeCompare(b.task.description, 'es') ||
+        a.task.id.localeCompare(b.task.id),
     )
-    .map((task) => {
-      const createdOn = toLocalDate(task.createdAt, timeZone);
-      const currentPeriodKey = computePeriodKey(task.frequency, now, timeZone);
-      const slotDates = task.frequency === 'DAILY' ? days : [weekStart];
+    .map((row) => {
+      const createdOn = toLocalDate(row.task.createdAt, timeZone);
+      const currentPeriodKey = computePeriodKey(row.task.frequency, now, timeZone);
+      const slotDates = row.frequency === 'DAILY' ? days : [weekStart];
       const slots = slotDates
         .map((date) => {
           const periodKey = formatLocalDate(date);
-          const execution = executionByKey.get(`${task.id}|${periodKey}`) ?? null;
-          const periodEnd = task.frequency === 'DAILY' ? date : addDays(weekStart, 6);
+          const execution =
+            slotExecutions.get(`${rowKey(row.task.id, row.frequency)}|${periodKey}`) ?? null;
+          const periodEnd = row.frequency === 'DAILY' ? date : addDays(weekStart, 6);
           const isExpected =
-            task.active &&
+            row.expected &&
             compareLocalDates(date, today) <= 0 &&
             compareLocalDates(createdOn, periodEnd) <= 0;
-          const assigneeId = execution?.assignedEmployee.id ?? task.employee.id;
+          const assigneeId = execution?.assignedEmployee.id ?? row.task.employee.id;
           if (!matchesEmployee(assigneeId, execution?.completedByEmployee?.id)) return null;
           if (isExpected) {
             expected += 1;
@@ -950,30 +1202,32 @@ export async function getWeeklyHistory(
             periodKey,
             expected: isExpected,
             execution: execution
-              ? serializeExecution(
-                  execution,
-                  canRevertExecution(actor, execution, currentPeriodKey),
-                )
+              ? serializeExecution(execution, canRevertAt(actor, execution, currentPeriodKey, now))
               : null,
           };
         })
         .filter((slot): slot is NonNullable<typeof slot> => slot !== null);
-      return { task: serializeHistoryTask(task), slots };
+      return { task: serializeHistoryTask(row.task, row.frequency), slots };
     })
     .filter((row) => row.slots.some((slot) => slot.expected || slot.execution));
 
-  const others = otherExecutions
-    .filter((execution) =>
+  const otherLines = others
+    .filter(({ execution }) =>
       matchesEmployee(execution.assignedEmployee.id, execution.completedByEmployee?.id),
     )
-    .map((execution) => ({
-      task: serializeHistoryTask(execution.task),
+    .sort(
+      (a, b) =>
+        realizationInstant(a.execution, timeZone) - realizationInstant(b.execution, timeZone),
+    )
+    .map(({ execution, frequency }) => ({
+      task: serializeHistoryTask(execution.task, frequency),
       execution: serializeExecution(
         execution,
-        canRevertExecution(
+        canRevertAt(
           actor,
           execution,
           computePeriodKey(execution.task.frequency, now, timeZone),
+          now,
         ),
       ),
     }));
@@ -981,14 +1235,14 @@ export async function getWeeklyHistory(
   return {
     week: {
       start: weekKey,
-      end: dayKeys[6] as string,
+      end: weekEnd,
       days: dayKeys,
       isCurrent: weekKey === formatLocalDate(startOfWeek(today)),
       timeZone,
     },
     summary: { expected, completed },
     recurring,
-    others,
+    others: otherLines,
   };
 }
 

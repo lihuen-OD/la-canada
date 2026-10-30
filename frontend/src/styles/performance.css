@@ -163,6 +163,33 @@
   font-size: var(--font-size-xs);
 }
 
+/* ✅ Tareas: estado y acción a la derecha («Marcar como realizada», «Completar
+   en Tareas», «Deshacer»); en pantallas angostas la acción baja a su propia
+   línea sin desbordar. */
+.performance-detail--actions li {
+  flex-wrap: wrap;
+}
+
+.performance-detail--actions li > span:first-child {
+  flex: 1 1 12rem;
+}
+
+.performance-detail__side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+  margin-left: auto;
+  text-align: right;
+}
+
+.late-completion__period {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+}
+
 @media (min-width: 768px) {
   .performance__summary {
     grid-template-columns: repeat(4, minmax(0, 1fr));

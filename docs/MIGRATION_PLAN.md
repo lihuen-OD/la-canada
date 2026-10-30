@@ -349,6 +349,13 @@ Con el código de esta etapa ya validado (ver checklist más abajo), crear el pr
 - **Pendiente para `production`** (con autorización propia, antes de publicar este código): aplicar `20261027120000_kitchen_garden_module` con `db:migrate:deploy`. Las 19 anteriores ya están aplicadas allí (salida compartida por el usuario el 2026-10-26).
 - **Para empezar a usarla**: ver `docs/BUSINESS_RULES.md`, "🥬 Huerta" (un ADMIN agrega a los participantes desde la app; nada viene precargado).
 
+### Tareas realizadas que se olvidaron marcar 🟢 implementada y validada en `demo` (2026-10-30)
+
+- **Alcance** (pedido explícito del usuario): «Marcar como realizada» en las filas «Sin completar» de Desempeño → Detalle para registrar una obligación pasada (o del período en curso) con su fecha real, sin usar el período vigente del servidor. Solo ✅ Tareas; 🥬 Huerta sin cambios. Solo `demo`: sin PR, merge ni despliegue. Regla en `docs/BUSINESS_RULES.md`, "Tareas realizadas que se olvidaron marcar"; detalle técnico en `docs/ARCHITECTURE.md` §44.
+- **Decisiones**: una sola lectura y un solo calculador para Desempeño y la carga (`loadObligationInputs` + `buildRecurringOccurrences`); ventana = el rango más largo de Desempeño (30 días), sin límite propio; el cliente solo identifica la obligación y la fecha; fecha real sin hora en una columna nueva (`performed_on`) y `completed_at` como momento real del registro; EMPLOYEE solo lo propio, ADMIN elige quién la realizó; el EMPLOYEE deshace su carga el mismo día en que la registró; historial interpretado con la frecuencia histórica de cada ejecución; acciones del detalle como capacidad opcional de la fuente de datos (la Huerta no la tiene).
+- **Migración**: `20261030120000_task_execution_performed_on` (una columna `DATE NULL` y un CHECK), generada offline con `prisma migrate diff` y revisada; sin datos ni backfill. Aplicada **solo a `demo`** el 2026-10-30 con `db:migrate:deploy` (guarda `DATABASE_TARGET=demo`): 21 de 21 al día; huella de solo lectura de los datos reales idéntica antes y después.
+- **Pendiente para `production`** (con autorización propia, antes de publicar este código): aplicar `20261027120000_kitchen_garden_module` y `20261030120000_task_execution_performed_on`, en ese orden, con `db:migrate:deploy`. Es aditiva: el código publicado no lee la columna nueva y la deja en NULL.
+
 ## Etapa 6 — Integrar Neon Object Storage (fotografías y archivos)
 
 - **Objetivo**: conectar `FileAsset` (ya modelado en la Etapa 2, adaptado a Neon Object Storage en la Etapa 2.2) con el Object Storage real de Neon, gestionado desde el backend.

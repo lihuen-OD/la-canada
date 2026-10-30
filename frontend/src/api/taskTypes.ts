@@ -42,7 +42,14 @@ export interface TaskEmployee {
 export interface TaskExecution {
   id: string;
   periodKey: string;
+  /** Momento real en que se registró (ISO). */
   completedAt: string | null;
+  /**
+   * Fecha real de realización (`YYYY-MM-DD`, sin hora) de una carga olvidada
+   * registrada desde Desempeño; `null` (o ausente, 🥬 Huerta) en el flujo
+   * normal: se realizó cuando se registró.
+   */
+  performedOn?: string | null;
   /** Snapshot: a quién estaba asignada la tarea al completarla. */
   assignedEmployee: TaskEmployee;
   /** Quién la realizó realmente. */
@@ -88,6 +95,31 @@ export interface TaskEmployeesResponse {
 
 export interface TaskMutationResponse {
   task: TaskItem;
+}
+
+/**
+ * «Marcar como realizada» desde Desempeño → Detalle: identifica la obligación
+ * (tarea + `periodKey` que mostró el backend) y la fecha REAL de realización.
+ * `employeeId` (quién la realizó) solo lo envía un ADMIN. Responsable,
+ * frecuencia y estado nunca se envían: los reconstruye el backend.
+ */
+export interface LateCompletionRequest {
+  periodKey: string;
+  performedOn: string;
+  employeeId?: string;
+}
+
+export interface LateCompletionResponse {
+  completion: {
+    taskId: string;
+    periodKey: string;
+    frequency: TaskFrequency;
+    performedOn: string;
+    recordedAt: string;
+    assignedEmployeeId: string;
+    completedByEmployeeId: string;
+    status: 'personal' | 'covered';
+  };
 }
 
 export interface CreateTaskRequest extends Partial<TaskSuggestion> {

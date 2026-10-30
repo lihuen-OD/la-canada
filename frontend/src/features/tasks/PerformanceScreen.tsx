@@ -1,19 +1,43 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { keepPreviousData, useQuery, type QueryKey } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+  type QueryKey,
+} from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
+import { ApiError } from '../../api/httpClient';
 import { fetchEmployeePerformance, fetchPerformance } from '../../api/performanceApi';
 import { STALE_TIME } from '../../api/queryClient';
 import { queryKeys } from '../../api/queryKeys';
+import { registerLateCompletion, revertTaskCompletion } from '../../api/tasksApi';
+import type { LateCompletionRequest } from '../../api/taskTypes';
 import { useSessionScope } from '../../api/useSessionScope';
 import { useAuth } from '../../auth/useAuth';
 import { Avatar } from '../../components/ui/Avatar';
+import { Button } from '../../components/ui/Button';
+import { buttonClassName } from '../../components/ui/buttonStyles';
 import { Card } from '../../components/ui/Card';
 import { Chip } from '../../components/ui/Chip';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
+import { AlertIcon, CheckCircleIcon } from '../../components/ui/icons';
 import { useBusinessToday } from '../../connectivity/useBusinessToday';
-import { formatDateWithWeekday, formatPercentage } from '../../utils/dateFormat';
+import { APP_ROUTES } from '../../routes/navigation';
+import { formatDate, formatDateWithWeekday, formatPercentage } from '../../utils/dateFormat';
+import { isSessionExpired } from './dialogErrors';
+import { LateCompletionDialog, type LateCompletionItem } from './LateCompletionDialog';
+import { RevertTaskDialog } from './RevertTaskDialog';
 import { TasksSubnav } from './TasksSubnav';
-import { FREQUENCY_LABEL, TASK_NOUN, formatPeriodKey, type ItemNoun } from './taskLabels';
+import { invalidateTaskViews } from './taskCache';
+import {
+  FREQUENCY_LABEL,
+  TASK_NOUN,
+  formatLateRegistration,
+  formatPeriodKey,
+  type ItemNoun,
+} from './taskLabels';
 import type { PerformanceOccurrence, PerformanceResponse } from '../../api/performanceTypes';
 
 /** Rótulo del estado que ya calculó el backend, visto desde la persona del detalle. */
@@ -82,6 +106,25 @@ export interface PerformanceSource {
   fetchSummary: (from: string, to: string) => Promise<PerformanceResponse>;
   detailKey: (userId: string, personId: string, from: string, to: string) => QueryKey;
   fetchDetail: (personId: string, from: string, to: string) => Promise<PerformanceResponse>;
+  /** Acciones del detalle; sin ellas (por defecto en otra fuente) no se muestra ninguna. */
+  actions?: PerformanceActions;
+}
+
+/**
+ * Acciones del detalle — SOLO ✅ Tareas: «Marcar como realizada» una
+ * obligación que se hizo y no se marcó, deshacer esa carga y el enlace a
+ * Tareas de «Una vez» y urgentes. Cuáles filas las tienen lo decide el
+ * backend (`lateCompletion`, `lateRegistration.canRevert`, `completeInTasks`);
+ * esta pantalla solo las presenta. Una fuente sin `actions` (🥬 Huerta) no
+ * muestra ninguna ni usa endpoints o claves de Tareas.
+ */
+export interface PerformanceActions {
+  registerLate: (taskId: string, body: LateCompletionRequest) => Promise<unknown>;
+  revert: (taskId: string, executionId: string, reason?: string) => Promise<unknown>;
+  /** Lo que una carga o reversión deja desactualizado: lo mismo que completar/revertir en Tareas. */
+  invalidate: (queryClient: QueryClient, userId: string) => void;
+  /** Dónde se completan «Una vez» y urgentes con su flujo normal. */
+  tasksPath: string;
 }
 
 const TASKS_PERFORMANCE: PerformanceSource = {
@@ -89,7 +132,22 @@ const TASKS_PERFORMANCE: PerformanceSource = {
   fetchSummary: fetchPerformance,
   detailKey: queryKeys.performance.employee,
   fetchDetail: fetchEmployeePerformance,
+  // Funciones diferidas: los endpoints de Tareas solo se tocan al usarlos.
+  actions: {
+    registerLate: (taskId, body) => registerLateCompletion(taskId, body),
+    revert: (taskId, executionId, reason) => revertTaskCompletion(taskId, executionId, reason),
+    invalidate: invalidateTaskViews,
+    tasksPath: APP_ROUTES.tasks.path,
+  },
 };
+
+type LateRegistration = NonNullable<PerformanceOccurrence['lateRegistration']>;
+type DetailDialog =
+  | { type: 'none' }
+  | { type: 'late'; item: LateCompletionItem }
+  | { type: 'revert'; item: PerformanceOccurrence; late: LateRegistration };
+
+type Notice = { tone: 'positive' | 'danger'; text: string } | null;
 
 interface PerformanceScreenProps {
   source?: PerformanceSource;
@@ -126,9 +184,14 @@ export function PerformanceScreen({
   const percentageLabel = (value: number | null) =>
     value === null ? noun.noObligations : formatPercentage(value);
   const { user, logout } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
   const { userId, enabled } = useSessionScope();
+  const queryClient = useQueryClient();
+  const actions = source.actions ?? null;
   const [preset, setPreset] = useState<Preset>(7);
   const [selected, setSelected] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<DetailDialog>({ type: 'none' });
+  const [notice, setNotice] = useState<Notice>(null);
   const today = useBusinessToday();
   const range = presetRange(preset, today);
 
@@ -156,10 +219,50 @@ export function PerformanceScreen({
   const detail = detailQuery.data ?? null;
   const load = () => void summary.refetch();
 
+  /**
+   * Una acción del detalle: sin actualizaciones optimistas (los datos
+   * visibles quedan como estaban si falla). Éxito → aviso, cierre e
+   * invalidación de todo lo que completar/revertir actualiza en Tareas.
+   * Conflicto (otra persona la registró, ya no corresponde) → se actualizan
+   * los datos y el diálogo lo explica. Sesión vencida → login. Sin conexión
+   * o sin respuesta: el mensaje de `httpClient`; nunca se reintenta solo.
+   */
+  async function runAction(
+    current: NonNullable<typeof actions>,
+    operation: () => Promise<unknown>,
+    success: string,
+  ): Promise<void> {
+    try {
+      await operation();
+    } catch (reason) {
+      if (isSessionExpired(reason)) void logout();
+      if (reason instanceof ApiError && reason.status === 409) {
+        current.invalidate(queryClient, userId);
+      }
+      throw reason;
+    }
+    setDialog({ type: 'none' });
+    setNotice({ tone: 'positive', text: success });
+    current.invalidate(queryClient, userId);
+  }
+
   return (
     <div className="performance">
       <PageHeader title={title} refreshing={Boolean(data) && summary.isFetching} />
       {subnav}
+      {actions ? (
+        <div aria-live="polite" className="tasks__notice">
+          {notice ? (
+            <p
+              role={notice.tone === 'danger' ? 'alert' : 'status'}
+              className={`notice notice--${notice.tone}`}
+            >
+              {notice.tone === 'danger' ? <AlertIcon size="sm" /> : <CheckCircleIcon size="sm" />}
+              {notice.text}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <div className="filter-scroller" role="group" aria-label="Período">
         {PRESETS.map((days) => (
           <Chip
@@ -289,7 +392,11 @@ export function PerformanceScreen({
                 </button>
               }
             >
-              <ul className="performance-detail">
+              <ul
+                className={
+                  actions ? 'performance-detail performance-detail--actions' : 'performance-detail'
+                }
+              >
                 {detail.occurrences?.map((item) => (
                   <li key={`${item.taskId}-${item.periodKey}`}>
                     <span>
@@ -301,8 +408,36 @@ export function PerformanceScreen({
                           ? ` · realizada por ${item.completedByEmployee.displayName}`
                           : ''}
                       </small>
+                      {actions && item.lateRegistration ? (
+                        <small>
+                          {formatLateRegistration(
+                            item.lateRegistration.performedOn,
+                            item.lateRegistration.recordedAt,
+                            detail.range.timeZone,
+                          )}
+                        </small>
+                      ) : null}
                     </span>
-                    <span>{occurrenceLabel(item, selected)}</span>
+                    {actions ? (
+                      <span className="performance-detail__side">
+                        <span>{occurrenceLabel(item, selected)}</span>
+                        <DetailAction
+                          item={item}
+                          isAdmin={isAdmin}
+                          tasksPath={actions.tasksPath}
+                          onLate={(target) => {
+                            setNotice(null);
+                            setDialog({ type: 'late', item: target });
+                          }}
+                          onRevert={(late) => {
+                            setNotice(null);
+                            setDialog({ type: 'revert', item, late });
+                          }}
+                        />
+                      </span>
+                    ) : (
+                      <span>{occurrenceLabel(item, selected)}</span>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -310,6 +445,92 @@ export function PerformanceScreen({
           ) : null}
         </>
       )}
+
+      {actions && dialog.type === 'late' ? (
+        <LateCompletionDialog
+          item={dialog.item}
+          isAdmin={isAdmin}
+          onCancel={() => setDialog({ type: 'none' })}
+          onConfirm={(choice) =>
+            runAction(
+              actions,
+              () =>
+                actions.registerLate(dialog.item.taskId, {
+                  periodKey: dialog.item.periodKey,
+                  ...choice,
+                }),
+              `«${dialog.item.description}» quedó registrada como realizada el ${formatDate(choice.performedOn)}.`,
+            )
+          }
+        />
+      ) : null}
+
+      {actions && dialog.type === 'revert' ? (
+        <RevertTaskDialog
+          description={dialog.item.description}
+          execution={dialog.item}
+          reasonRequired={isAdmin}
+          onCancel={() => setDialog({ type: 'none' })}
+          onConfirm={(reason) =>
+            runAction(
+              actions,
+              () => actions.revert(dialog.item.taskId, dialog.late.executionId, reason),
+              `«${dialog.item.description}» volvió a quedar pendiente.`,
+            )
+          }
+        />
+      ) : null}
     </div>
   );
+}
+
+/**
+ * Acción de una fila del detalle, la que indique el backend: «Marcar como
+ * realizada» (obligación recurrente pendiente y registrable), «Completar en
+ * Tareas» («Una vez» o urgente pendiente: su flujo normal) o deshacer una
+ * carga olvidada que quien mira todavía puede corregir.
+ */
+function DetailAction({
+  item,
+  isAdmin,
+  tasksPath,
+  onLate,
+  onRevert,
+}: {
+  item: PerformanceOccurrence;
+  isAdmin: boolean;
+  tasksPath: string;
+  onLate: (item: LateCompletionItem) => void;
+  onRevert: (late: LateRegistration) => void;
+}) {
+  const { lateCompletion, lateRegistration } = item;
+  if (!item.completed && lateCompletion) {
+    return (
+      <Button size="sm" variant="secondary" onClick={() => onLate({ ...item, lateCompletion })}>
+        Marcar como realizada
+        <span className="visually-hidden">
+          : {item.description}, {occurrencePeriod(item)}
+        </span>
+      </Button>
+    );
+  }
+  if (!item.completed && item.completeInTasks) {
+    return (
+      <Link to={tasksPath} className={buttonClassName({ variant: 'ghost', size: 'sm' })}>
+        Completar en Tareas
+        <span className="visually-hidden">: {item.description}</span>
+      </Link>
+    );
+  }
+  if (item.completed && lateRegistration?.canRevert) {
+    return (
+      <Button size="sm" variant="ghost" onClick={() => onRevert(lateRegistration)}>
+        {isAdmin ? 'Corregir' : 'Deshacer'}
+        <span className="visually-hidden">
+          : {item.description}, {occurrencePeriod(item)}
+        </span>
+      </Button>
+    );
+  }
+  return null;
 }

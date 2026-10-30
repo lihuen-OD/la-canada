@@ -506,3 +506,39 @@ Todo se valida también en el backend.
 - «Desmalezar canteros», semanal de la administradora: la semana del 26 (la del 19 empezó antes del rango) → hecha.
 - «Revisar riego por goteo», «Una vez» para el 24, de Pablo, sin completar → pendiente. «Sembrar lechuga», «Una vez» para el 30 → todavía no cuenta.
 - Resultado: **Pablo** 12 asignadas, 6 propias, 1 le cubrieron, 5 sin completar → **50 %**. **Administradora** 4 asignadas, 3 propias, 1 sin completar, cubrió 1 → **75 %** (la cobertura no suma a su porcentaje). **Equipo** 16 asignadas, 9 propias → **56,3 %**. Un tercer participante sin actividades: «Sin actividades previstas».
+
+## Tareas realizadas que se olvidaron marcar (2026-10-30)
+
+Función nueva pedida explícitamente por el usuario: la app está en uso y el equipo está aprendiendo a usarla, así que alguien puede hacer una tarea un día, olvidarse de marcarla y querer registrarla al día siguiente. Solo ✅ Tareas generales (🥬 Huerta no cambia). Desempeño, Inicio, el flujo normal de completar y las «Una vez» vencidas siguen con sus reglas.
+
+**Dónde y qué**: en Tareas → 🏆 Desempeño → Detalle, las filas «Sin completar» que el backend marca como elegibles muestran «Marcar como realizada». Registra que esa obligación (tarea + período de la fila) se hizo en una fecha real; **nunca** usa el período vigente como el check de Tareas. Las diarias antiguas no se agregan al listado de Tareas.
+
+- **Elegibles** (lo decide el backend con el mismo cálculo de Desempeño): obligaciones recurrentes (diaria, semanal, quincenal, mensual, bimestral, anual) pendientes cuyo período **empieza** dentro de los últimos 30 días incluido hoy (el rango más largo de Desempeño; los rangos no se amplían). Incluye el período en curso. Sin límite propio de 7 días. Como en Desempeño, una mensual, bimestral o anual solo figura mientras su primer día cae dentro de esos 30 días.
+- **No elegibles**: realizadas o cubiertas; «Una vez» y urgentes (no tienen períodos: la fila ofrece «Completar en Tareas» si la tarea sigue activa, con su flujo normal y sin inventarles períodos); obligaciones fuera de la ventana.
+- **Diaria**: confirmación sencilla con la fecha fijada por la fila — «¿Confirmás que realizaste “Aspirar planta baja” el 29/10/2026?» (para un ADMIN: «¿Confirmás que “…” se realizó el 29/10/2026?»). No se puede elegir otro día.
+- **Períodos más largos**: se muestra el período («26/10/2026 al 01/11/2026») y se pide «Fecha en que la realizaste» (ADMIN: «Fecha en que se realizó»), sin preseleccionar ninguna. Debe estar dentro del período, no puede ser futura y no puede ser anterior al día en que la tarea empezó a tener esa frecuencia dentro del período (creada o cambiada a mitad de período). El inicio de la semana o del mes nunca se usa como fecha de realización.
+- **Sin motivo**: es una carga olvidada, no una corrección administrativa.
+- Se puede registrar una obligación pasada aunque la del período actual ya esté completada; la de hoy y los demás períodos no cambian.
+
+**Permisos**
+
+| Quién | Puede |
+| --- | --- |
+| EMPLOYEE activo | Registrar a su nombre una obligación que le correspondía (responsable histórico de ese período). No registra por otra persona ni se atribuye una obligación ajena. |
+| ADMIN | Registrar cualquier obligación elegible eligiendo explícitamente quién la realizó, entre los empleados activos (las personas habilitadas de siempre). Si no es el responsable, queda como cobertura. |
+
+El autor de la carga sale siempre de la sesión. Ocultar el botón no reemplaza la validación: el backend rechaza lo que no corresponde.
+
+**Fuente única de obligaciones**: el backend reconstruye la obligación pedida con la misma lectura de planificación y ejecuciones y el mismo calculador que Desempeño. Del cliente solo acepta la identificación (tarea + período de la fila), la fecha real y, para un ADMIN, quién la realizó; nunca el responsable, la frecuencia, el estado pendiente ni un período arbitrario. Si la obligación dejó de ser elegible o ya figura como realizada desde que se abrió la pantalla, responde 409 con un mensaje claro y la pantalla actualiza los datos.
+
+- **Historia**: el responsable y la frecuencia son los de la planificación de ese período (reasignar o cambiar la frecuencia después no cambia la obligación anterior). No se puede registrar un período en que la tarea todavía no existía o no tenía esa obligación. Una desactivación posterior no borra la obligación ni invalida la carga de cuando estaba planificada; completar desde Tareas una tarea desactivada sigue bloqueado.
+
+**Fechas y registro** (separados): período (`periodKey`), responsable histórico (`assignedEmployeeId`), persona que la realizó (`completedByEmployeeId`), usuario que la registró (`recordedByUserId` + auditoría `task.completed_late`), **fecha real de realización** (`performedOn`, solo el día: nunca se inventa una hora) y **momento real del registro** (`completedAt`, el instante en que se cargó; nunca se adelanta para simular otra fecha). Las ejecuciones anteriores y las del flujo normal conservan su significado y sus valores (`performedOn` vacío: se realizó cuando se registró). Fechas en `BUSINESS_TIME_ZONE` con el día del servidor.
+
+**Duplicados y concurrencia**: una sola ejecución vigente por tarea y período (el índice único de siempre). Doble clic, varias solicitudes a la vez o alguien que la registró o cubrió mientras tanto → una sola ejecución; las demás reciben 409 y nunca se reemplaza ni se cambia el período de una ejecución existente.
+
+**Deshacer**: el EMPLOYEE puede deshacer su carga olvidada (la que realizó y registró él) el mismo día de negocio en que la registró — «Deshacer» en la fila del detalle o en el historial —, con motivo opcional. No se habilita deshacer ejecuciones antiguas del flujo normal. El ADMIN conserva sus correcciones administrativas (cualquier ejecución vigente, motivo obligatorio). Deshacer nunca borra: la fila queda revertida y auditada, y el período se puede volver a registrar.
+
+**Desempeño, Inicio e historial**: la fila elegida pasa a realizada (o cubierta, si la hizo otra persona) y se recalculan resumen, detalle, porcentajes e Inicio con las reglas de siempre. El denominador no cambia, una cobertura no suma al porcentaje de quien la tenía asignada ni de quien la cubrió, y ningún otro período o métrica cambia. El historial semanal ubica la ejecución en su período (diarias y semanales por su clave; quincenales, mensuales, bimestrales, anuales, urgentes y únicas por la fecha real de realización) e interpreta cada ejecución con la frecuencia que tenía la tarea cuando se registró, no solo con la actual. Donde corresponde se muestra «Realizada el 29/10 · Registrada el 30/10».
+
+*Ejemplo* (el pedido): Coke tenía la diaria «Aspirar planta baja» el 29/10, la hizo y no la marcó. El 30/10 abre Desempeño → Detalle, toca «Marcar como realizada» en la fila del 29/10 y confirma. Queda completada solo la obligación del 29/10 (realizada por Coke, responsable Coke, `performedOn` 29/10, registrada el 30/10 por el usuario de Coke); la del 30/10 sigue pendiente, en el detalle y en Tareas. Su porcentaje sube una realización personal sin cambiar las asignadas. Ese mismo 30/10 Coke puede deshacerla; desde el 31/10, solo un ADMIN con motivo.
