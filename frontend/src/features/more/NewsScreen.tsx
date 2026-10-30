@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { createNews, createNewsReply, fetchNews, fetchNewsReplies } from '../../api/moreApi';
@@ -72,40 +72,42 @@ export function NewsScreen() {
         />
       </Card>
 
-      <h2 className="more__section-title">Historial</h2>
-      {!list.data ? (
-        list.isError ? (
-          <ErrorState
-            title="No pudimos cargar las novedades"
-            description={errorMessageOf(list.error)}
-            onRetry={() => void list.refetch()}
-          />
+      <div className="news-history">
+        <h2 className="more__section-title">Historial</h2>
+        {!list.data ? (
+          list.isError ? (
+            <ErrorState
+              title="No pudimos cargar las novedades"
+              description={errorMessageOf(list.error)}
+              onRetry={() => void list.refetch()}
+            />
+          ) : (
+            <LoadingState label="Cargando novedades…" />
+          )
+        ) : news.length === 0 ? (
+          <EmptyState icon={<span>📝</span>} title="Sin novedades aún" />
         ) : (
-          <LoadingState label="Cargando novedades…" />
-        )
-      ) : news.length === 0 ? (
-        <EmptyState icon={<span>📝</span>} title="Sin novedades aún" />
-      ) : (
-        <>
-          <ul className="news-list" aria-label="Historial de novedades">
-            {news.map((item) => (
-              <li key={item.id} className="news-item">
-                <NewsReportCard item={item} onSessionExpired={handleSessionExpired} />
-              </li>
-            ))}
-          </ul>
-          {list.hasNextPage ? (
-            <Button
-              variant="secondary"
-              fullWidth
-              loading={list.isFetchingNextPage}
-              onClick={() => void list.fetchNextPage({ cancelRefetch: false })}
-            >
-              Cargar más
-            </Button>
-          ) : null}
-        </>
-      )}
+          <>
+            <ul className="news-list" aria-label="Historial de novedades">
+              {news.map((item) => (
+                <li key={item.id} className="news-item">
+                  <NewsReportCard item={item} onSessionExpired={handleSessionExpired} />
+                </li>
+              ))}
+            </ul>
+            {list.hasNextPage ? (
+              <Button
+                variant="secondary"
+                fullWidth
+                loading={list.isFetchingNextPage}
+                onClick={() => void list.fetchNextPage({ cancelRefetch: false })}
+              >
+                Cargar más
+              </Button>
+            ) : null}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -118,9 +120,12 @@ function NewsReportCard({
   onSessionExpired: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  // Montaje diferido; luego ocultar conserva borrador, cita e intento de envío.
+  const [hasOpened, setHasOpened] = useState(false);
   const [focusTrigger, setFocusTrigger] = useState(0);
 
   function openToReply(): void {
+    setHasOpened(true);
     setOpen(true);
     setFocusTrigger((value) => value + 1);
   }
@@ -135,12 +140,6 @@ function NewsReportCard({
         </time>
       </div>
       <p className="news-item__text">{item.text}</p>
-      {item.lastReply ? (
-        <p className="news-item__last-reply">
-          Última respuesta · {item.lastReply.author.displayName} ·{' '}
-          {timeAgo(item.lastReply.createdAt)}
-        </p>
-      ) : null}
       <div className="news-item__actions">
         <Button size="sm" variant="ghost" onClick={openToReply}>
           Responder
@@ -151,15 +150,23 @@ function NewsReportCard({
           aria-expanded={open}
           aria-controls={`news-replies-${item.id}`}
           onClick={() => {
+            setHasOpened(true);
             setOpen((currentlyOpen) => !currentlyOpen);
           }}
         >
-          {open ? 'Ocultar respuestas' : `Ver respuestas · ${item.replyCount}`}
+          {open ? 'Ocultar respuestas' : 'Ver respuestas'} · {item.replyCount}
         </Button>
+        {item.lastReply ? (
+          <p className="news-item__last-reply">
+            Última respuesta · {item.lastReply.author.displayName} ·{' '}
+            {timeAgo(item.lastReply.createdAt)}
+          </p>
+        ) : null}
       </div>
-      {open ? (
+      {hasOpened ? (
         <NewsConversation
           id={item.id}
+          open={open}
           text={item.text}
           focusTrigger={focusTrigger}
           onSessionExpired={onSessionExpired}
@@ -182,11 +189,13 @@ function orderedUniqueReplies(pages: NewsRepliesPage[] | undefined): NewsReply[]
 
 function NewsConversation({
   id,
+  open,
   text,
   focusTrigger,
   onSessionExpired,
 }: {
   id: string;
+  open: boolean;
   text: string;
   focusTrigger: number;
   onSessionExpired: () => void;
@@ -200,13 +209,13 @@ function NewsConversation({
   const intent = useRef(new IdempotencyIntent());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
-  const scrollHeightBeforeLoad = useRef<number | null>(null);
+  const readingAnchor = useRef<{ element: Element; top: number } | null>(null);
   const replies = useInfiniteQuery({
     queryKey: queryKeys.more.newsReplies(userId, id),
     queryFn: ({ pageParam }) => fetchNewsReplies(id, pageParam),
     initialPageParam: null as NewsReplyCursor | null,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
-    enabled,
+    enabled: enabled && open,
     staleTime: STALE_TIME.operational,
     refetchOnWindowFocus: true,
   });
@@ -217,22 +226,28 @@ function NewsConversation({
   }, [expired, onSessionExpired]);
 
   useEffect(() => {
-    if (focusTrigger > 0) textareaRef.current?.focus();
-  }, [focusTrigger]);
+    if (open && focusTrigger > 0) textareaRef.current?.focus();
+  }, [focusTrigger, open]);
 
   useEffect(() => {
-    if (replies.isFetchNextPageError) scrollHeightBeforeLoad.current = null;
-  }, [replies.isFetchNextPageError]);
+    if (replies.isFetchNextPageError || !open) readingAnchor.current = null;
+  }, [replies.isFetchNextPageError, open]);
 
-  useEffect(() => {
-    const container = listRef.current;
-    if (!container || scrollHeightBeforeLoad.current === null) return;
-    container.scrollTop += container.scrollHeight - scrollHeightBeforeLoad.current;
-    scrollHeightBeforeLoad.current = null;
+  useLayoutEffect(() => {
+    const anchor = readingAnchor.current;
+    if (!anchor) return;
+    // El hilo usa el scroll de la página: conservar la posición de la fila
+    // que ya se estaba leyendo, incluso si el navegador hizo scroll anchoring.
+    window.scrollBy({
+      top: anchor.element.getBoundingClientRect().top - anchor.top,
+      behavior: 'instant',
+    });
+    readingAnchor.current = null;
   }, [visibleReplies.length]);
 
   function loadOlder(): void {
-    if (listRef.current) scrollHeightBeforeLoad.current = listRef.current.scrollHeight;
+    const element = listRef.current?.firstElementChild;
+    if (element) readingAnchor.current = { element, top: element.getBoundingClientRect().top };
     void replies.fetchNextPage({ cancelRefetch: false });
   }
 
@@ -274,6 +289,7 @@ function NewsConversation({
     <section
       id={`news-replies-${id}`}
       className="news-conversation"
+      hidden={!open}
       aria-label={`Respuestas a: ${text}`}
     >
       <div className="news-conversation__heading">
@@ -300,12 +316,7 @@ function NewsConversation({
             <p className="news-conversation__empty">Todavía no hay respuestas.</p>
           ) : null}
           {replies.data && visibleReplies.length > 0 ? (
-            <div
-              className="news-conversation__scroll"
-              role="region"
-              aria-label="Respuestas"
-              tabIndex={0}
-            >
+            <div className="news-conversation__thread" role="region" aria-label="Respuestas">
               {replies.hasNextPage ? (
                 <Button
                   size="sm"
@@ -319,16 +330,19 @@ function NewsConversation({
               <ul ref={listRef} className="news-replies">
                 {visibleReplies.map((reply) => (
                   <li key={reply.id} className="news-reply">
+                    <div className="news-reply__head">
+                      <Avatar name={reply.author.displayName} size="sm" />
+                      <div className="news-reply__identity">
+                        <strong>{reply.author.displayName}</strong>
+                        <time dateTime={reply.createdAt}>{timeAgo(reply.createdAt)}</time>
+                      </div>
+                    </div>
                     {reply.quote ? (
                       <blockquote className="news-reply__quote">
                         <strong>{reply.quote.author.displayName}</strong>
-                        <p>{shortQuote(reply.quote.text)}</p>
+                        <p>{reply.quote.text}</p>
                       </blockquote>
                     ) : null}
-                    <div className="news-reply__head">
-                      <strong>{reply.author.displayName}</strong>
-                      <time dateTime={reply.createdAt}>{timeAgo(reply.createdAt)}</time>
-                    </div>
                     <p className="news-reply__text">{reply.text}</p>
                     <Button
                       size="sm"
@@ -353,20 +367,21 @@ function NewsConversation({
           <div className="news-reply-form__quote">
             <div>
               <strong>Respondiendo a {quotedReply.author.displayName}</strong>
-              <p>{shortQuote(quotedReply.text)}</p>
+              <p>{quotedReply.text}</p>
             </div>
             <Button
               size="sm"
               variant="ghost"
+              aria-label="Cancelar respuesta"
               disabled={isSubmitting}
               onClick={() => setQuotedReply(null)}
             >
-              Cancelar respuesta
+              <span aria-hidden="true">×</span>
             </Button>
           </div>
         ) : null}
         <label className="field__label" htmlFor={`reply-${id}`}>
-          Escribí una respuesta…
+          Tu respuesta
         </label>
         <textarea
           ref={textareaRef}
@@ -377,27 +392,30 @@ function NewsConversation({
           placeholder="Escribí una respuesta…"
           value={replyText}
           disabled={isSubmitting}
+          aria-invalid={Boolean(sendError)}
+          aria-describedby={sendError ? `reply-error-${id}` : undefined}
           onChange={(event) => {
             setReplyText(event.target.value);
             setSendError(null);
           }}
         />
         {sendError ? (
-          <p className="news-conversation__error" role="alert">
+          <p id={`reply-error-${id}`} className="news-conversation__error" role="alert">
             {sendError}
           </p>
         ) : null}
-        <Button type="submit" size="sm" loading={isSubmitting} disabled={!replyText.trim()}>
+        <Button
+          className="news-reply-form__send"
+          type="submit"
+          size="sm"
+          loading={isSubmitting}
+          disabled={!replyText.trim()}
+        >
           Enviar
         </Button>
       </form>
     </section>
   );
-}
-
-function shortQuote(value: string): string {
-  const clean = value.trim();
-  return clean.length > 180 ? `${clean.slice(0, 177)}…` : clean;
 }
 
 function NewsForm({

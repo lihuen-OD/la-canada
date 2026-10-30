@@ -248,7 +248,7 @@ describe('📝 Novedades', () => {
     expect(api.fetchNewsReplies).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole('button', { name: 'Responder' }));
-    const composer = await screen.findByRole('textbox', { name: 'Escribí una respuesta…' });
+    const composer = await screen.findByRole('textbox', { name: 'Tu respuesta' });
     await waitFor(() => expect(composer).toHaveFocus());
     expect(api.fetchNewsReplies).toHaveBeenCalledWith('news-0', null);
 
@@ -286,11 +286,16 @@ describe('📝 Novedades', () => {
     renderMore('/more/news');
     await screen.findByText('Aviso sintético 0');
     await user.click(screen.getByRole('button', { name: 'Responder' }));
-    const composer = await screen.findByRole('textbox', { name: 'Escribí una respuesta…' });
+    const composer = await screen.findByRole('textbox', { name: 'Tu respuesta' });
     await user.type(composer, 'Texto que queda');
     await user.click(screen.getByRole('button', { name: 'Enviar' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('No pudimos comunicarnos');
     expect(composer).toHaveValue('Texto que queda');
+    await user.click(screen.getByRole('button', { name: 'Ocultar respuestas · 0' }));
+    expect(screen.queryByRole('textbox', { name: 'Tu respuesta' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Ver respuestas · 0' }));
+    expect(screen.getByRole('textbox', { name: 'Tu respuesta' })).toHaveValue('Texto que queda');
+    expect(api.fetchNewsReplies).toHaveBeenCalledTimes(1);
     await user.click(screen.getByRole('button', { name: 'Enviar' }));
     await waitFor(() => expect(api.createNewsReply).toHaveBeenCalledTimes(2));
     expect(api.createNewsReply.mock.calls[0]?.[2]).toBe(api.createNewsReply.mock.calls[1]?.[2]);
@@ -301,7 +306,7 @@ describe('📝 Novedades', () => {
     const user = userEvent.setup();
     const oldReply = {
       id: 'reply-old',
-      text: 'Texto original fuera de la página cargada.',
+      text: 'Texto original fuera de la página cargada. '.repeat(8).trim(),
       createdAt: new Date(Date.now() - 60_000).toISOString(),
       author: { displayName: 'Viki' },
       quote: null,
@@ -340,7 +345,15 @@ describe('📝 Novedades', () => {
     expect(
       within(response as HTMLElement).getByText('Mi respuesta', { selector: 'p' }),
     ).toBeInTheDocument();
-    await user.type(screen.getByRole('textbox', { name: 'Escribí una respuesta…' }), 'Lo reviso.');
+    await user.type(screen.getByRole('textbox', { name: 'Tu respuesta' }), 'Lo reviso.');
+    await user.click(screen.getByRole('button', { name: 'Ocultar respuestas · 0' }));
+    await user.click(screen.getByRole('button', { name: 'Ver respuestas · 0' }));
+    expect(screen.getByText('Respondiendo a Administrador')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Tu respuesta' })).toHaveValue('Lo reviso.');
+    await user.click(screen.getByRole('button', { name: 'Cancelar respuesta' }));
+    expect(screen.queryByText('Respondiendo a Administrador')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Tu respuesta' })).toHaveValue('Lo reviso.');
+    await user.click(within(response as HTMLElement).getByRole('button', { name: 'Responder' }));
     await user.click(screen.getByRole('button', { name: 'Enviar' }));
     await waitFor(() =>
       expect(api.createNewsReply.mock.calls[0]?.[1]).toEqual({

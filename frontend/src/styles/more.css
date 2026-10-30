@@ -175,6 +175,16 @@
   list-style: none;
 }
 
+.news-history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: calc(72ch + 2 * var(--space-4));
+  margin-inline: auto;
+  font-size: var(--font-size-md);
+}
+
 .news-list {
   display: grid;
   gap: var(--space-3);
@@ -192,6 +202,8 @@
 }
 
 .news-item__author {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-bold);
 }
@@ -212,14 +224,16 @@
 }
 
 .news-item__last-reply {
-  margin: var(--space-2) 0 0;
+  margin: 0;
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
 }
 
 .news-item__actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-1);
   margin-top: var(--space-2);
 }
@@ -229,14 +243,14 @@
 }
 
 .news-conversation {
-  margin-top: var(--space-3);
+  margin-top: var(--space-2);
   padding-top: var(--space-3);
   border-top: var(--border-width) solid var(--color-border);
 }
 
-.news-conversation__heading,
-.news-reply__head {
+.news-conversation__heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: var(--space-2);
 }
@@ -247,7 +261,7 @@
 
 .news-conversation__heading h3 {
   margin: 0;
-  font-family: var(--font-heading);
+  font-family: var(--font-display);
   font-size: var(--font-size-md);
 }
 
@@ -257,11 +271,8 @@
   font-size: var(--font-size-xs);
 }
 
-.news-conversation__scroll {
-  max-height: 28rem;
+.news-conversation__thread {
   margin-top: var(--space-2);
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
 
 .news-conversation__empty,
@@ -275,22 +286,42 @@
 }
 
 .news-replies {
-  display: grid;
-  gap: var(--space-2);
-  margin: var(--space-2) 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .news-reply {
   min-width: 0;
-  padding: var(--space-2);
-  border-radius: var(--radius-control);
-  background: var(--color-surface-muted);
+  padding-top: var(--space-3);
+  background: var(--color-surface);
+}
+
+.news-reply + .news-reply {
+  border-top: var(--border-width) solid var(--color-border);
 }
 
 .news-reply__head {
-  justify-content: space-between;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.news-reply__identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-2);
+  min-width: 0;
+  padding-top: var(--space-1);
+}
+
+.news-reply__identity strong {
+  overflow-wrap: anywhere;
+}
+
+.news-reply__identity time {
+  white-space: nowrap;
 }
 
 .news-reply__head strong,
@@ -308,30 +339,62 @@
 }
 
 .news-reply__text {
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-base);
+  color: var(--color-text);
 }
 
-.news-reply__quote {
-  margin: 0 0 var(--space-2);
-  padding-left: var(--space-2);
-  border-left: 3px solid var(--color-border);
+.news-reply__quote,
+.news-reply-form__quote {
+  margin: var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--color-action);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  background: var(--color-surface-hover);
   color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+.news-reply__quote p,
+.news-reply-form__quote p {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+@media (min-width: 48rem) {
+  .news-reply__text,
+  .news-reply__quote,
+  .news-reply__respond {
+    margin-left: calc(var(--avatar-sm) + var(--space-2));
+  }
 }
 
 .news-reply__respond {
-  margin-top: var(--space-1);
+  min-height: var(--tap-target);
+  padding-inline: var(--space-2);
 }
 
 .news-reply-form {
   display: grid;
   gap: var(--space-2);
-  margin-top: var(--space-3);
+  margin-top: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: var(--border-width) solid var(--color-border);
 }
 
 .news-reply-form .button {
   min-height: var(--tap-target);
-  justify-self: start;
+}
+
+.news-reply-form .news-reply-form__send {
+  justify-self: end;
+}
+
+.news-reply-form textarea {
+  min-height: 0;
 }
 
 .news-reply-form__quote {
@@ -339,9 +402,14 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-2);
-  padding: var(--space-2);
-  border-radius: var(--radius-control);
-  background: var(--color-surface-muted);
+  margin: 0;
+}
+
+.news-reply-form__quote .button {
+  flex-shrink: 0;
+  padding: 0;
+  width: var(--tap-target);
+  font-size: var(--font-size-xl);
 }
 
 .news-reply-form__quote > div {
