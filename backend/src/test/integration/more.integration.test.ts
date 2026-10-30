@@ -215,6 +215,7 @@ afterAll(async () => {
   // Defensa: un trabajo de copia de estas fotos (FK RESTRICT) impediría borrarlas.
   await prisma.driveBackupJob.deleteMany({ where: { fileAssetId: { in: fileIds } } });
   await prisma.fileAsset.deleteMany({ where: { id: { in: fileIds } } });
+  await prisma.photoFolder.deleteMany({ where: { createdByUserId: { in: userIds } } });
   await prisma.newsReply.deleteMany({ where: { id: { in: newsReplyIds } } });
   await prisma.newsReport.deleteMany({ where: { id: { in: newsIds } } });
   await prisma.event.deleteMany({ where: { id: { in: eventIds } } });
@@ -392,10 +393,21 @@ describe('📅 Eventos y 🎂 cumpleaños derivados', () => {
 
 describe('📸 Fotos (almacenamiento en memoria contra Postgres real)', () => {
   let photoId = '';
+  let folderId = '';
+  // Toda foto nueva necesita una carpeta (sintética, se borra en afterAll).
+  beforeAll(async () => {
+    const folder = await request(app)
+      .post('/api/v1/photos/folders')
+      .set(as(employee))
+      .set('Idempotency-Key', key())
+      .send({ name: `${RUN} Carpeta` });
+    expect(folder.status).toBe(201);
+    folderId = folder.body.folder.id;
+  });
   const upload = (actor: Actor, idem?: string, title = `${RUN} Jardín`) => {
     const call = request(app)
       .post(
-        `/api/v1/photos?category=MEMORY&title=${encodeURIComponent(title)}&employeeId=${employeeId}`,
+        `/api/v1/photos?category=MEMORY&title=${encodeURIComponent(title)}&employeeId=${employeeId}&folderId=${folderId}`,
       )
       .set(as(actor))
       .set('Content-Type', 'image/jpeg')

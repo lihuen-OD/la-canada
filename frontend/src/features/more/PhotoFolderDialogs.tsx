@@ -17,7 +17,6 @@ import { errorCodeOf, errorMessageOf, humanError, isSessionExpired } from '../pe
 import { ActionsMenu } from './ActionsMenu';
 import {
   PHOTO_FOLDER_NAME_MAX,
-  UNFILED_LABEL,
   folderNameError,
   isMissingFolder,
   normalizeFolderName,
@@ -25,25 +24,30 @@ import {
 } from './photoFolders';
 import { useMoreCache } from './useMoreCache';
 
-/** Valor del selector para «Sin carpeta» (un `<select>` no admite `null`). */
-const UNFILED_VALUE = '';
+/** Valor del selector sin carpeta elegida (un `<select>` no admite `null`). */
+const NONE_VALUE = '';
 
 /**
- * Selector «Carpeta» de subir y mover: «Sin carpeta» + carpetas vigentes en
- * orden. Si la elegida dejó de existir, queda marcada como no disponible y
- * quien la eligió debe elegir otra (nunca se cambia sola por otro destino).
+ * Selector «Carpeta» de subir y mover: SIEMPRE una carpeta vigente (no hay
+ * opción «sin carpeta»). Sin elección, pide elegir. Si la elegida dejó de
+ * existir, queda marcada como no disponible y hay que elegir otra (nunca
+ * se cambia sola por otro destino).
  */
 export function FolderSelect({
   id,
   value,
   folders,
   disabled,
+  invalid,
+  describedBy,
   onChange,
 }: {
   id: string;
   value: string | null;
   folders: readonly PhotoFolder[];
   disabled?: boolean;
+  invalid?: boolean;
+  describedBy?: string;
   onChange: (folderId: string | null) => void;
 }) {
   const missing = isMissingFolder(value, folders);
@@ -55,9 +59,11 @@ export function FolderSelect({
       <select
         id={id}
         className="field__input"
-        value={value ?? UNFILED_VALUE}
+        value={value ?? NONE_VALUE}
         disabled={disabled}
-        aria-invalid={missing || undefined}
+        required
+        aria-invalid={missing || invalid || undefined}
+        aria-describedby={describedBy}
         onChange={(change) => onChange(change.target.value || null)}
       >
         {missing && value !== null ? (
@@ -65,7 +71,11 @@ export function FolderSelect({
             — Ya no existe: elegí otra —
           </option>
         ) : null}
-        <option value={UNFILED_VALUE}>{UNFILED_LABEL}</option>
+        {value === null ? (
+          <option value={NONE_VALUE} disabled>
+            {folders.length ? 'Elegí una carpeta' : 'Primero creá una carpeta'}
+          </option>
+        ) : null}
         {folders.map((folder) => (
           <option key={folder.id} value={folder.id}>
             {folder.name}
@@ -76,13 +86,141 @@ export function FolderSelect({
   );
 }
 
+/**
+ * «＋ Nueva carpeta» dentro de subir o mover: crear la carpeta sin perder la
+ * foto ni el formulario y dejarla elegida. Sin carpetas aparece abierta, con
+ * la explicación. Sin `<form>` propio (vive dentro del diálogo): Enter crea.
+ * Mismo contrato que «Crear carpeta» (`Idempotency-Key`, validación local).
+ */
+export function InlineFolderCreate({
+  noFolders,
+  disabled,
+  onCreated,
+  onSessionExpired,
+}: {
+  noFolders: boolean;
+  disabled?: boolean;
+  onCreated: (folder: PhotoFolder) => void;
+  onSessionExpired: () => void;
+}) {
+  const inputId = useId();
+  const { afterFolderCreated } = useMoreCache();
+  const { isSubmitting, run } = useSubmitGuard();
+  const intent = useRef(new IdempotencyIntent());
+  const [expanded, setExpanded] = useState(false);
+  const [name, setName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const open = expanded || noFolders;
+
+  function create(): void {
+    const normalized = normalizeFolderName(name);
+    const invalid = folderNameError(normalized);
+    if (invalid) {
+      setError(invalid);
+      return;
+    }
+    void run(async () => {
+      setError(null);
+      try {
+        const saved = await createPhotoFolder(
+          normalized,
+          intent.current.keyFor(intentFingerprint('photo-folder', { name: normalized })),
+        );
+        intent.current.discard();
+        afterFolderCreated(saved.folder);
+        setName('');
+        setExpanded(false);
+        onCreated(saved.folder);
+      } catch (caught) {
+        if (isSessionExpired(caught)) {
+          onSessionExpired();
+          return;
+        }
+        if (errorCodeOf(caught) !== 'IDEMPOTENCY_RECORD_PENDING') intent.current.discard();
+        setError(errorMessageOf(caught));
+      }
+    });
+  }
+
+  if (!open) {
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        className="inline-folder__toggle"
+        disabled={disabled}
+        onClick={() => setExpanded(true)}
+      >
+        <span aria-hidden="true">＋ </span>Nueva carpeta
+      </Button>
+    );
+  }
+  return (
+    <div className="inline-folder">
+      {noFolders ? (
+        <p className="inline-folder__intro">
+          Todavía no hay carpetas. Creá la primera para guardar la foto.
+        </p>
+      ) : null}
+      <label className="field__label" htmlFor={inputId}>
+        Nombre de la carpeta nueva
+      </label>
+      <div className="inline-folder__row">
+        <input
+          id={inputId}
+          className="field__input"
+          maxLength={PHOTO_FOLDER_NAME_MAX}
+          autoComplete="off"
+          placeholder="Ej: Jardín de invierno"
+          value={name}
+          disabled={disabled || isSubmitting}
+          aria-invalid={error ? true : undefined}
+          onChange={(change) => setName(change.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              create();
+            }
+          }}
+        />
+        <Button size="sm" loading={isSubmitting} disabled={disabled} onClick={create}>
+          Crear
+        </Button>
+        {noFolders ? null : (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={isSubmitting}
+            onClick={() => {
+              setExpanded(false);
+              setError(null);
+            }}
+          >
+            Cancelar
+          </Button>
+        )}
+      </div>
+      {error ? (
+        <div className="live-status live-status--start">
+          <span role="alert">
+            <AlertIcon size="sm" />
+            {error}
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** «⋯» de una carpeta: solo Renombrar/Eliminar si el backend los autoriza. */
 export function FolderActionsMenu({
   folder,
+  className,
   onRename,
   onDelete,
 }: {
   folder: PhotoFolder;
+  className?: string;
   onRename: () => void;
   onDelete: () => void;
 }) {
@@ -91,7 +229,7 @@ export function FolderActionsMenu({
     <ActionsMenu
       label={`Acciones de la carpeta ${folder.name}`}
       triggerRef={triggerRef}
-      className="photo-folder__menu"
+      className={className}
       items={[
         ...(folder.permissions.canRename
           ? [{ key: 'rename', label: 'Renombrar', onSelect: onRename }]
@@ -219,10 +357,11 @@ export function FolderFormDialog({
 }
 
 /**
- * «Mover a carpeta» de UNA foto: destino precargado con su carpeta actual.
- * Envía la carpeta en la que se vio la foto; si otra persona la movió, la
- * pantalla informa el conflicto (no se pisa). Si el destino dejó de existir,
- * el selector lo marca y hay que elegir otro.
+ * «Mover a carpeta» de UNA foto: destino precargado con su carpeta actual
+ * (una foto por organizar no tiene: hay que elegir). Siempre a una carpeta;
+ * se puede crear una ahí mismo. Envía la carpeta en la que se vio la foto;
+ * si otra persona la movió, la pantalla informa el conflicto (no se pisa).
+ * Si el destino dejó de existir, el selector lo marca y hay que elegir otro.
  */
 export function MovePhotoDialog({
   photo,
@@ -249,12 +388,13 @@ export function MovePhotoDialog({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (missing || unchanged) return;
+    if (target === null || missing || unchanged) return;
+    const folderId = target;
     void run(async () => {
       setError(null);
       try {
         const result = await movePhoto(photo.id, {
-          folderId: target,
+          folderId,
           fromFolderId: photo.folderId,
         });
         onMoved(result.photo);
@@ -288,6 +428,12 @@ export function MovePhotoDialog({
           disabled={isSubmitting}
           onChange={setTarget}
         />
+        <InlineFolderCreate
+          noFolders={folders.length === 0}
+          disabled={isSubmitting}
+          onCreated={(folder) => setTarget(folder.id)}
+          onSessionExpired={onSessionExpired}
+        />
         <div aria-live="assertive" className="live-status live-status--start">
           {isSubmitting ? <span role="status">Moviendo…</span> : null}
           {error ? (
@@ -301,7 +447,11 @@ export function MovePhotoDialog({
           <Button variant="secondary" onClick={onClose} disabled={isSubmitting}>
             Cancelar
           </Button>
-          <Button type="submit" loading={isSubmitting} disabled={missing || unchanged}>
+          <Button
+            type="submit"
+            loading={isSubmitting}
+            disabled={target === null || missing || unchanged}
+          >
             Mover
           </Button>
         </div>
@@ -332,8 +482,8 @@ export function DeleteFolderDialog({
       title="¿Eliminar la carpeta?"
       description={
         folder.photoCount > 0
-          ? `«${folder.name}» tiene ${photoCountLabel(folder.photoCount)}. Solo se eliminan carpetas vacías: primero mové sus fotos a otra carpeta o a «Sin carpeta».`
-          : `Se eliminará la carpeta «${folder.name}». Las fotos nunca se borran.`
+          ? `«${folder.name}» tiene ${photoCountLabel(folder.photoCount)}. Solo se eliminan carpetas vacías: primero mové sus fotos a otra carpeta.`
+          : `Se eliminará la carpeta «${folder.name}». Está vacía: ninguna foto se borra.`
       }
       confirmLabel="Eliminar"
       tone="danger"

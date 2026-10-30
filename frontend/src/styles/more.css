@@ -871,51 +871,137 @@
   color: var(--color-text-muted);
 }
 
-/* Carpetas de Fotos: tarjetas como las de la grilla de Más (icono, nombre,
-   cantidad), 2 columnas en móvil y más en pantallas anchas. El «⋯» queda en
-   la esquina, fuera del enlace (no se anidan controles). */
+/* 📸 Fotos — galería organizada en carpetas. Encabezado con «Crear
+   carpeta» y «Subir foto»; tarjetas de carpeta horizontales y compactas
+   (ícono, nombre en hasta dos líneas, cantidad) en 1 columna en móvil, 2
+   en tablet y auto-relleno en escritorio; «⋯» discreto fuera del enlace.
+   Miniaturas cuadradas (object-fit: cover) y visor con la imagen completa.
+   Solo tokens. */
 
-.photo-folders-section {
+.photos__back {
+  margin-bottom: calc(-1 * var(--space-3));
+  margin-inline-start: calc(-1 * var(--space-3));
+}
+
+.photos__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.photos__actions .news-menu__trigger {
+  margin-block: 0;
+}
+
+.photos__notice {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.photos__notice:empty {
+  display: none;
+}
+
+/* Acceso discreto a las fotos anteriores sin carpeta (solo si quedan). */
+.photos-organize {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--tap-target);
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) dashed var(--color-border-control);
+  border-radius: var(--radius-card);
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+  text-decoration: none;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.photos-organize:hover {
+  background: var(--color-surface-hover);
+}
+
+.photos-organize__icon {
+  font-size: 1.375rem;
+  line-height: 1;
+}
+
+.photos-organize__text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  font-size: var(--font-size-sm);
+}
+
+.photos-organize__text span {
+  color: var(--color-text-muted);
+}
+
+.photos-organize__go {
+  color: var(--color-text-muted);
+}
+
+.photos__section {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   min-width: 0;
 }
 
-.photo-folders-section__head {
+.photos__section-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
-  gap: var(--space-2);
+  gap: var(--space-1) var(--space-3);
 }
 
-.photo-folders-section__head .more__section-title {
+.photos__section-head .more__section-title {
   margin: 0;
 }
 
-.photo-folders-section__notice {
-  margin: 0;
-  font-size: var(--font-size-sm);
+.photos__section-count {
   color: var(--color-text-muted);
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-regular);
 }
 
-.photo-folders-section__notice:empty {
-  display: none;
+/* «Todas las fotos»: acceso secundario, un enlace de texto (no una carpeta). */
+.photos__all-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-target);
+  color: var(--color-action);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
 }
 
 .photo-folders {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-3);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-@media (min-width: 768px) {
+@media (min-width: 600px) {
   .photo-folders {
-    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+}
+
+@media (min-width: 1024px) {
+  .photo-folders {
+    grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
   }
 }
 
@@ -930,12 +1016,11 @@
 
 .photo-folder__link {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-1);
+  align-items: center;
+  gap: var(--space-3);
   height: 100%;
-  min-height: 7rem;
-  padding: var(--space-4) var(--space-3);
+  min-height: 4.5rem;
+  padding: var(--space-3);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-card);
   background: var(--color-surface);
@@ -949,25 +1034,33 @@
   background: var(--color-surface-hover);
 }
 
-.photo-folder--special .photo-folder__link {
-  border-style: dashed;
-  box-shadow: none;
+.photo-folder--with-menu .photo-folder__link {
+  padding-inline-end: calc(var(--tap-target) + var(--space-1));
 }
 
 .photo-folder__icon {
-  font-size: 1.75rem;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: var(--radius-control);
+  background: var(--color-positive-bg);
+  font-size: 1.375rem;
   line-height: 1;
-  margin-bottom: var(--space-1);
 }
 
-/* Nombres largos: dos líneas como máximo, sin desbordar la tarjeta; el
-   espacio a la derecha deja lugar al «⋯». */
+.photo-folder__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+/* Nombres largos: dos líneas como máximo, sin desbordar la tarjeta. */
 .photo-folder__name {
   display: -webkit-box;
-  max-width: 100%;
-  padding-right: var(--space-6);
   overflow: hidden;
-  font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-tight);
   overflow-wrap: anywhere;
@@ -976,46 +1069,109 @@
   line-clamp: 2;
 }
 
-.photo-folder--special .photo-folder__name {
-  padding-right: 0;
-}
-
 .photo-folder__count {
-  margin-top: auto;
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
 
 /* Solo dentro de la tarjeta: en el encabezado de una carpeta el mismo menú
-   va en el flujo, junto a «Fotos». */
+   va en el flujo, junto a «Subir foto». */
 .photo-folder > .photo-folder__menu {
   position: absolute;
-  top: var(--space-1);
+  top: 50%;
   right: var(--space-1);
+  transform: translateY(-50%);
 }
 
 .photo-folder > .photo-folder__menu .news-menu__trigger {
   margin-block: 0;
+  color: var(--color-text-muted);
 }
 
-.photo-gallery__actions {
+.photos-empty {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   align-items: center;
-  gap: var(--space-1);
+  gap: var(--space-2);
+  padding: var(--space-6) var(--space-4);
+  border: var(--border-width) dashed var(--color-border-control);
+  border-radius: var(--radius-card);
+  text-align: center;
 }
 
-.photo-gallery__actions .news-menu__trigger {
-  margin-block: 0;
+.photos-empty__icon {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.photos-empty__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+}
+
+.photos-empty__text {
+  max-width: 28rem;
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.photos__more {
+  display: flex;
+  justify-content: center;
 }
 
 .photo-viewer__folder {
   overflow-wrap: anywhere;
 }
 
+/* Visor de Fotos más ancho desde tablet: la imagen completa (contain) se ve
+   grande también si es horizontal. Solo Fotos (el visor del Jardín no cambia). */
+@media (min-width: 768px) {
+  .modal.modal--viewer:has(.photo-viewer) {
+    max-width: min(60rem, 100%);
+  }
+}
+
 .photo-move__title {
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+/* Crear una carpeta sin salir de subir o mover. */
+.inline-folder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--border-width) dashed var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-muted);
+}
+
+.inline-folder__intro {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.inline-folder__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.inline-folder__row .field__input {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.inline-folder__toggle {
+  align-self: flex-start;
+  margin-top: calc(-1 * var(--space-2));
 }
 
 .gallery {
@@ -1027,10 +1183,22 @@
   list-style: none;
 }
 
-@media (min-width: 768px) {
+@media (min-width: 600px) {
+  .gallery {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.3125rem;
+  }
+}
+
+@media (min-width: 1024px) {
   .gallery {
     grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 0.3125rem;
+  }
+}
+
+@media (min-width: 1200px) {
+  .gallery {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 }
 
@@ -1064,22 +1232,6 @@
 .gallery-image__placeholder {
   font-size: 1.5rem;
   opacity: 0.5;
-}
-
-.gallery__tag {
-  position: absolute;
-  bottom: 0.1875rem;
-  left: 0.1875rem;
-  padding: 0.125rem 0.3125rem;
-  border-radius: var(--radius-pill);
-  font-size: var(--font-size-xs);
-  line-height: 1.2;
-  background: var(--color-earth);
-  color: var(--color-on-action);
-}
-
-.gallery__tag--task_evidence {
-  background: var(--color-action);
 }
 
 .upload-preview {

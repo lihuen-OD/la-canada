@@ -322,7 +322,9 @@ export async function deletePhotoFolder(
 }
 
 /**
- * «Mover a carpeta» (cualquier usuario activo, una foto visible por vez).
+ * «Mover a carpeta» (cualquier usuario activo, una foto visible por vez),
+ * siempre a una carpeta vigente: así se organizan las fotos anteriores sin
+ * carpeta, y ninguna vuelve a quedar sin ella.
  * Cambia SOLO `folder_id`: id, autor, fecha, tipo, título, persona y
  * vínculos quedan iguales y el objeto del bucket no se toca. Al destino
  * actual no escribe ni audita. Si la foto ya no está en `fromFolderId`
@@ -342,9 +344,7 @@ export async function movePhoto(
     if (!photo) throw new PhotoNotFoundError();
     if (photo.folderId === input.folderId) return { photo: serializePhoto(photo), moved: false };
     if (photo.folderId !== input.fromFolderId) throw new PhotoMoveConflictError();
-    if (input.folderId && !(await lockLiveFolder(tx, input.folderId))) {
-      throw new PhotoFolderUnavailableError();
-    }
+    if (!(await lockLiveFolder(tx, input.folderId))) throw new PhotoFolderUnavailableError();
     const { count } = await tx.fileAsset.updateMany({
       where: { id: photoId, status: 'AVAILABLE', folderId: input.fromFolderId },
       data: { folderId: input.folderId },

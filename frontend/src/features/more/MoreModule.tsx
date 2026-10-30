@@ -27,7 +27,8 @@ const adminOnly = (element: ReactElement) => (
  * ☰ Más (`pg-mas` del prototipo) y sus submódulos como rutas descendientes
  * SPA: `/more` (grilla), 📝 `/more/news`, 📅 `/more/events`, 🌤️
  * `/more/weather`, 📸 `/more/photos` (carpetas) con `/more/photos/all`,
- * `/more/photos/unfiled` y `/more/photos/folders/:folderId`, 🌳 `/more/garden`, ⚙️
+ * `/more/photos/to-organize` (la anterior `/more/photos/unfiled` redirige) y
+ * `/more/photos/folders/:folderId`, 🌳 `/more/garden`, ⚙️
  * `/more/settings` y 👤 `/more/settings/team` (ADMIN) y 👤 `/more/profile`
  * (equipo y ADMIN, 5F). Jardín no es una ruta por rol: la pantalla es la misma
  * para todos y solo aparece "Publicar" al ADMIN.
@@ -56,13 +57,14 @@ export function MoreModule() {
         }
       />
       <Route
-        path="photos/unfiled"
+        path="photos/to-organize"
         element={
           <Suspense fallback={fallback}>
             <PhotosScreen scope="none" />
           </Suspense>
         }
       />
+      <Route path="photos/unfiled" element={<Navigate to="/more/photos/to-organize" replace />} />
       <Route
         path="photos/folders/:folderId"
         element={

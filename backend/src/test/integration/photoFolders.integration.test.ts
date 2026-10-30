@@ -155,8 +155,9 @@ async function createFolder(actor: Actor, name: string, idem = key()) {
   return response;
 }
 
+/** Subida de la app actual: sin categoría (la elige el backend) y con carpeta. */
 async function upload(actor: Actor, title: string, folderId?: string) {
-  const params = new URLSearchParams({ category: 'MEMORY', title: `${RUN} ${title}` });
+  const params = new URLSearchParams({ title: `${RUN} ${title}` });
   if (folderId) params.set('folderId', folderId);
   const response = await request(app)
     .post(`/api/v1/photos?${params.toString()}`)
@@ -167,6 +168,32 @@ async function upload(actor: Actor, title: string, folderId?: string) {
     .send(jpeg(title));
   if (response.body.photo?.id) fileIds.add(response.body.photo.id);
   return response;
+}
+
+/**
+ * Foto ANTERIOR a las carpetas (sintética): confirmada y sin carpeta, como
+ * las que ya existían. Se inserta directo porque la API ya no las crea.
+ */
+async function legacyPhoto(title: string): Promise<string> {
+  const objectKey = `memories/2026/${crypto.randomUUID()}.jpg`;
+  const body = jpeg(title);
+  objects.set(objectKey, body);
+  const row = await prisma.fileAsset.create({
+    data: {
+      provider: 'NEON_OBJECT_STORAGE',
+      bucket: memoryStorage.bucket,
+      objectKey,
+      originalFilename: 'anterior.jpg',
+      title: `${RUN} ${title}`,
+      mimeType: 'image/jpeg',
+      sizeBytes: body.length,
+      category: 'MEMORY',
+      status: 'AVAILABLE',
+    },
+    select: { id: true },
+  });
+  fileIds.add(row.id);
+  return row.id;
 }
 
 const move = (
@@ -361,19 +388,27 @@ describe('crear y renombrar', { timeout: 120_000 }, () => {
 describe('fotos, carpetas y conteos', { timeout: 120_000 }, () => {
   let garden = '';
   let visits = '';
+  let third = '';
   let loose = '';
 
-  it('una foto sin carpeta (como las anteriores) está en «Sin carpeta» y en «Todas las fotos»', async () => {
+  it('una foto anterior sin carpeta queda por organizar y en «Todas las fotos»; una nueva sin carpeta se rechaza', async () => {
     const created = await createFolder(creator, `${RUN} Conteos`);
     garden = created.body.folder.id;
     visits = (await createFolder(admin, `${RUN} Conteos destino`)).body.folder.id;
-    const response = await upload(stranger, 'suelta');
-    expect(response.status).toBe(201);
-    expect(response.body.photo.folderId).toBeNull();
-    loose = response.body.photo.id;
+    third = (await createFolder(stranger, `${RUN} Conteos tercera`)).body.folder.id;
+    loose = await legacyPhoto('anterior');
     expect(ids(await gallery(creator, 'folder=none&pageSize=48'))).toContain(loose);
     expect(ids(await gallery(creator, 'pageSize=48'))).toContain(loose);
     expect(ids(await gallery(creator, `folder=${garden}`))).not.toContain(loose);
+    const counts = (await listFolders(creator)).body;
+    expect(counts.unfiled.photoCount).toBeGreaterThanOrEqual(1);
+
+    const putsBefore = storageCalls.put;
+    const withoutFolder = await upload(stranger, 'sin carpeta');
+    expect(withoutFolder.status).toBe(400);
+    expect(withoutFolder.body.error.code).toBe('PHOTO_FOLDER_REQUIRED');
+    expect(storageCalls.put).toBe(putsBefore);
+    expect(await prisma.fileAsset.count({ where: { title: `${RUN} sin carpeta` } })).toBe(0);
   });
 
   it('subida confirmada en la carpeta; una subida fallida no aparece en ningún lado', async () => {
@@ -381,12 +416,14 @@ describe('fotos, carpetas y conteos', { timeout: 120_000 }, () => {
     await sleep(5);
     const second = await upload(stranger, 'en carpeta 2', garden);
     await sleep(5);
-    const third = await upload(admin, 'en carpeta 3', garden);
-    expect([first.status, second.status, third.status]).toEqual([201, 201, 201]);
+    const latest = await upload(admin, 'en carpeta 3', garden);
+    expect([first.status, second.status, latest.status]).toEqual([201, 201, 201]);
     expect(first.body.photo.folderId).toBe(garden);
+    // Sin pedir la clasificación: la categoría general, nunca evidencia de tarea.
+    expect(first.body.photo.category).toBe('MEMORY');
     const pageOne = await gallery(creator, `folder=${garden}&pageSize=2&page=1`);
     const pageTwo = await gallery(creator, `folder=${garden}&pageSize=2&page=2`);
-    expect(ids(pageOne)).toEqual([third.body.photo.id, second.body.photo.id]);
+    expect(ids(pageOne)).toEqual([latest.body.photo.id, second.body.photo.id]);
     expect(ids(pageTwo)).toEqual([first.body.photo.id]);
     expect(pageOne.body).toMatchObject({ total: 3, totalPages: 2 });
     expect(ids(await gallery(creator, `folder=${garden}&category=TASK_EVIDENCE`))).toEqual([]);
@@ -429,7 +466,7 @@ describe('fotos, carpetas y conteos', { timeout: 120_000 }, () => {
     expect(filtered.sql.length).toBeLessThanOrEqual(5);
   });
 
-  it('mover entre carpetas y a «Sin carpeta» conserva archivo y metadatos; al destino actual no audita', async () => {
+  it('mover entre carpetas y organizar una foto anterior conserva archivo y metadatos; al destino actual no audita; nunca a «sin carpeta»', async () => {
     const photoId = ids(await gallery(creator, `folder=${garden}&pageSize=1`))[0] as string;
     const before = await prisma.fileAsset.findUniqueOrThrow({ where: { id: photoId } });
     const callsBefore = { ...storageCalls };
@@ -443,8 +480,10 @@ describe('fotos, carpetas y conteos', { timeout: 120_000 }, () => {
     expect(ids(await gallery(creator, 'pageSize=48'))).toContain(photoId);
 
     const toNone = await move(admin, photoId, null, visits);
-    expect(toNone.body.photo.folderId).toBeNull();
-    const same = await move(creator, photoId, null, null);
+    expect(toNone.status).toBe(400);
+    const toThird = await move(admin, photoId, third, visits);
+    expect(toThird.body.photo.folderId).toBe(third);
+    const same = await move(creator, photoId, third, null);
     expect(same.body.moved).toBe(false);
 
     const after = await prisma.fileAsset.findUniqueOrThrow({ where: { id: photoId } });
@@ -473,10 +512,20 @@ describe('fotos, carpetas y conteos', { timeout: 120_000 }, () => {
     });
     expect(moves.map((audit) => [audit.previousState, audit.newState])).toEqual([
       [{ folderId: garden }, { folderId: visits }],
-      [{ folderId: visits }, { folderId: null }],
+      [{ folderId: visits }, { folderId: third }],
     ]);
     // Vuelve a su carpeta para las pruebas siguientes.
-    expect((await move(creator, photoId, garden, null)).status).toBe(200);
+    expect((await move(creator, photoId, garden, third)).status).toBe(200);
+
+    // Una foto anterior por organizar pasa a una carpeta, sin cambiar nada más.
+    const legacyBefore = await prisma.fileAsset.findUniqueOrThrow({ where: { id: loose } });
+    const organized = await move(stranger, loose, visits, null);
+    expect(organized.body).toMatchObject({ moved: true, photo: { id: loose, folderId: visits } });
+    const legacyAfter = await prisma.fileAsset.findUniqueOrThrow({ where: { id: loose } });
+    expect(keep(legacyAfter)).toEqual(keep(legacyBefore));
+    expect(ids(await gallery(creator, 'folder=none&pageSize=48'))).not.toContain(loose);
+    // Vuelve a quedar por organizar (fixture) para las pruebas siguientes.
+    await prisma.fileAsset.update({ where: { id: loose }, data: { folderId: null } });
   });
 
   it('dos movimientos simultáneos de la misma foto: uno gana y el otro recibe conflicto', async () => {
@@ -484,7 +533,7 @@ describe('fotos, carpetas y conteos', { timeout: 120_000 }, () => {
     const audits = await auditCount(photoId, 'photo.moved');
     const [left, right] = await Promise.all([
       move(creator, photoId, visits, garden),
-      move(stranger, photoId, null, garden),
+      move(stranger, photoId, third, garden),
     ]);
     expect([left.status, right.status].sort()).toEqual([200, 409]);
     expect([left, right].find((response) => response.status === 409)?.body.error.code).toBe(
@@ -594,7 +643,7 @@ describe(
 
     it('eliminación en curso → un movimiento que llega después espera y recibe 409 (no queda huérfana)', async () => {
       const folder = (await createFolder(creator, `${RUN} Carrera mover`)).body.folder.id as string;
-      const photo = (await upload(creator, 'carrera mover')).body.photo.id as string;
+      const photo = await legacyPhoto('carrera mover');
       const deletion = holdTransaction(async (tx) => {
         await tx.$queryRaw`SELECT "id" FROM "photo_folders" WHERE "id" = ${folder}::uuid FOR UPDATE`;
         await tx.photoFolder.update({
@@ -625,7 +674,7 @@ describe(
     it('movimiento en curso → la eliminación espera, cuenta la foto y responde 409', async () => {
       const folder = (await createFolder(creator, `${RUN} Carrera eliminar`)).body.folder
         .id as string;
-      const photo = (await upload(creator, 'carrera eliminar')).body.photo.id as string;
+      const photo = await legacyPhoto('carrera eliminar');
       const moving = holdTransaction(async (tx) => {
         await tx.$queryRaw`SELECT "id" FROM "photo_folders" WHERE "id" = ${folder}::uuid AND "deleted_at" IS NULL FOR KEY SHARE`;
         await tx.fileAsset.update({ where: { id: photo }, data: { folderId: folder } });
@@ -681,7 +730,7 @@ describe(
       for (let round = 0; round < 4; round += 1) {
         const folder = (await createFolder(creator, `${RUN} Ronda ${round}`)).body.folder
           .id as string;
-        const photo = (await upload(creator, `ronda ${round}`)).body.photo.id as string;
+        const photo = await legacyPhoto(`ronda ${round}`);
         const [moved, deleted] = await Promise.all([
           move(stranger, photo, folder, null),
           remove(creator, folder, 1),

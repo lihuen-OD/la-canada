@@ -631,7 +631,7 @@ describe('📸 Fotos y carpetas — navegación', () => {
     ).toBeInTheDocument();
     await screen.findByRole('button', { name: 'Ver Foto sintética' });
     await user.click(screen.getByRole('link', { name: /Fotos/ }));
-    await user.click(await screen.findByRole('link', { name: /Todas las fotos/ }));
+    await user.click(await screen.findByRole('link', { name: /Ver todas las fotos/ }));
     await screen.findByRole('button', { name: 'Ver Foto sintética' });
     await user.click(screen.getByRole('link', { name: /Fotos/ }));
     await user.click(await screen.findByRole('link', { name: /Carpeta sintética/ }));

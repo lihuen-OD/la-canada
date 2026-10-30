@@ -66,6 +66,7 @@ import {
 const META = { ipAddress: null, userAgent: 'vitest' };
 const FOLDER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const OTHER_FOLDER = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const THIRD_FOLDER = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const PHOTO = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const CREATOR: TaskActor = { userId: 'user-creator', role: 'EMPLOYEE', employeeId: 'emp-1' };
 const STRANGER: TaskActor = { userId: 'user-other', role: 'EMPLOYEE', employeeId: 'emp-2' };
@@ -146,14 +147,20 @@ describe('esquemas', () => {
     expect(createPhotoFolderBodySchema.safeParse({ name: 'a\u0000b' }).success).toBe(false);
   });
 
-  it.each(['Sin carpeta', '  sin   CARPETA ', 'Todas las fotos', 'TODAS LAS FOTOS'])(
-    'reserva los accesos especiales: %j',
-    (name) => {
-      const parsed = createPhotoFolderBodySchema.safeParse({ name });
-      expect(parsed.success).toBe(false);
-      expect(parsed.error?.issues[0]?.message).toMatch(/Sin carpeta.*Todas las fotos/);
-    },
-  );
+  it.each([
+    'Sin carpeta',
+    '  sin   CARPETA ',
+    'Todas las fotos',
+    'TODAS LAS FOTOS',
+    'Fotos por organizar',
+    ' fotos  POR organizar',
+  ])('reserva los nombres de los accesos especiales: %j', (name) => {
+    const parsed = createPhotoFolderBodySchema.safeParse({ name });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0]?.message).toMatch(
+      /Todas las fotos.*Fotos por organizar.*Sin carpeta/,
+    );
+  });
 
   it('el cliente nunca envía autor, clave ni estado', () => {
     expect(createPhotoFolderBodySchema.safeParse({ name: 'x', createdByUserId: 'u' }).success).toBe(
@@ -166,12 +173,16 @@ describe('esquemas', () => {
     ).toBe(false);
   });
 
-  it('mover exige destino y carpeta vista (null = «Sin carpeta»)', () => {
+  it('mover exige una carpeta de destino y la carpeta vista (null = por organizar)', () => {
     expect(
       movePhotoBodySchema.parse({ folderId: FOLDER.toUpperCase(), fromFolderId: null }),
     ).toEqual({ folderId: FOLDER, fromFolderId: null });
     expect(movePhotoBodySchema.safeParse({ folderId: FOLDER }).success).toBe(false);
     expect(movePhotoBodySchema.safeParse({ fromFolderId: null }).success).toBe(false);
+    // Ninguna foto vuelve a quedar sin carpeta.
+    expect(movePhotoBodySchema.safeParse({ folderId: null, fromFolderId: FOLDER }).success).toBe(
+      false,
+    );
     expect(movePhotoBodySchema.safeParse({ folderId: 'x', fromFolderId: null }).success).toBe(
       false,
     );
@@ -510,12 +521,19 @@ describe('mover', () => {
     expect(db.driveBackupJob.create).not.toHaveBeenCalled();
   });
 
-  it('a «Sin carpeta» no bloquea ninguna carpeta', async () => {
+  it('entre carpetas: cualquier usuario activo, con el destino bloqueado', async () => {
     db.fileAsset.findFirst.mockResolvedValue(photoRow(FOLDER));
+    db.$queryRaw.mockResolvedValue([{ id: OTHER_FOLDER }]);
     db.fileAsset.updateMany.mockResolvedValue({ count: 1 });
-    const result = await movePhoto(STRANGER, PHOTO, { folderId: null, fromFolderId: FOLDER }, META);
-    expect(result.photo.folderId).toBeNull();
-    expect(db.$queryRaw).not.toHaveBeenCalled();
+    const result = await movePhoto(
+      STRANGER,
+      PHOTO,
+      { folderId: OTHER_FOLDER, fromFolderId: FOLDER },
+      META,
+    );
+    expect(result.photo.folderId).toBe(OTHER_FOLDER);
+    expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(db.fileAsset.updateMany.mock.calls[0]?.[0].where).toMatchObject({ folderId: FOLDER });
   });
 
   it('al destino actual no escribe ni audita', async () => {
@@ -527,9 +545,10 @@ describe('mover', () => {
   });
 
   it('si otra persona la movió (no está donde la vio): 409 sin pisar', async () => {
-    db.fileAsset.findFirst.mockResolvedValue(photoRow(OTHER_FOLDER));
+    db.$queryRaw.mockResolvedValue([{ id: OTHER_FOLDER }]);
+    db.fileAsset.findFirst.mockResolvedValue(photoRow(THIRD_FOLDER));
     await expect(
-      movePhoto(CREATOR, PHOTO, { folderId: null, fromFolderId: FOLDER }, META),
+      movePhoto(CREATOR, PHOTO, { folderId: OTHER_FOLDER, fromFolderId: FOLDER }, META),
     ).rejects.toMatchObject({ code: 'PHOTO_MOVE_CONFLICT' });
     // Carrera: leyó la misma carpeta pero otra transacción escribió antes.
     db.fileAsset.findFirst
@@ -537,12 +556,12 @@ describe('mover', () => {
       .mockResolvedValueOnce({ id: PHOTO });
     db.fileAsset.updateMany.mockResolvedValue({ count: 0 });
     await expect(
-      movePhoto(CREATOR, PHOTO, { folderId: null, fromFolderId: FOLDER }, META),
+      movePhoto(CREATOR, PHOTO, { folderId: OTHER_FOLDER, fromFolderId: FOLDER }, META),
     ).rejects.toMatchObject({ code: 'PHOTO_MOVE_CONFLICT' });
     // ... o la eliminaron mientras tanto.
     db.fileAsset.findFirst.mockResolvedValueOnce(photoRow(FOLDER)).mockResolvedValueOnce(null);
     await expect(
-      movePhoto(CREATOR, PHOTO, { folderId: null, fromFolderId: FOLDER }, META),
+      movePhoto(CREATOR, PHOTO, { folderId: OTHER_FOLDER, fromFolderId: FOLDER }, META),
     ).rejects.toMatchObject({ code: 'PHOTO_NOT_FOUND' });
     expect(audits()).toHaveLength(0);
   });
@@ -641,6 +660,24 @@ describe('subir a una carpeta', () => {
       module: 'fotos',
     });
     expect(audits()[0]).toMatchObject({ action: 'photo.uploaded', newState: { folderId: FOLDER } });
+  });
+
+  it('sin carpeta (p. ej. un cliente anterior): 400 propio, sin subir bytes ni tocar la base', async () => {
+    const storage = fakeStorage();
+    setObjectStorageForTests(storage);
+    await expect(
+      uploadPhoto(
+        CREATOR,
+        { body: JPEG, declaredType: 'image/jpeg', filename: 'x.jpg' },
+        { title: 'Rosas', category: 'MEMORY' },
+        META,
+        undefined,
+        NOW,
+      ),
+    ).rejects.toMatchObject({ statusCode: 400, code: 'PHOTO_FOLDER_REQUIRED' });
+    expect(storage.putObject).not.toHaveBeenCalled();
+    expect(db.fileAsset.create).not.toHaveBeenCalled();
+    expect(db.photoFolder.findFirst).not.toHaveBeenCalled();
   });
 
   it('carpeta eliminada antes de subir: 409 sin subir bytes ni crear registros', async () => {

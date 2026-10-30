@@ -1,5 +1,5 @@
 import type { ChickenCoopPeriodDays } from './chickenCoopTypes';
-import type { EventType, GalleryCategory, PhotoScope, TeamFilter } from './moreTypes';
+import type { EventType, PhotoScope, TeamFilter } from './moreTypes';
 import type { PerformanceDetailFilters } from './performanceTypes';
 import type { MedicalRecordType, PetDueFilters } from './petTypes';
 import type {
@@ -193,16 +193,13 @@ export const queryKeys = {
     weather: (userId: string) => [...scope(userId), 'more', 'weather'] as const,
     /**
      * Galería (`useInfiniteQuery`) por parte de la galería (`all`, `none` =
-     * «Sin carpeta» o el id de una carpeta) y tipo; la página vive en
-     * `pageParams`. Cada prefijo invalida lo que contiene: sin argumentos,
-     * toda la galería; con `photoScope`, esa vista en todos sus tipos.
+     * por organizar, o el id de una carpeta); la página vive en `pageParams`.
+     * Sin `photoScope`, el prefijo de toda la galería.
      */
-    photos: (userId: string, photoScope?: PhotoScope, category?: GalleryCategory | 'all') =>
+    photos: (userId: string, photoScope?: PhotoScope) =>
       photoScope === undefined
         ? ([...scope(userId), 'more', 'photos'] as const)
-        : category === undefined
-          ? ([...scope(userId), 'more', 'photos', photoScope] as const)
-          : ([...scope(userId), 'more', 'photos', photoScope, category] as const),
+        : ([...scope(userId), 'more', 'photos', photoScope] as const),
     /** Carpetas de Fotos con sus conteos, «Sin carpeta» y «Todas las fotos» (una request). */
     photoFolders: (userId: string) => [...scope(userId), 'more', 'photo-folders'] as const,
     /** Imagen por id de foto: inmutable (una foto nueva es otro id). */

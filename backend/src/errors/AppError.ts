@@ -665,10 +665,19 @@ export class PhotoFolderNotFoundError extends AppError {
   }
 }
 
+/** Una foto nueva de la galería sin carpeta (p. ej. un cliente anterior a las carpetas). */
+export class PhotoFolderRequiredError extends AppError {
+  constructor() {
+    super('Elegí una carpeta para guardar la foto. Si no ves esa opción, recargá la página.', 400, {
+      code: 'PHOTO_FOLDER_REQUIRED',
+    });
+  }
+}
+
 /** Destino de una subida o de un movimiento eliminado mientras se elegía: nunca se usa otro. */
 export class PhotoFolderUnavailableError extends AppError {
   constructor() {
-    super('La carpeta elegida ya no existe. Elegí otra carpeta o «Sin carpeta».', 409, {
+    super('La carpeta elegida ya no existe. Elegí otra carpeta.', 409, {
       code: 'PHOTO_FOLDER_UNAVAILABLE',
     });
   }
@@ -695,11 +704,9 @@ export class PhotoFolderVersionConflictError extends AppError {
 /** Solo se eliminan carpetas sin fotos: nunca se borran ni se mueven fotos para vaciarla. */
 export class PhotoFolderNotEmptyError extends AppError {
   constructor() {
-    super(
-      'La carpeta todavía tiene fotos. Movelas a otra carpeta o a «Sin carpeta» antes de eliminarla.',
-      409,
-      { code: 'PHOTO_FOLDER_NOT_EMPTY' },
-    );
+    super('La carpeta todavía tiene fotos. Movelas a otra carpeta antes de eliminarla.', 409, {
+      code: 'PHOTO_FOLDER_NOT_EMPTY',
+    });
   }
 }
 

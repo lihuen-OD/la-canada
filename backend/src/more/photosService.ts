@@ -14,6 +14,7 @@ import {
   ObjectStorageUnavailableError,
   PetPhotoInvalidError,
   PhotoFolderNotFoundError,
+  PhotoFolderRequiredError,
   PhotoFolderUnavailableError,
   PhotoNotFoundError,
 } from '../errors/AppError';
@@ -38,10 +39,13 @@ import type { uploadPhotoQuerySchema } from './moreSchemas';
  * Eliminar es baja lógica confirmada y luego borrado físico; un fallo del
  * borrado físico deja la fila `PENDING_DELETION` para `reconcileFileAssets`.
  *
- * Carpetas (`photoFoldersService.ts`): organización en la base. Una foto nueva
- * recibe su carpeta recién al CONFIRMARSE, con la carpeta bloqueada en la
- * misma transacción (`lockLiveFolder`); la clave del objeto y la copia en
- * Drive no dependen de la carpeta.
+ * Carpetas (`photoFoldersService.ts`): organización en la base. Toda foto
+ * nueva de la galería necesita una carpeta vigente (las anteriores sin
+ * carpeta quedan «por organizar»); la recibe recién al CONFIRMARSE, con la
+ * carpeta bloqueada en la misma transacción (`lockLiveFolder`). La clave
+ * del objeto y la copia en Drive no dependen de la carpeta. Solo aplica a
+ * esta galería: la foto de una mascota y el plano del jardín tienen sus
+ * propios servicios y no usan carpetas.
  */
 
 export const MAX_GALLERY_PHOTO_BYTES = 10 * 1024 * 1024;
@@ -221,6 +225,8 @@ export async function uploadPhoto(
 ): Promise<UploadPhotoResult> {
   const storage = requireStorage();
   if (idempotencyKey !== undefined) assertIdempotencyKey(idempotencyKey);
+  const folderId = metadata.folderId;
+  if (!folderId) throw new PhotoFolderRequiredError();
   const body = input.body;
   if (!Buffer.isBuffer(body) || body.length === 0) {
     throw new PetPhotoInvalidError('Elegí una imagen para subir.');
@@ -230,16 +236,13 @@ export async function uploadPhoto(
   if (!mime || declared !== mime) throw new PetPhotoInvalidError();
   const checksum = createHash('sha256').update(body).digest('hex');
   const employeeId = metadata.employeeId?.toLowerCase() ?? null;
-  const folderId = metadata.folderId ?? null;
-  // Sin carpeta, la huella es la de siempre: un reintento que cruce el
-  // despliegue sigue reconociendo su envío anterior.
   const requestHash = canonicalRequestHash([
     UPLOAD_ENDPOINT,
     checksum,
     metadata.category,
     employeeId,
     metadata.title,
-    ...(folderId ? [folderId] : []),
+    folderId,
   ]);
 
   if (idempotencyKey !== undefined) {
@@ -272,7 +275,6 @@ export async function uploadPhoto(
   // Antes de subir los bytes: una carpeta ya eliminada no hace subir nada.
   // La comprobación que vale es la de la confirmación (bloqueo de la fila).
   if (
-    folderId &&
     !(await prisma.photoFolder.findFirst({
       where: { id: folderId, deletedAt: null },
       select: { id: true },
@@ -312,7 +314,7 @@ export async function uploadPhoto(
   const confirm = async (tx: Prisma.TransactionClient) => {
     // La pertenencia se asigna al confirmar, nunca a una carpeta eliminada
     // mientras se subía: 409 y el objeto se descarta (sin otro destino).
-    if (folderId && !(await lockLiveFolder(tx, folderId))) throw new PhotoFolderUnavailableError();
+    if (!(await lockLiveFolder(tx, folderId))) throw new PhotoFolderUnavailableError();
     const { count } = await tx.fileAsset.updateMany({
       where: { id: file.id, status: 'PENDING_UPLOAD' },
       data: { status: 'AVAILABLE', etag: etag ?? null, folderId },

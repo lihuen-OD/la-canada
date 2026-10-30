@@ -246,7 +246,7 @@ export function useMoreCache() {
     ),
     /**
      * 📸 Foto nueva o eliminada: «Todas las fotos», la vista de SU carpeta (o
-     * «Sin carpeta»), los conteos de carpetas y la tarjeta de Más. Las demás
+     * «por organizar»), los conteos de carpetas y la tarjeta de Más. Las demás
      * carpetas no cambian y no se piden.
      */
     afterPhotoChange: useCallback(
@@ -288,13 +288,25 @@ export function useMoreCache() {
       },
       [invalidate, queryClient, userId],
     ),
-    /** Carpeta nueva: solo el listado de carpetas (el backend la ubica y la cuenta). */
+    /**
+     * Carpeta nueva: entra ya en el listado (ordenada), así un selector abierto
+     * puede elegirla sin esperar, y se revalida solo el listado de carpetas.
+     */
     afterFolderCreated: useCallback(
-      () =>
-        void queryClient.invalidateQueries({
-          queryKey: queryKeys.more.photoFolders(userId),
-          exact: true,
-        }),
+      (folder: PhotoFolder) => {
+        const key = queryKeys.more.photoFolders(userId);
+        queryClient.setQueryData<PhotoFoldersResponse>(
+          key,
+          (previous) =>
+            previous && {
+              ...previous,
+              folders: [...previous.folders.filter((item) => item.id !== folder.id), folder].sort(
+                comparePhotoFolders,
+              ),
+            },
+        );
+        void queryClient.invalidateQueries({ queryKey: key, exact: true });
+      },
       [queryClient, userId],
     ),
     /**

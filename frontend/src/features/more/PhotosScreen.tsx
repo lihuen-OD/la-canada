@@ -1,14 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { deletePhoto, fetchPhotos } from '../../api/moreApi';
-import type { GalleryCategory, GalleryPhoto, PhotoFolder, PhotoScope } from '../../api/moreTypes';
+import type { GalleryPhoto, PhotoFolder, PhotoScope } from '../../api/moreTypes';
 import { queryKeys } from '../../api/queryKeys';
 import { useSessionScope } from '../../api/useSessionScope';
 import { useAuth } from '../../auth/useAuth';
 import { Button } from '../../components/ui/Button';
 import { buttonClassName } from '../../components/ui/buttonStyles';
-import { Chip } from '../../components/ui/Chip';
 import { Modal } from '../../components/ui/Modal';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
@@ -22,14 +21,14 @@ import {
   FolderFormDialog,
   MovePhotoDialog,
 } from './PhotoFolderDialogs';
-import { PhotoUploadZone } from './PhotoUploadZone';
-import { PHOTO_CATEGORY_ICON, PHOTO_CATEGORY_TEXT, PHOTO_FILTERS, timeAgo } from './moreLabels';
+import { PhotoUploadButton } from './PhotoUploadButton';
+import { timeAgo } from './moreLabels';
 import {
   ALL_PHOTOS_ICON,
   ALL_PHOTOS_LABEL,
   FOLDER_ICON,
-  UNFILED_ICON,
-  UNFILED_LABEL,
+  TO_ORGANIZE_ICON,
+  TO_ORGANIZE_LABEL,
   folderLabel,
   photoCountLabel,
   usePhotoFolders,
@@ -39,17 +38,18 @@ import { useMoreCache } from './useMoreCache';
 const PAGE_SIZE = 24;
 
 /**
- * 📸 Una parte de la galería: «Todas las fotos» (`/more/photos/all`), «Sin
- * carpeta» (`/more/photos/unfiled`) o una carpeta
- * (`/more/photos/folders/:folderId`, se puede recargar o compartir). Cada
- * una conserva lo de siempre: chips Todas/Tareas/Recuerdos, "Subir foto"
- * (con esta carpeta preseleccionada), grilla paginada y visor. Recuerdos y
- * evidencias siguen siendo tipos, independientes de la carpeta.
+ * 📸 Una parte de la galería: una carpeta (`/more/photos/folders/:folderId`,
+ * se puede recargar o compartir), «Todas las fotos» (`/more/photos/all`) o
+ * «Fotos por organizar» (`/more/photos/to-organize`, las anteriores a las
+ * carpetas que todavía no tienen una). Regreso a Fotos, nombre, cantidad,
+ * acciones, grilla de miniaturas cuadradas, «Cargar más» y visor con la
+ * imagen completa. Sin filtros de tipo: las carpetas organizan la galería
+ * (los tipos históricos se conservan en la base).
  */
 export default function PhotosScreen({ scope }: { scope?: 'all' | 'none' }) {
   const { folderId } = useParams();
   const resolved: PhotoScope = scope ?? folderId?.toLowerCase() ?? 'all';
-  // Otra carpeta = otra pantalla: filtro, visor y diálogos empiezan de cero.
+  // Otra carpeta = otra pantalla: visor y diálogos empiezan de cero.
   return <PhotoGallery key={resolved} scope={resolved} />;
 }
 
@@ -60,7 +60,7 @@ function PhotoGallery({ scope }: { scope: PhotoScope }) {
   const { userId, enabled } = useSessionScope();
   const cache = useMoreCache();
   const folders = usePhotoFolders();
-  const [filter, setFilter] = useState<GalleryCategory | 'all'>('all');
+  const storageHintId = useId();
   const [viewing, setViewing] = useState<GalleryPhoto | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [moving, setMoving] = useState(false);
@@ -75,18 +75,11 @@ function PhotoGallery({ scope }: { scope: PhotoScope }) {
   const missingInList = isFolder && Boolean(folders.data) && !folder;
 
   const list = useInfiniteQuery({
-    queryKey: queryKeys.more.photos(userId, scope, filter),
-    queryFn: ({ pageParam }) =>
-      fetchPhotos({
-        category: filter === 'all' ? undefined : filter,
-        scope,
-        page: pageParam,
-        pageSize: PAGE_SIZE,
-      }),
+    queryKey: queryKeys.more.photos(userId, scope),
+    queryFn: ({ pageParam }) => fetchPhotos({ scope, page: pageParam, pageSize: PAGE_SIZE }),
     initialPageParam: 1,
     getNextPageParam: (last) => (last.page < last.totalPages ? last.page + 1 : undefined),
     enabled: enabled && !missingInList,
-    placeholderData: keepPreviousData,
   });
   const expired = isSessionExpired(list.error) || isSessionExpired(folders.error);
   useEffect(() => {
@@ -106,23 +99,29 @@ function PhotoGallery({ scope }: { scope: PhotoScope }) {
       : scope === 'none'
         ? folders.data.unfiled.photoCount
         : folder?.photoCount;
-  const title =
-    scope === 'all' ? (
-      <>
-        <span aria-hidden="true">{ALL_PHOTOS_ICON} </span>
-        {ALL_PHOTOS_LABEL}
-      </>
-    ) : scope === 'none' ? (
-      <>
-        <span aria-hidden="true">{UNFILED_ICON} </span>
-        {UNFILED_LABEL}
-      </>
-    ) : (
-      <>
-        <span aria-hidden="true">{FOLDER_ICON} </span>
-        {folder?.name ?? 'Carpeta'}
-      </>
-    );
+  const [icon, name] =
+    scope === 'all'
+      ? [ALL_PHOTOS_ICON, ALL_PHOTOS_LABEL]
+      : scope === 'none'
+        ? [TO_ORGANIZE_ICON, TO_ORGANIZE_LABEL]
+        : [FOLDER_ICON, folder?.name ?? 'Carpeta'];
+  const title = (
+    <>
+      <span aria-hidden="true">{icon} </span>
+      {name}
+    </>
+  );
+  const description =
+    count === undefined
+      ? undefined
+      : scope === 'none' && count > 0
+        ? `${photoCountLabel(count)} sin carpeta. Abrí una y elegí «Mover a carpeta».`
+        : photoCountLabel(count);
+  const back = (
+    <div className="photos__back">
+      <MoreBackLink to="/more/photos" label="Fotos" />
+    </div>
+  );
 
   /** Conflicto al mover: se cierra todo, se avisa y se revalida lo afectado. */
   function showConflict(message: string): void {
@@ -134,8 +133,9 @@ function PhotoGallery({ scope }: { scope: PhotoScope }) {
 
   if (folderGone) {
     return (
-      <div className="more">
-        <PageHeader title={title} actions={<MoreBackLink to="/more/photos" label="Fotos" />} />
+      <div className="more photos">
+        {back}
+        <PageHeader title={title} />
         <EmptyState
           icon={<span>{FOLDER_ICON}</span>}
           title="Esta carpeta no existe o fue eliminada."
@@ -150,56 +150,52 @@ function PhotoGallery({ scope }: { scope: PhotoScope }) {
   }
 
   return (
-    <div className="more">
+    <div className="more photos">
+      {back}
       <PageHeader
         title={title}
-        description={count === undefined ? undefined : photoCountLabel(count)}
+        description={description}
         refreshing={
           (Boolean(list.data) && list.isFetching && !list.isFetchingNextPage) ||
           (Boolean(folders.data) && folders.isFetching)
         }
         actions={
-          <div className="photo-gallery__actions">
-            {folder ? (
-              <FolderActionsMenu
-                folder={folder}
-                onRename={() => setRenaming(folder)}
-                onDelete={() => setDeletingFolder(folder)}
+          scope === 'none' ? undefined : (
+            <div className="photos__actions">
+              <PhotoUploadButton
+                storage={storage}
+                defaultFolderId={isFolder ? scope : null}
+                hintId={storageHintId}
+                onUploaded={(photo) => {
+                  cache.afterPhotoChange(photo.folderId);
+                  const here = scope === 'all' || photo.folderId === scope;
+                  setNotice(
+                    here
+                      ? null
+                      : {
+                          text: `La foto se guardó en «${folderLabel(folders.data?.folders, photo.folderId)}».`,
+                          tone: 'info',
+                        },
+                  );
+                }}
+                onSessionExpired={handleSessionExpired}
               />
-            ) : null}
-            <MoreBackLink to="/more/photos" label="Fotos" />
-          </div>
+              {folder ? (
+                <FolderActionsMenu
+                  folder={folder}
+                  onRename={() => setRenaming(folder)}
+                  onDelete={() => setDeletingFolder(folder)}
+                />
+              ) : null}
+            </div>
+          )
         }
       />
-      <div className="filter-scroller" role="group" aria-label="Filtrar por tipo">
-        {PHOTO_FILTERS.map((option) => (
-          <Chip
-            key={option.value}
-            selected={filter === option.value}
-            onSelect={() => setFilter(option.value)}
-          >
-            {option.label}
-          </Chip>
-        ))}
-      </div>
-
-      <PhotoUploadZone
-        storage={storage}
-        defaultFolderId={isFolder ? scope : null}
-        onUploaded={(photo) => {
-          cache.afterPhotoChange(photo.folderId);
-          const here = scope === 'all' || (photo.folderId ?? 'none') === scope;
-          setNotice(
-            here
-              ? null
-              : {
-                  text: `La foto se guardó en «${folderLabel(folders.data?.folders, photo.folderId)}».`,
-                  tone: 'info',
-                },
-          );
-        }}
-        onSessionExpired={handleSessionExpired}
-      />
+      {storage === 'unconfigured' && scope !== 'none' ? (
+        <p id={storageHintId} className="notice notice--warning">
+          Las fotos no están disponibles: falta configurar el almacenamiento.
+        </p>
+      ) : null}
       {notice ? (
         <p
           className={`notice ${notice.tone === 'error' ? 'notice--warning' : 'notice--positive'}`}
@@ -220,19 +216,29 @@ function PhotoGallery({ scope }: { scope: PhotoScope }) {
           <LoadingState label="Cargando fotos…" />
         )
       ) : photos.length === 0 ? (
-        <EmptyState
-          icon={<span>📷</span>}
-          title={isFolder || scope === 'none' ? 'No hay fotos acá.' : 'Sin fotos aún.'}
-          description={
-            isFolder
-              ? 'Subí una foto o mové fotos a esta carpeta.'
-              : scope === 'none'
-                ? 'Todas las fotos están en alguna carpeta.'
-                : 'Subí la primera.'
-          }
-        />
+        scope === 'none' ? (
+          <EmptyState
+            icon={<span>{TO_ORGANIZE_ICON}</span>}
+            title="No quedan fotos por organizar."
+            description={
+              <Link to="/more/photos" className={buttonClassName({ variant: 'secondary' })}>
+                Volver a Fotos
+              </Link>
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={<span>📷</span>}
+            title={isFolder ? 'Esta carpeta está vacía.' : 'Todavía no hay fotos.'}
+            description={
+              isFolder
+                ? 'Subí una foto o mové acá fotos de otra carpeta.'
+                : 'Creá una carpeta en Fotos y subí la primera.'
+            }
+          />
+        )
       ) : (
-        <div className={list.isPlaceholderData ? 'is-stale' : undefined}>
+        <>
           <ul className="gallery" aria-label="Fotos">
             {photos.map((photo) => (
               <li key={photo.id}>
@@ -243,27 +249,22 @@ function PhotoGallery({ scope }: { scope: PhotoScope }) {
                   aria-label={`Ver ${photo.title}`}
                 >
                   <GalleryImage photoId={photo.id} alt="" />
-                  <span
-                    className={`gallery__tag gallery__tag--${photo.category.toLowerCase()}`}
-                    aria-hidden="true"
-                  >
-                    {PHOTO_CATEGORY_ICON[photo.category]}
-                  </span>
                 </button>
               </li>
             ))}
           </ul>
           {list.hasNextPage ? (
-            <Button
-              variant="secondary"
-              fullWidth
-              loading={list.isFetchingNextPage}
-              onClick={() => void list.fetchNextPage({ cancelRefetch: false })}
-            >
-              Cargar más
-            </Button>
+            <div className="photos__more">
+              <Button
+                variant="secondary"
+                loading={list.isFetchingNextPage}
+                onClick={() => void list.fetchNextPage({ cancelRefetch: false })}
+              >
+                Cargar más
+              </Button>
+            </div>
           ) : null}
-        </div>
+        </>
       )}
 
       {viewing && !confirmDelete && !moving ? (
@@ -283,20 +284,21 @@ function PhotoGallery({ scope }: { scope: PhotoScope }) {
               {viewing.title}
             </h2>
             <p className="photo-viewer__meta">
-              {[
-                viewing.employee?.displayName,
-                PHOTO_CATEGORY_TEXT[viewing.category],
-                timeAgo(viewing.createdAt),
-              ]
+              {[viewing.employee?.displayName, timeAgo(viewing.createdAt)]
                 .filter(Boolean)
                 .join(' · ')}
             </p>
             <p className="photo-viewer__meta photo-viewer__folder">
-              <span aria-hidden="true">{viewing.folderId ? FOLDER_ICON : UNFILED_ICON} </span>
+              <span aria-hidden="true">{viewing.folderId ? FOLDER_ICON : TO_ORGANIZE_ICON} </span>
               {folderLabel(folders.data?.folders, viewing.folderId)}
+              {/* Tipo histórico: se conserva y se muestra solo si era evidencia de una tarea. */}
+              {viewing.category === 'TASK_EVIDENCE' ? ' · Evidencia de tarea' : null}
             </p>
             <div className="photo-viewer__actions">
-              <Button variant="secondary" onClick={() => setMoving(true)}>
+              <Button
+                variant={viewing.folderId ? 'secondary' : 'primary'}
+                onClick={() => setMoving(true)}
+              >
                 <span aria-hidden="true">{FOLDER_ICON} </span>Mover a carpeta
               </Button>
               {isAdmin ? (

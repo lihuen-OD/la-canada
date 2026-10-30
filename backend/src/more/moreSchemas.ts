@@ -204,8 +204,16 @@ export const listPhotosQuerySchema = z
 
 /**
  * Metadatos de "Guardar foto" (viajan en la query: el cuerpo es la imagen).
- * Título vacío = "Sin título" (prototipo); persona opcional; carpeta
- * opcional (sin ella, «Sin carpeta», como toda foto anterior).
+ * Título vacío = "Sin título" (prototipo); persona opcional.
+ *
+ * - `folderId`: la carpeta de la foto. El servicio la EXIGE (400
+ *   `PHOTO_FOLDER_REQUIRED`): desde 2026-10-30 ninguna foto nueva de la
+ *   galería queda sin carpeta. Acá es opcional solo para responder con ese
+ *   código propio (y no un error genérico) a un cliente anterior.
+ * - `category`: ya no se le pide a la persona. Sin valor, `MEMORY`, la
+ *   categoría general de la galería ("fotografía general o recuerdo",
+ *   docs/DATABASE.md); nunca `TASK_EVIDENCE` por defecto. Un cliente
+ *   anterior que la envía la conserva tal cual.
  */
 export const uploadPhotoQuerySchema = z
   .object({
@@ -213,7 +221,7 @@ export const uploadPhotoQuerySchema = z
       .union([z.literal(''), plainText('El título', PHOTO_TITLE_MAX)])
       .optional()
       .transform((value) => value || 'Sin título'),
-    category: z.enum(GALLERY_CATEGORIES, { message: 'Elegí el tipo de foto.' }),
+    category: z.enum(GALLERY_CATEGORIES, { message: 'Tipo de foto inválido.' }).default('MEMORY'),
     employeeId: uuidSchema.optional(),
     folderId: uuidSchema.transform((value) => value.toLowerCase()).optional(),
   })
@@ -222,8 +230,15 @@ export const uploadPhotoQuerySchema = z
 // ── 📸 Carpetas de Fotos ─────────────────────────────────────────────────
 
 export const PHOTO_FOLDER_NAME_MAX = 80;
-/** Nombres de los accesos especiales de la pantalla: no pueden ser carpetas. */
-export const RESERVED_PHOTO_FOLDER_NAMES = ['Sin carpeta', 'Todas las fotos'] as const;
+/**
+ * Nombres de los accesos especiales de la pantalla (y el anterior «Sin
+ * carpeta»): no pueden ser carpetas.
+ */
+export const RESERVED_PHOTO_FOLDER_NAMES = [
+  'Sin carpeta',
+  'Todas las fotos',
+  'Fotos por organizar',
+] as const;
 
 /**
  * Clave de unicidad de una carpeta: el nombre YA normalizado en minúsculas.
@@ -245,7 +260,7 @@ const photoFolderNameSchema = z
   .pipe(plainText('El nombre de la carpeta', PHOTO_FOLDER_NAME_MAX))
   .refine(
     (name) => !RESERVED_KEYS.has(photoFolderNameKey(name)),
-    '«Sin carpeta» y «Todas las fotos» son accesos de Fotos: elegí otro nombre.',
+    '«Todas las fotos», «Fotos por organizar» y «Sin carpeta» son nombres reservados de Fotos: elegí otro.',
   );
 
 /** Versión que se vio al abrir el renombre o la confirmación (409 si cambió). */
@@ -276,13 +291,17 @@ const folderRefSchema = (message: string) =>
   );
 
 /**
- * "Mover a carpeta": destino (`null` = «Sin carpeta») y la carpeta en la que
- * quien mueve VIO la foto (`fromFolderId`). Si ya no está ahí, 409 en lugar
- * de pisar el movimiento de otra persona.
+ * "Mover a carpeta": destino (siempre una carpeta: ninguna foto vuelve a
+ * quedar sin carpeta) y la carpeta en la que quien mueve VIO la foto
+ * (`fromFolderId`, `null` = una foto anterior por organizar). Si ya no está
+ * ahí, 409 en lugar de pisar el movimiento de otra persona.
  */
 export const movePhotoBodySchema = z
   .object({
-    folderId: folderRefSchema('Elegí una carpeta.'),
+    folderId: z
+      .string({ message: 'Elegí una carpeta.' })
+      .uuid('Elegí una carpeta.')
+      .transform((value) => value.toLowerCase()),
     fromFolderId: folderRefSchema('Falta la carpeta en la que estaba la foto.'),
   })
   .strict();

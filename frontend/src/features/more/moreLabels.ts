@@ -1,10 +1,4 @@
-import type {
-  Age,
-  BirthdayOrigin,
-  EventType,
-  FamilyRelation,
-  GalleryCategory,
-} from '../../api/moreTypes';
+import type { Age, BirthdayOrigin, EventType, FamilyRelation } from '../../api/moreTypes';
 import { formatDate } from '../../utils/dateFormat';
 
 /** Textos y emojis del prototipo (`EV_LBL`, `EV_IC`, `MESC`, `DIAS3`, `ago`, `calcEdad`). */
@@ -32,12 +26,6 @@ export const EVENT_FILTERS: readonly { value: EventType | 'all'; label: string }
   { value: 'OTHER', label: 'Otros' },
 ];
 
-export const PHOTO_FILTERS: readonly { value: GalleryCategory | 'all'; label: string }[] = [
-  { value: 'all', label: 'Todas' },
-  { value: 'TASK_EVIDENCE', label: 'Tareas' },
-  { value: 'MEMORY', label: 'Recuerdos' },
-];
-
 /** Formatos que el backend acepta (el tipo real se valida por bytes allá). */
 export const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
@@ -46,19 +34,6 @@ export const GARDEN_PLAN_TYPES = PHOTO_TYPES;
 
 /** "10 MB" como lo muestra la UI (el backend corta en bytes, no en MB). */
 export const MAX_GARDEN_PLAN_BYTES = 10 * 1024 * 1024;
-
-export const PHOTO_CATEGORY_OPTION: Record<GalleryCategory, string> = {
-  MEMORY: '📷 Recuerdo',
-  TASK_EVIDENCE: '✅ Tarea',
-};
-export const PHOTO_CATEGORY_ICON: Record<GalleryCategory, string> = {
-  MEMORY: '📷',
-  TASK_EVIDENCE: '✅',
-};
-export const PHOTO_CATEGORY_TEXT: Record<GalleryCategory, string> = {
-  MEMORY: 'recuerdo',
-  TASK_EVIDENCE: 'tarea',
-};
 
 const MONTHS_SHORT = [
   'Ene',

@@ -1,49 +1,45 @@
-import { useId, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { GalleryPhoto } from '../../api/moreTypes';
+import { Button } from '../../components/ui/Button';
 import { PhotoUploadDialog } from './PhotoUploadDialog';
 import { PHOTO_TYPES } from './moreLabels';
 
 /**
- * "Subir foto" de siempre (zona punteada + selector de archivo + diálogo),
- * en la pantalla principal y dentro de cada parte de la galería. Sin
- * almacenamiento configurado queda deshabilitada con el aviso de siempre.
+ * «Subir foto»: botón compacto + selector de archivo + diálogo (el flujo de
+ * subida de siempre). La carpeta llega preseleccionada desde una carpeta;
+ * desde la pantalla principal o «Todas las fotos» hay que elegirla. Sin
+ * almacenamiento configurado queda deshabilitado (la pantalla muestra el
+ * aviso con `hintId`).
  */
-export function PhotoUploadZone({
+export function PhotoUploadButton({
   storage,
   defaultFolderId,
+  hintId,
+  variant = 'primary',
   onUploaded,
   onSessionExpired,
 }: {
-  /** `undefined` mientras se carga: deshabilitada, sin aviso. */
+  /** `undefined` mientras se carga: deshabilitado, sin aviso. */
   storage: 'configured' | 'unconfigured' | undefined;
   defaultFolderId: string | null;
+  hintId?: string;
+  variant?: 'primary' | 'secondary';
   onUploaded: (photo: GalleryPhoto) => void;
   onSessionExpired: () => void;
 }) {
-  const hintId = useId();
   const [file, setFile] = useState<File | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const ready = storage === 'configured';
   return (
     <>
-      <button
-        type="button"
-        className="upload-zone"
-        disabled={!ready}
-        onClick={() => inputRef.current?.click()}
+      <Button
+        variant={variant}
+        size="sm"
+        disabled={storage !== 'configured'}
         aria-describedby={storage === 'unconfigured' ? hintId : undefined}
+        onClick={() => inputRef.current?.click()}
       >
-        <span className="upload-zone__icon" aria-hidden="true">
-          📷
-        </span>
-        <span className="upload-zone__title">Subir foto</span>
-        <span className="upload-zone__hint">Tocá para seleccionar</span>
-      </button>
-      {storage === 'unconfigured' ? (
-        <p id={hintId} className="notice notice--warning">
-          Las fotos no están disponibles: falta configurar el almacenamiento.
-        </p>
-      ) : null}
+        <span aria-hidden="true">📷 </span>Subir foto
+      </Button>
       <input
         ref={inputRef}
         type="file"

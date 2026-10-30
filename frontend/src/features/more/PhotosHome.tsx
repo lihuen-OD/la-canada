@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useId, useState } from 'react';
-import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import type { GalleryPhoto, PhotoFolder } from '../../api/moreTypes';
 import { useAuth } from '../../auth/useAuth';
@@ -9,13 +8,11 @@ import { ErrorState, LoadingState } from '../../components/ui/StateMessage';
 import { errorMessageOf, isSessionExpired } from '../pets/petErrors';
 import { MoreBackLink } from './MoreBackLink';
 import { DeleteFolderDialog, FolderActionsMenu, FolderFormDialog } from './PhotoFolderDialogs';
-import { PhotoUploadZone } from './PhotoUploadZone';
+import { PhotoUploadButton } from './PhotoUploadButton';
 import {
-  ALL_PHOTOS_ICON,
   ALL_PHOTOS_LABEL,
   FOLDER_ICON,
-  UNFILED_ICON,
-  UNFILED_LABEL,
+  TO_ORGANIZE_ICON,
   folderLabel,
   photoCountLabel,
   photoScopePath,
@@ -23,42 +20,52 @@ import {
 } from './photoFolders';
 import { useMoreCache } from './useMoreCache';
 
-/** Tarjeta de carpeta (o de un acceso especial): ícono, nombre y cantidad de fotos visibles. */
+/**
+ * Tarjeta de carpeta: ícono, nombre (hasta dos líneas) y cantidad de fotos
+ * visibles. Sin vista previa a propósito: el backend no genera miniaturas y
+ * una portada costaría descargar la imagen completa (hasta 10 MB) por
+ * carpeta. El «⋯» queda fuera del enlace (no se anidan controles) y solo
+ * aparece con acciones autorizadas.
+ */
 function FolderCard({
-  to,
-  icon,
-  name,
-  count,
-  special = false,
-  menu,
+  folder,
+  onRename,
+  onDelete,
 }: {
-  to: string;
-  icon: string;
-  name: string;
-  count: number;
-  special?: boolean;
-  menu?: ReactNode;
+  folder: PhotoFolder;
+  onRename: () => void;
+  onDelete: () => void;
 }) {
+  const hasActions = folder.permissions.canRename || folder.permissions.canDelete;
   return (
-    <div className={`photo-folder${special ? ' photo-folder--special' : ''}`}>
-      <Link to={to} className="photo-folder__link">
+    <div className={`photo-folder${hasActions ? ' photo-folder--with-menu' : ''}`}>
+      <Link to={photoScopePath(folder.id)} className="photo-folder__link">
         <span className="photo-folder__icon" aria-hidden="true">
-          {icon}
+          {FOLDER_ICON}
         </span>
-        <span className="photo-folder__name">{name}</span>
-        <span className="photo-folder__count">{photoCountLabel(count)}</span>
+        <span className="photo-folder__text">
+          <span className="photo-folder__name">{folder.name}</span>
+          <span className="photo-folder__count">{photoCountLabel(folder.photoCount)}</span>
+        </span>
       </Link>
-      {menu}
+      <FolderActionsMenu
+        folder={folder}
+        className="photo-folder__menu"
+        onRename={onRename}
+        onDelete={onDelete}
+      />
     </div>
   );
 }
 
 /**
  * 📸 Fotos — pantalla principal: galería compartida organizada en carpetas
- * de un nivel. «Todas las fotos» y «Sin carpeta» son accesos especiales (no
- * se editan ni se eliminan); las carpetas, en orden por nombre, con sus
- * conteos — todo en UNA request. Cualquiera crea carpetas y sube fotos;
- * renombrar o eliminar, quien la creó o un ADMIN (lo dice el backend).
+ * de un nivel. Encabezado con «Crear carpeta» y «Subir foto»; grilla de
+ * carpetas por nombre con sus conteos; «Todas las fotos» como acceso
+ * secundario y, solo si quedan fotos anteriores sin carpeta, el acceso
+ * discreto «Fotos por organizar». Todo en UNA request. Cualquiera crea
+ * carpetas y sube fotos (siempre a una carpeta); renombrar o eliminar,
+ * quien la creó o un ADMIN (lo dice el backend).
  */
 export default function PhotosHome() {
   const { logout } = useAuth();
@@ -66,6 +73,7 @@ export default function PhotosHome() {
   const folders = usePhotoFolders();
   const cache = useMoreCache();
   const sectionId = useId();
+  const storageHintId = useId();
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState<PhotoFolder | null>(null);
   const [deleting, setDeleting] = useState<PhotoFolder | null>(null);
@@ -75,40 +83,79 @@ export default function PhotosHome() {
     if (expired) handleSessionExpired();
   }, [expired, handleSessionExpired]);
   const data = folders.data;
+  const toOrganize = data?.unfiled.photoCount ?? 0;
 
   return (
-    <div className="more">
+    <div className="more photos">
+      <div className="photos__back">
+        <MoreBackLink label="Más" />
+      </div>
       <PageHeader
         title={
           <>
             <span aria-hidden="true">📸 </span>Fotos
           </>
         }
+        description="Las fotos de La Cañada, organizadas en carpetas compartidas."
         refreshing={Boolean(data) && folders.isFetching}
-        actions={<MoreBackLink />}
+        actions={
+          <div className="photos__actions">
+            <Button variant="secondary" size="sm" onClick={() => setCreating(true)}>
+              <span aria-hidden="true">＋ </span>Crear carpeta
+            </Button>
+            <PhotoUploadButton
+              storage={data?.photoStorage}
+              defaultFolderId={null}
+              hintId={storageHintId}
+              onUploaded={(photo: GalleryPhoto) => {
+                cache.afterPhotoChange(photo.folderId);
+                setNotice(`La foto se guardó en «${folderLabel(data?.folders, photo.folderId)}».`);
+              }}
+              onSessionExpired={handleSessionExpired}
+            />
+          </div>
+        }
       />
-      <PhotoUploadZone
-        storage={data?.photoStorage}
-        defaultFolderId={null}
-        onUploaded={(photo: GalleryPhoto) => {
-          cache.afterPhotoChange(photo.folderId);
-          setNotice(`La foto se guardó en «${folderLabel(data?.folders, photo.folderId)}».`);
-        }}
-        onSessionExpired={handleSessionExpired}
-      />
+      {data?.photoStorage === 'unconfigured' ? (
+        <p id={storageHintId} className="notice notice--warning">
+          Las fotos no están disponibles: falta configurar el almacenamiento.
+        </p>
+      ) : null}
+      <p className="photos__notice" role="status" aria-live="polite">
+        {notice}
+      </p>
 
-      <section className="photo-folders-section" aria-labelledby={sectionId}>
-        <div className="photo-folders-section__head">
+      {toOrganize > 0 ? (
+        <Link to={photoScopePath('none')} className="photos-organize">
+          <span className="photos-organize__icon" aria-hidden="true">
+            {TO_ORGANIZE_ICON}
+          </span>
+          <span className="photos-organize__text">
+            <strong>
+              {toOrganize === 1 ? '1 foto por organizar' : `${toOrganize} fotos por organizar`}
+            </strong>
+            <span>Son anteriores a las carpetas: movelas a la que corresponda.</span>
+          </span>
+          <span className="photos-organize__go" aria-hidden="true">
+            →
+          </span>
+        </Link>
+      ) : null}
+
+      <section className="photos__section" aria-labelledby={sectionId}>
+        <div className="photos__section-head">
           <h2 id={sectionId} className="more__section-title">
             Carpetas
+            {data && data.folders.length > 0 ? (
+              <span className="photos__section-count"> · {data.folders.length}</span>
+            ) : null}
           </h2>
-          <Button variant="secondary" size="sm" onClick={() => setCreating(true)}>
-            <span aria-hidden="true">＋ </span>Nueva carpeta
-          </Button>
+          {data && data.all.photoCount > 0 ? (
+            <Link to={photoScopePath('all')} className="photos__all-link">
+              Ver {ALL_PHOTOS_LABEL.toLowerCase()} ({data.all.photoCount})
+            </Link>
+          ) : null}
         </div>
-        <p className="photo-folders-section__notice" role="status" aria-live="polite">
-          {notice}
-        </p>
         {!data ? (
           folders.isError ? (
             <ErrorState
@@ -119,52 +166,31 @@ export default function PhotosHome() {
           ) : (
             <LoadingState label="Cargando carpetas…" />
           )
+        ) : data.folders.length === 0 ? (
+          <div className="photos-empty">
+            <span className="photos-empty__icon" aria-hidden="true">
+              {FOLDER_ICON}
+            </span>
+            <p className="photos-empty__title">Todavía no hay carpetas</p>
+            <p className="photos-empty__text">
+              Creá la primera carpeta para empezar a subir y organizar fotos.
+            </p>
+            <Button size="sm" onClick={() => setCreating(true)}>
+              <span aria-hidden="true">＋ </span>Crear la primera carpeta
+            </Button>
+          </div>
         ) : (
-          <>
-            <ul className="photo-folders" aria-label="Carpetas de fotos">
-              <li>
+          <ul className="photo-folders" aria-label="Carpetas de fotos">
+            {data.folders.map((folder) => (
+              <li key={folder.id}>
                 <FolderCard
-                  to={photoScopePath('all')}
-                  icon={ALL_PHOTOS_ICON}
-                  name={ALL_PHOTOS_LABEL}
-                  count={data.all.photoCount}
-                  special
+                  folder={folder}
+                  onRename={() => setRenaming(folder)}
+                  onDelete={() => setDeleting(folder)}
                 />
               </li>
-              <li>
-                <FolderCard
-                  to={photoScopePath('none')}
-                  icon={UNFILED_ICON}
-                  name={UNFILED_LABEL}
-                  count={data.unfiled.photoCount}
-                  special
-                />
-              </li>
-              {data.folders.map((folder) => (
-                <li key={folder.id}>
-                  <FolderCard
-                    to={photoScopePath(folder.id)}
-                    icon={FOLDER_ICON}
-                    name={folder.name}
-                    count={folder.photoCount}
-                    menu={
-                      <FolderActionsMenu
-                        folder={folder}
-                        onRename={() => setRenaming(folder)}
-                        onDelete={() => setDeleting(folder)}
-                      />
-                    }
-                  />
-                </li>
-              ))}
-            </ul>
-            {data.folders.length === 0 ? (
-              <p className="more__muted">
-                Todavía no hay carpetas. Creá la primera con «Nueva carpeta»: las fotos sin carpeta
-                siguen en «Sin carpeta».
-              </p>
-            ) : null}
-          </>
+            ))}
+          </ul>
         )}
       </section>
 
@@ -173,7 +199,7 @@ export default function PhotosHome() {
           onClose={() => setCreating(false)}
           onSaved={(folder) => {
             setCreating(false);
-            cache.afterFolderCreated();
+            cache.afterFolderCreated(folder);
             setNotice(`Se creó la carpeta «${folder.name}».`);
           }}
           onSessionExpired={handleSessionExpired}

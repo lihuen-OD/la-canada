@@ -29,6 +29,8 @@ const db = vi.hoisted(() => {
       findFirst: fn(),
       findUniqueOrThrow: fn(),
     },
+    photoFolder: { findFirst: fn() },
+    $queryRaw: fn(),
     idempotencyRecord: { findUnique: fn(), create: fn(), update: fn() },
     driveBackupJob: { create: fn() },
     employeeProfile: { findUnique: fn(), upsert: fn() },
@@ -189,7 +191,18 @@ describe('📅 Eventos — solo ADMIN, sin duplicados, "eliminar" es anulación'
 });
 
 describe('📸 Fotos — subida validada, idempotente y borrado solo ADMIN', () => {
-  const metadata = { title: 'Jardín', category: 'MEMORY' as const, employeeId: undefined };
+  const FOLDER = '44444444-4444-4444-8444-444444444444';
+  const metadata = {
+    title: 'Jardín',
+    category: 'MEMORY' as const,
+    employeeId: undefined,
+    folderId: FOLDER,
+  };
+  // Carpeta vigente (lectura previa y bloqueo en la confirmación).
+  beforeEach(() => {
+    db.photoFolder.findFirst.mockResolvedValue({ id: FOLDER });
+    db.$queryRaw.mockResolvedValue([{ id: FOLDER }]);
+  });
   const upload = (actor: TaskActor, key?: string, body: Buffer = JPEG, type = 'image/jpeg') =>
     uploadPhoto(actor, { body, declaredType: type, filename: 'x.jpg' }, metadata, META, key, NOW);
   const saved = {
@@ -308,7 +321,14 @@ describe('📸 Fotos — subida validada, idempotente y borrado solo ADMIN', () 
     setObjectStorageForTests(storage);
     const checksum = createHash('sha256').update(JPEG).digest('hex');
     db.idempotencyRecord.findUnique.mockResolvedValue({
-      requestHash: canonicalRequestHash(['POST /photos', checksum, 'MEMORY', null, 'Jardín']),
+      requestHash: canonicalRequestHash([
+        'POST /photos',
+        checksum,
+        'MEMORY',
+        null,
+        'Jardín',
+        FOLDER,
+      ]),
       responseStatus: 201,
       responseBody: { photo: { id: ID } },
       completedAt: NOW,

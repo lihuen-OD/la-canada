@@ -12,13 +12,17 @@ import { normalizeText } from './moreLabels';
  */
 
 export const PHOTO_FOLDER_NAME_MAX = 80;
-export const UNFILED_LABEL = 'Sin carpeta';
+/** Fotos anteriores a las carpetas que todavía no tienen una (no es una carpeta). */
+export const TO_ORGANIZE_LABEL = 'Fotos por organizar';
 export const ALL_PHOTOS_LABEL = 'Todas las fotos';
 export const FOLDER_ICON = '📁';
-export const UNFILED_ICON = '🗂️';
+export const TO_ORGANIZE_ICON = '🗂️';
 export const ALL_PHOTOS_ICON = '🖼️';
 
-const RESERVED = new Set([UNFILED_LABEL, ALL_PHOTOS_LABEL].map((name) => name.toLowerCase()));
+/** Mismos nombres reservados que el backend (incluido el anterior «Sin carpeta»). */
+const RESERVED = new Set(
+  [ALL_PHOTOS_LABEL, TO_ORGANIZE_LABEL, 'Sin carpeta'].map((name) => name.toLowerCase()),
+);
 
 /** El mismo nombre visible que guardará el backend (NFC, sin espacios de más). */
 export const normalizeFolderName = (value: string) => normalizeText(value.normalize('NFC'));
@@ -31,7 +35,7 @@ export function folderNameError(name: string): string | null {
   }
   if (/[<>]/.test(name)) return 'El nombre no puede contener «<» ni «>».';
   if (RESERVED.has(name.toLowerCase())) {
-    return '«Sin carpeta» y «Todas las fotos» son accesos de Fotos: elegí otro nombre.';
+    return '«Todas las fotos», «Fotos por organizar» y «Sin carpeta» son nombres reservados de Fotos: elegí otro.';
   }
   return null;
 }
@@ -50,10 +54,13 @@ export function comparePhotoFolders(
   );
 }
 
-/** Ruta SPA de cada parte de la galería (se puede recargar o compartir). */
+/**
+ * Ruta SPA de cada parte de la galería (se puede recargar o compartir). La
+ * anterior `/more/photos/unfiled` redirige a «Fotos por organizar».
+ */
 export function photoScopePath(scope: PhotoScope): string {
   if (scope === 'all') return '/more/photos/all';
-  if (scope === 'none') return '/more/photos/unfiled';
+  if (scope === 'none') return '/more/photos/to-organize';
   return `/more/photos/folders/${scope}`;
 }
 
@@ -65,7 +72,7 @@ export const isMissingFolder = (value: string | null, folders: readonly PhotoFol
 
 /** Nombre de la carpeta de una foto según el listado cargado. */
 export function folderLabel(folders: readonly PhotoFolder[] | undefined, folderId: string | null) {
-  if (folderId === null) return UNFILED_LABEL;
+  if (folderId === null) return 'Por organizar';
   return folders?.find((folder) => folder.id === folderId)?.name ?? 'Carpeta';
 }
 
