@@ -259,7 +259,17 @@ export interface ListTasksFilters {
   status: 'active' | 'inactive' | 'all';
 }
 
-export async function listTasks(actor: TaskActor, filters: ListTasksFilters, now = new Date()) {
+/**
+ * `keepCompletedUrgent`: solo para el KPI operativo de Inicio («Tareas
+ * completadas»), que sigue contando las urgentes completadas como siempre;
+ * el listado de Tareas las oculta.
+ */
+export async function listTasks(
+  actor: TaskActor,
+  filters: ListTasksFilters,
+  now = new Date(),
+  options: { keepCompletedUrgent?: boolean } = {},
+) {
   if (filters.status !== 'active' && actor.role !== 'ADMIN') {
     throw new ForbiddenError('Solo un administrador puede ver tareas desactivadas.');
   }
@@ -286,12 +296,18 @@ export async function listTasks(actor: TaskActor, filters: ListTasksFilters, now
         today,
       ),
     )
-    // Una tarea única ya completada sale del listado operativo (como en el
-    // prototipo): se conserva en base y en el historial, y un ADMIN la ve
-    // con `status=all`.
+    // Una «Una vez» (como en el prototipo) o una urgente ya completada sale
+    // del listado operativo: no se borra ni se desactiva, se conserva en base,
+    // en el historial y en Desempeño, un ADMIN la ve con `status=all` y, si se
+    // deshace su finalización, vuelve pendiente (si la tarea sigue activa).
     .filter(
       (task) =>
-        !(filters.status === 'active' && task.frequency === 'ONE_TIME' && task.currentExecution),
+        !(
+          filters.status === 'active' &&
+          task.currentExecution &&
+          (task.frequency === 'ONE_TIME' ||
+            (task.frequency === 'URGENT' && !options.keepCompletedUrgent))
+        ),
     )
     .sort(compareOperationalOrder);
 

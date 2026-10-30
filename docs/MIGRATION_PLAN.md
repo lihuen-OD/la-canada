@@ -368,6 +368,10 @@ Con el código de esta etapa ya validado (ver checklist más abajo), crear el pr
 - **Decisiones**: `input type="date"` nativo (el mismo de los formularios de Tareas, sin dependencias) con `min`/`max` del rango; el detalle informa `execution: { id, canRevert }` con la MISMA regla de `revertTaskCompletion` (`canRevertExecution`), que sigue siendo la autoridad; reversión, diálogo, auditoría e invalidaciones existentes.
 - **Sin migración ni cambios de datos.** Pendiente en `production` (cambio anterior): `20261030120000_task_execution_performed_on`.
 
+### Urgentes completadas fuera del listado de Tareas 🟢 implementado y validado en `demo` (2026-10-30)
+
+- Pedido explícito del usuario: el listado operativo oculta las urgentes completadas como las «Una vez» (se conservan en historial, Desempeño y la vista de gestión del ADMIN; deshacer las devuelve si siguen activas). Inicio conserva su KPI. Sin migración. Detalle en `docs/ARCHITECTURE.md` §47. Pendiente en `production` (cambio anterior): `20261030120000_task_execution_performed_on`.
+
 ## Etapa 6 — Integrar Neon Object Storage (fotografías y archivos)
 
 - **Objetivo**: conectar `FileAsset` (ya modelado en la Etapa 2, adaptado a Neon Object Storage en la Etapa 2.2) con el Object Storage real de Neon, gestionado desde el backend.

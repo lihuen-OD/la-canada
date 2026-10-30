@@ -322,7 +322,7 @@ export function TasksScreen() {
               checked={showAll}
               onChange={(event) => setShowAll(event.target.checked)}
             />
-            Incluir desactivadas y únicas ya completadas
+            Incluir desactivadas y completadas («Una vez» y urgentes)
           </label>
         ) : null}
       </div>
@@ -335,11 +335,21 @@ export function TasksScreen() {
             description={isAdmin ? 'Creá la primera con «Nueva tarea».' : undefined}
           />
         ) : visible.length === 0 ? (
-          <EmptyState
-            icon={<span aria-hidden="true">✅</span>}
-            title="No hay tareas con estos filtros."
-            description="Probá con otra persona o frecuencia."
-          />
+          // Las urgentes completadas salen del listado (como las «Una vez»):
+          // el vacío lo dice, en vez de sugerir que no existen.
+          frequency === 'URGENT' && !showAll ? (
+            <EmptyState
+              icon={<span aria-hidden="true">✅</span>}
+              title="No hay urgentes pendientes."
+              description="Las urgentes completadas se consultan en el historial y en Desempeño."
+            />
+          ) : (
+            <EmptyState
+              icon={<span aria-hidden="true">✅</span>}
+              title="No hay tareas con estos filtros."
+              description="Probá con otra persona o frecuencia."
+            />
+          )
         ) : (
           <ul className="task-list" role="list" aria-label="Tareas del período">
             {visible.map((task) => (

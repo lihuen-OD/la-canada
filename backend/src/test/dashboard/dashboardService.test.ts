@@ -131,7 +131,10 @@ describe('getDashboard', () => {
         },
       ],
     });
-    expect(mocks.listTasks).toHaveBeenCalledWith(actor, { status: 'active' }, expect.any(Date));
+    // El KPI cuenta las urgentes completadas (el listado de Tareas las oculta).
+    expect(mocks.listTasks).toHaveBeenCalledWith(actor, { status: 'active' }, expect.any(Date), {
+      keepCompletedUrgent: true,
+    });
   });
 
   it('alertas de reposición: solo críticos (igual al mínimo incluido), nunca bajos; activos', async () => {

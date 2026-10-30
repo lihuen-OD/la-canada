@@ -46,6 +46,8 @@ El detalle completo está en `docs/`. Este archivo no repite ese contenido: defi
 
 ## Estado actual
 
+**Actualización Urgentes completadas (`demo`, 2026-10-30):** el listado operativo de Tareas oculta las urgentes completadas como las «Una vez» (mismo filtro de `listTasks`, solo `status=active`); siguen en historial, Desempeño y la vista de gestión del ADMIN, y deshacer las devuelve si la tarea está activa. Inicio conserva su KPI (`keepCompletedUrgent`). Sin migración. Ver `docs/ARCHITECTURE.md` §47.
+
 **Actualización Detalle: calendario y «Deshacer» (`demo`, 2026-10-30):** el filtro de día del detalle de Desempeño es un calendario (`input type="date"` limitado al rango, «Todas las fechas» para quitarlo); las acciones son compactas («Marcar realizada», «Deshacer», 44 px táctiles) y «Deshacer» aparece en toda ejecución vigente que el backend permite revertir (`execution.canRevert` del detalle, misma regla y mismo `POST /tasks/:id/revert`). Sin migración. Migraciones pendientes en `production`: solo `20261030120000_task_execution_performed_on`. Ver `docs/ARCHITECTURE.md` §46.
 
 **Actualización Desempeño → Detalle (`demo`, 2026-10-30):** el detalle de Tareas muestra las obligaciones más recientes primero, agrupadas por día (recurrentes largas en el primer día de su período, mostrado completo; sin fecha al final), con filtros de fecha, frecuencia y estado («Cubrió a otros» aparte) y «Ver más» de a 20. Filtros, orden y páginas en el backend (parámetros opcionales de `GET /performance/employees/:id`, cursor sobre un orden total; sin ellos, la respuesta de siempre); las métricas siguen siendo las de todo el rango. Huerta sin cambios. Sin migración. Ver `docs/ARCHITECTURE.md` §45.
