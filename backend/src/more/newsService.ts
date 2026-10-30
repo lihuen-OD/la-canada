@@ -1,5 +1,6 @@
 import type { z } from 'zod';
-import type { Prisma } from '../generated/prisma/client';
+import { Prisma } from '../generated/prisma/client';
+import { findUserIdentities } from '../lib/userIdentity';
 import { config } from '../config';
 import { recordAuditLog } from '../auth/auditLog';
 import {
@@ -56,8 +57,54 @@ export async function listNews(filters: { page: number; pageSize: number }) {
       take: filters.pageSize,
     }),
   ]);
+  const statsRows =
+    rows.length === 0
+      ? []
+      : await prisma.$queryRaw<
+          { newsReportId: string; replyCount: bigint; latestAuthorUserId: string; latestAt: Date }[]
+        >(Prisma.sql`
+          SELECT ranked."news_report_id"::text AS "newsReportId",
+            ranked."reply_count" AS "replyCount",
+            ranked."author_user_id"::text AS "latestAuthorUserId",
+            ranked."created_at" AS "latestAt"
+          FROM (
+            SELECT nr."news_report_id", nr."author_user_id", nr."created_at",
+              COUNT(*) OVER (PARTITION BY nr."news_report_id") AS "reply_count",
+              ROW_NUMBER() OVER (
+                PARTITION BY nr."news_report_id"
+                ORDER BY nr."created_at" DESC, nr."id" DESC
+              ) AS "position"
+            FROM "news_replies" nr
+            WHERE nr."news_report_id" IN (${Prisma.join(
+              rows.map((row) => Prisma.sql`${row.id}::uuid`),
+            )})
+          ) ranked
+          WHERE ranked."position" = 1`);
+  const identities = await findUserIdentities(
+    prisma,
+    statsRows.map((row) => row.latestAuthorUserId),
+  );
+  const statsByNewsId = new Map<
+    string,
+    {
+      replyCount: number;
+      lastReply: { createdAt: string; author: { displayName: string } };
+    }
+  >();
+  for (const row of statsRows) {
+    const identity = identities.get(row.latestAuthorUserId);
+    if (!identity) throw new Error('No se pudo resolver el nombre visible de la última respuesta.');
+    statsByNewsId.set(row.newsReportId, {
+      replyCount: Number(row.replyCount),
+      lastReply: { createdAt: row.latestAt.toISOString(), author: identity.identity },
+    });
+  }
   return {
-    news: rows.map(serializeNews),
+    news: rows.map((row) => ({
+      ...serializeNews(row),
+      replyCount: statsByNewsId.get(row.id)?.replyCount ?? 0,
+      lastReply: statsByNewsId.get(row.id)?.lastReply ?? null,
+    })),
     page: filters.page,
     pageSize: filters.pageSize,
     total,

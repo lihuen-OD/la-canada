@@ -12,6 +12,7 @@ import {
   getMoreSummaryHandler,
   getMyProfileHandler,
   getNewsHandler,
+  getNewsRepliesHandler,
   getPhotoContentHandler,
   getPhotosHandler,
   getTeamProfilesHandler,
@@ -31,6 +32,7 @@ import {
   postMyChildHandler,
   postMyFamilyHandler,
   postNewsHandler,
+  postNewsReplyHandler,
   postPhotoHandler,
   postRemoveMyChildHandler,
   putMyProfileHandler,
@@ -50,6 +52,8 @@ export const newsRouter = Router();
 newsRouter.use(requireAuth);
 newsRouter.get('/', getNewsHandler);
 newsRouter.post('/', requireJsonContentType, postNewsHandler);
+newsRouter.get('/:id/replies', getNewsRepliesHandler);
+newsRouter.post('/:id/replies', requireJsonContentType, postNewsReplyHandler);
 
 export const eventsRouter = Router();
 eventsRouter.use(requireAuth);

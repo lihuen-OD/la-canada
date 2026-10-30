@@ -30,6 +30,8 @@ export const newsResponse = (count = 1): NewsListResponse => ({
     text: `Aviso sintético ${index}`,
     createdAt: new Date(Date.now() - 3 * 3600_000).toISOString(),
     employee: PERSON,
+    replyCount: 0,
+    lastReply: null,
   })),
   page: 1,
   pageSize: 20,

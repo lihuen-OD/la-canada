@@ -602,3 +602,10 @@ Cambios de esta revisión:
   2. *IP detrás de proxies*: `TRUST_PROXY_HOPS` acotado (0 a 3, nunca `true`); falta el dato de topología para el valor productivo.
   3. *Escrituras sin conexión*: no había `useMutation` (nada se encolaba; el cierre anterior lo afirmó por error); ahora ninguna escritura sale sin Internet (`OfflineError`, mensaje claro, datos conservados, reintento manual) y `mutations.networkMode = 'always'` por defensa.
   - Validación: tests unitarios y HTTP del protocolo, IP efectiva y rate limit por IP, persistencia del intento, escrituras sin conexión, suites completas, typecheck, lint, build, format; revisión visual aislada (simulador en puertos propios) en móvil y escritorio.
+
+## Etapa 5X.1 — Conversaciones por novedad ✅ implementada y validada en `demo`
+
+- **Alcance**: conversaciones planas por novedad con respuestas paginadas, citas del mismo hilo, identidad desde la sesión, auditoría e idempotencia transaccional. ADMIN y EMPLOYEE autenticados y activos leen/responden; el alta original y «¿Quién reporta?» no cambian. Sin edición/eliminación, notificaciones ni cambios en Inicio.
+- **Migración**: `20261030130000_news_replies`, tabla nueva vacía `news_replies`, índices compuestos y FKs `RESTRICT`, incluida la cita dentro de la misma novedad. Revisada offline y aplicada solo a `demo`; sin seed, backfill, `db push`, reset ni cambios de datos reales. Pendiente en `production`.
+- **Validación**: lint, typecheck de frontend/backend, build y format:check en verde. Frontend `MoreModule.test.tsx`: 51/51; backend de rutas/guardas/schema: 45/45; integración `more.integration.test.ts` contra `demo`: 18/18 con fixtures sintéticos, limpieza y verificación de conteos. Revisión visual sintética en 360, 390 y 1366 px sin desbordamiento horizontal; navegación desde «Más» a Novedades sin refresh adicional de sesión. Bundle principal: 512.98 kB (139.66 kB gzip); el build termina en verde y advierte que supera el umbral Vite de 500 kB. No se midió delta contra el bundle previo.
+- **Fuera de alcance**: adjuntos, reacciones, edición de respuestas, notificaciones push, WebSockets y conexión con otros módulos.

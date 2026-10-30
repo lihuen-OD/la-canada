@@ -26,9 +26,36 @@ export interface NewsItem {
   text: string;
   createdAt: string;
   employee: PersonRef;
+  replyCount: number;
+  lastReply: { createdAt: string; author: { displayName: string } } | null;
 }
 export interface NewsListResponse extends Page {
   news: NewsItem[];
+}
+export interface NewsReplyQuote {
+  id: string;
+  text: string;
+  author: { displayName: string };
+}
+export interface NewsReply {
+  id: string;
+  text: string;
+  createdAt: string;
+  author: { displayName: string };
+  quote: NewsReplyQuote | null;
+}
+export interface NewsReplyCursor {
+  createdAt: string;
+  id: string;
+}
+export interface NewsRepliesPage {
+  replies: NewsReply[];
+  hasOlder: boolean;
+  nextCursor: NewsReplyCursor | null;
+}
+export interface CreateNewsReplyRequest {
+  text: string;
+  quotedReplyId?: string;
 }
 
 // 📅 Eventos

@@ -13,11 +13,13 @@ import {
   createEventBodySchema,
   createFamilyMemberBodySchema,
   createNewsBodySchema,
+  createNewsReplyBodySchema,
   employeeStatusBodySchema,
   familyStatusBodySchema,
   idParamSchema,
   listEventsQuerySchema,
   listNewsQuerySchema,
+  listNewsRepliesQuerySchema,
   listPhotosQuerySchema,
   teamProfilesQuerySchema,
   updateEmployeeBodySchema,
@@ -28,6 +30,7 @@ import {
   uploadPhotoQuerySchema,
 } from '../more/moreSchemas';
 import { createNews, listNews } from '../more/newsService';
+import { createNewsReply, listNewsReplies } from '../more/newsRepliesService';
 import { createEvent, deleteEvent, listEvents, updateEvent } from '../more/eventsService';
 import { getWeather } from '../more/weatherService';
 import {
@@ -117,6 +120,35 @@ export async function postNewsHandler(req: Request, res: Response): Promise<void
   const actor = await actorFrom(req);
   const input = parseOrThrow(createNewsBodySchema, req.body, 'Datos de la novedad inválidos.');
   const result = await createNews(actor, input, requestMeta(req), idempotencyKeyOf(req));
+  send(res, result.kind === 'replay' ? result.status : 201, result.body);
+}
+
+export async function getNewsRepliesHandler(req: Request, res: Response): Promise<void> {
+  await actorFrom(req);
+  const newsId = idFrom(req.params.id, 'novedad');
+  const query = parseOrThrow(
+    listNewsRepliesQuerySchema,
+    req.query,
+    'Filtros de respuestas inválidos.',
+  );
+  send(res, 200, await listNewsReplies(newsId, query));
+}
+
+export async function postNewsReplyHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const newsId = idFrom(req.params.id, 'novedad');
+  const input = parseOrThrow(
+    createNewsReplyBodySchema,
+    req.body,
+    'Datos de la respuesta inválidos.',
+  );
+  const result = await createNewsReply(
+    actor,
+    newsId,
+    input,
+    requestMeta(req),
+    idempotencyKeyOf(req),
+  );
   send(res, result.kind === 'replay' ? result.status : 201, result.body);
 }
 

@@ -509,6 +509,14 @@ Migración `20260925200000_more_module` (offline con `prisma migrate diff`, revi
 - `file_assets.title` (nullable; `null` en fotos de ficha de mascota) e índice `(category, status, created_at)` para la galería.
 - Precondición en `READ ONLY` (2 novedades y 2 eventos reales, sin duplicados; 0 archivos; 0 perfiles/hijos); aplicada a `demo` el 2026-09-25 con `db:migrate:deploy` y verificada en `pg_indexes`/`pg_constraint`/`information_schema`. `production` intacta. Los cumpleaños no tienen tabla nueva: se derivan de `RecurringBirthday`, `EmployeeProfile.birthDate`, `EmployeeChild.birthDate` y `Animal.birthDate`.
 
+### Conversaciones por novedad — `20261030130000_news_replies` (aplicada solo a `demo`)
+
+- Tabla nueva `news_replies`: `id` UUID, `news_report_id`, `author_user_id`, `text`, `created_at DEFAULT CURRENT_TIMESTAMP` y `quoted_reply_id` opcional. El UUID se genera en Prisma; la fecha es del servidor. No se agregaron ni actualizaron columnas de `news_reports` y no se reescribió ninguna novedad existente.
+- FK `news_report_id → news_reports.id` y `author_user_id → users.id`, ambas `ON DELETE RESTRICT`. La cita referencia `(id, news_report_id)` de otra fila de `news_replies`, también con `RESTRICT`; esto hace cumplir que una cita no cruce de novedad aun si se eludiera la validación del servicio. No hay cascadas ni operaciones de borrado de conversaciones en la aplicación.
+- Índice `(news_report_id, created_at, id)` para buscar páginas de 20 respuestas por cursor estable; índice único `(id, news_report_id)` como clave referenciada por la FK compuesta.
+- La clave del intento no se duplica como columna en `news_replies`: `IdempotencyRecord` ya conserva actor, endpoint con ID de la novedad, clave, huella y respuesta, y `executeIdempotent` confirma reserva, respuesta y auditoría en una transacción. No se purgan ni se reescriben registros previos.
+- SQL generado offline con `prisma migrate diff` desde el schema de `517a5e5`, comparado exactamente con el archivo versionado; solo CREATE TABLE/INDEX y ALTER ADD FOREIGN KEY, sin `DROP`, `DELETE`, `UPDATE`, `TRUNCATE`, `CASCADE` ni backfill. Estado previo en `demo`: 22 migraciones conocidas, exactamente esta pendiente. Guarda de destino confirmó `DATABASE_TARGET=demo`; desplegada allí con `db:migrate:deploy`. Pendiente en `production`.
+
 ### Etapa 5Y — Jardín: versiones del plano (aplicada a `demo`)
 
 Migración `20260928100000_garden_plan_versions` (offline con `prisma migrate diff --from-schema <schema 5X> --to-schema <schema 5Y>`, revisada; solo agrega, sin `DROP`/`TRUNCATE`/`DELETE`/`INSERT`):
@@ -597,4 +605,3 @@ Módulo propio, independiente de Tareas: cuatro tablas NUEVAS y vacías; ninguna
 - **CHECK** (a mano): `task_executions_performed_on_not_after_completion_check` — `performed_on IS NULL OR performed_on <= (completed_at + INTERVAL '14 hours')::date`. Sumar 14 h (el mayor adelanto horario existente) a `completed_at` (UTC) hace que valga para cualquier zona de negocio sin fijarla en SQL. Probado contra `demo` (`tasksLateCompletion.integration.test.ts`).
 - **Sin índices nuevos**: la unicidad sigue siendo el índice parcial `(task_id, period_key) WHERE reverted_at IS NULL` (una ejecución vigente por tarea y período, también para la carga olvidada y ante solicitudes concurrentes).
 - **Sin backfill, UPDATE ni DELETE**; ninguna migración anterior se modificó. Verificado en `demo` antes y después en `READ ONLY` (2026-10-30, `db:migrate:deploy` con `DATABASE_TARGET=demo`, 21 de 21 al día): 25 tareas, 15 ejecuciones (todas con `performed_on` NULL), 25 intervalos, 38 auditorías `task.*`, 4 empleados y los datos de la Huerta con sumas de verificación idénticas de sus columnas anteriores.
-

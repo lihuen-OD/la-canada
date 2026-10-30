@@ -46,6 +46,8 @@ El detalle completo está en `docs/`. Este archivo no repite ese contenido: defi
 
 ## Estado actual
 
+**Actualización Conversaciones por novedad (`demo`, 2026-10-30):** Etapa 5X.1 implementada: respuestas planas, paginación, citas dentro de la misma novedad, identidad de sesión, auditoría e idempotencia; ADMIN y EMPLOYEE autenticados y activos. Migración `20261030130000_news_replies` aplicada solo a `demo`, sin backfill ni cambios a novedades existentes; pendiente en `production`. Pruebas: frontend 51/51, backend enfocado 45/45 e integración contra `demo` 18/18 con fixtures sintéticos y limpieza; lint, typecheck, build y format:check pasan. Revisión visual sintética en 360, 390 y 1366 px sin desbordamiento. No hubo deploy, PR ni merge.
+
 **Actualización Urgentes completadas (`demo`, 2026-10-30):** el listado operativo de Tareas oculta las urgentes completadas como las «Una vez» (mismo filtro de `listTasks`, solo `status=active`); siguen en historial, Desempeño y la vista de gestión del ADMIN, y deshacer las devuelve si la tarea está activa. Inicio conserva su KPI (`keepCompletedUrgent`). Sin migración. Ver `docs/ARCHITECTURE.md` §47.
 
 **Actualización Detalle: calendario y «Deshacer» (`demo`, 2026-10-30):** el filtro de día del detalle de Desempeño es un calendario (`input type="date"` limitado al rango, «Todas las fechas» para quitarlo); las acciones son compactas («Marcar realizada», «Deshacer», 44 px táctiles) y «Deshacer» aparece en toda ejecución vigente que el backend permite revertir (`execution.canRevert` del detalle, misma regla y mismo `POST /tasks/:id/revert`). Sin migración. Migraciones pendientes en `production`: solo `20261030120000_task_execution_performed_on`. Ver `docs/ARCHITECTURE.md` §46.

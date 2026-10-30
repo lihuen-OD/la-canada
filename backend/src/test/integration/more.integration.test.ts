@@ -79,6 +79,7 @@ async function countStatements<T>(run: () => Promise<T>): Promise<{ result: T; s
 async function globalCounts() {
   return {
     news: await prisma.newsReport.count(),
+    newsReplies: await prisma.newsReply.count(),
     events: await prisma.event.count(),
     birthdays: await prisma.recurringBirthday.count(),
     files: await prisma.fileAsset.count(),
@@ -183,6 +184,12 @@ afterAll(async () => {
   const eventIds = (
     await prisma.event.findMany({ where: { title: { startsWith: RUN } }, select: { id: true } })
   ).map((row) => row.id);
+  const newsReplyIds = (
+    await prisma.newsReply.findMany({
+      where: { newsReportId: { in: newsIds } },
+      select: { id: true },
+    })
+  ).map((row) => row.id);
   const fileIds = (
     await prisma.fileAsset.findMany({ where: { title: { startsWith: RUN } }, select: { id: true } })
   ).map((row) => row.id);
@@ -197,13 +204,18 @@ afterAll(async () => {
     where: {
       OR: [
         { actorUserId: { in: userIds } },
-        { entityId: { in: [...newsIds, ...eventIds, ...fileIds, ...childIds, ...employeeIds] } },
+        {
+          entityId: {
+            in: [...newsIds, ...newsReplyIds, ...eventIds, ...fileIds, ...childIds, ...employeeIds],
+          },
+        },
       ],
     },
   });
   // Defensa: un trabajo de copia de estas fotos (FK RESTRICT) impediría borrarlas.
   await prisma.driveBackupJob.deleteMany({ where: { fileAssetId: { in: fileIds } } });
   await prisma.fileAsset.deleteMany({ where: { id: { in: fileIds } } });
+  await prisma.newsReply.deleteMany({ where: { id: { in: newsReplyIds } } });
   await prisma.newsReport.deleteMany({ where: { id: { in: newsIds } } });
   await prisma.event.deleteMany({ where: { id: { in: eventIds } } });
   await prisma.employeeChild.deleteMany({ where: { id: { in: childIds } } });
@@ -267,7 +279,7 @@ describe('📝 Novedades', () => {
     expect(result.body.news).toHaveLength(2);
     expect(result.body.news[0].text).toBe(`${RUN} desde admin`);
     expect(result.body.total).toBeGreaterThanOrEqual(5);
-    expect(sql.length).toBeLessThanOrEqual(4); // auth + conteo + página + empleados
+    expect(sql.length).toBeLessThanOrEqual(5); // auth + conteo + página + aggregate de respuestas + nombres
   });
 });
 
@@ -531,6 +543,202 @@ describe('⚙️ Personas y 👤 Mi perfil', () => {
       .send({});
     expect(removed.status).toBe(200);
     expect(await prisma.employeeChild.count({ where: { id: childId } })).toBe(0);
+  });
+});
+
+describe('💬 Conversaciones por novedad', () => {
+  async function createSyntheticNews(text: string) {
+    const news = await prisma.newsReport.create({
+      data: {
+        employeeId,
+        text: `${RUN} ${text}`,
+        recordedByUserId: employee.userId,
+        createdAt: new Date('2020-01-02T03:04:05.000Z'),
+      },
+      select: { id: true, text: true, createdAt: true },
+    });
+    return news;
+  }
+
+  it('ADMIN sin Employee y EMPLOYEE responden con autor de sesión; el hilo no altera la novedad', async () => {
+    const news = await createSyntheticNews('La bomba de riego hace ruido');
+    const anotherNews = await createSyntheticNews('Otro aviso independiente');
+    const first = await request(app)
+      .post(`/api/v1/news/${news.id}/replies`)
+      .set(as(admin))
+      .set('Idempotency-Key', key())
+      .send({ text: '  Mañana viene el técnico  ' });
+    expect(first.status).toBe(201);
+    expect(first.body.reply).toMatchObject({
+      text: 'Mañana viene el técnico',
+      author: { displayName: 'Administrador' },
+      quote: null,
+    });
+
+    const quoted = await request(app)
+      .post(`/api/v1/news/${news.id}/replies`)
+      .set(as(employee))
+      .set('Idempotency-Key', key())
+      .send({ text: 'Perfecto, la dejo apagada', quotedReplyId: first.body.reply.id });
+    expect(quoted.status).toBe(201);
+    expect(quoted.body.reply).toMatchObject({
+      author: { displayName: `Sintético ${NAME_TAG}` },
+      quote: {
+        id: first.body.reply.id,
+        text: 'Mañana viene el técnico',
+        author: { displayName: 'Administrador' },
+      },
+    });
+
+    const crossThreadQuote = await request(app)
+      .post(`/api/v1/news/${anotherNews.id}/replies`)
+      .set(as(employee))
+      .set('Idempotency-Key', key())
+      .send({ text: 'No corresponde', quotedReplyId: first.body.reply.id });
+    expect(crossThreadQuote.status).toBe(400);
+    expect(crossThreadQuote.body.error.code).toBe('NEWS_REPLY_QUOTE_INVALID');
+
+    const spoof = await request(app)
+      .post(`/api/v1/news/${news.id}/replies`)
+      .set(as(employee))
+      .set('Idempotency-Key', key())
+      .send({ text: 'No se acepta el autor del cliente', authorUserId: admin.userId });
+    expect(spoof.status).toBe(400);
+    expect(await prisma.auditLog.count({ where: { entityId: quoted.body.reply.id } })).toBe(1);
+    expect(await prisma.newsReport.findUniqueOrThrow({ where: { id: news.id } })).toMatchObject({
+      text: news.text,
+      createdAt: news.createdAt,
+    });
+    expect(
+      (await request(app).get(`/api/v1/news/${anotherNews.id}/replies`).set(as(employee))).body
+        .replies,
+    ).toHaveLength(0);
+  });
+
+  it('reintentos reproducen la respuesta; otra carga con la misma clave da conflicto', async () => {
+    const news = await createSyntheticNews('Idempotencia sintética');
+    const idem = key();
+    const body = { text: `${RUN} envío único\ncon salto` };
+    const first = await request(app)
+      .post(`/api/v1/news/${news.id}/replies`)
+      .set(as(employee))
+      .set('Idempotency-Key', idem)
+      .send(body);
+    const replay = await request(app)
+      .post(`/api/v1/news/${news.id}/replies`)
+      .set(as(employee))
+      .set('Idempotency-Key', idem)
+      .send(body);
+    const conflict = await request(app)
+      .post(`/api/v1/news/${news.id}/replies`)
+      .set(as(employee))
+      .set('Idempotency-Key', idem)
+      .send({ text: 'otro contenido' });
+    const differentAttempt = await request(app)
+      .post(`/api/v1/news/${news.id}/replies`)
+      .set(as(employee))
+      .set('Idempotency-Key', key())
+      .send(body);
+    const missingKey = await request(app)
+      .post(`/api/v1/news/${news.id}/replies`)
+      .set(as(employee))
+      .send({ text: 'sin clave' });
+
+    expect([
+      first.status,
+      replay.status,
+      conflict.status,
+      differentAttempt.status,
+      missingKey.status,
+    ]).toEqual([201, 201, 409, 201, 400]);
+    expect(replay.body.reply.id).toBe(first.body.reply.id);
+    expect(first.body.reply.text).toBe(`${RUN} envío único\ncon salto`);
+    expect(conflict.body.error.code).toBe('IDEMPOTENCY_KEY_CONFLICT');
+    expect(differentAttempt.body.reply.id).not.toBe(first.body.reply.id);
+    expect(await prisma.newsReply.count({ where: { newsReportId: news.id } })).toBe(2);
+  });
+
+  it('valida texto y acepta dos respuestas simultáneas legítimas', async () => {
+    const news = await createSyntheticNews('Validación y concurrencia');
+    const empty = await request(app)
+      .post(`/api/v1/news/${news.id}/replies`)
+      .set(as(employee))
+      .set('Idempotency-Key', key())
+      .send({ text: ' \n\t ' });
+    const tooLong = await request(app)
+      .post(`/api/v1/news/${news.id}/replies`)
+      .set(as(employee))
+      .set('Idempotency-Key', key())
+      .send({ text: 'x'.repeat(1001) });
+    const concurrent = await Promise.all(
+      [admin, employee].map((actor, index) =>
+        request(app)
+          .post(`/api/v1/news/${news.id}/replies`)
+          .set(as(actor))
+          .set('Idempotency-Key', key())
+          .send({ text: `${RUN} concurrent-${index}` }),
+      ),
+    );
+    expect([empty.status, tooLong.status]).toEqual([400, 400]);
+    expect(concurrent.map((response) => response.status)).toEqual([201, 201]);
+    expect(await prisma.newsReply.count({ where: { newsReportId: news.id } })).toBe(2);
+  });
+
+  it('pagina más de 40 respuestas con cursor estable y no devuelve cuerpos en el historial', async () => {
+    const news = await createSyntheticNews('Paginación sintética');
+    const ids = Array.from({ length: 41 }, () => crypto.randomUUID());
+    const sharedTimestamp = new Date('2026-10-29T12:00:00.000Z');
+    await prisma.newsReply.createMany({
+      data: ids.map((id, index) => ({
+        id,
+        newsReportId: news.id,
+        authorUserId: admin.userId,
+        text: `${RUN} página-${index}`,
+        createdAt: sharedTimestamp,
+      })),
+    });
+
+    const first = await request(app).get(`/api/v1/news/${news.id}/replies`).set(as(employee));
+    const second = await request(app)
+      .get(`/api/v1/news/${news.id}/replies`)
+      .query({
+        beforeCreatedAt: first.body.nextCursor.createdAt,
+        beforeId: first.body.nextCursor.id,
+      })
+      .set(as(employee));
+    const third = await request(app)
+      .get(`/api/v1/news/${news.id}/replies`)
+      .query({
+        beforeCreatedAt: second.body.nextCursor.createdAt,
+        beforeId: second.body.nextCursor.id,
+      })
+      .set(as(employee));
+    expect(first.status).toBe(200);
+    expect(first.body.replies).toHaveLength(20);
+    expect(second.body.replies).toHaveLength(20);
+    expect(third.body.replies).toHaveLength(1);
+    expect([first.body.hasOlder, second.body.hasOlder, third.body.hasOlder]).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    const pages = [first, second, third].flatMap((page) => page.body.replies);
+    expect(new Set(pages.map((reply) => reply.id)).size).toBe(41);
+    expect(pages.map((reply) => reply.id).sort((a, b) => a.localeCompare(b))).toEqual(
+      [...ids].sort((a, b) => a.localeCompare(b)),
+    );
+
+    const history = await request(app).get('/api/v1/news?pageSize=50').set(as(employee));
+    const listed = history.body.news.find((item: { id: string }) => item.id === news.id);
+    expect(listed).toMatchObject({
+      replyCount: 41,
+      lastReply: {
+        author: { displayName: 'Administrador' },
+        createdAt: sharedTimestamp.toISOString(),
+      },
+    });
+    expect(listed).not.toHaveProperty('replies');
+    expect(JSON.stringify(listed)).not.toContain(`${RUN} página-`);
   });
 });
 

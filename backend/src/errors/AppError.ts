@@ -521,6 +521,20 @@ export class EventNotFoundError extends AppError {
   }
 }
 
+export class NewsNotFoundError extends AppError {
+  constructor() {
+    super('La novedad no existe.', 404, { code: 'NEWS_NOT_FOUND' });
+  }
+}
+
+export class NewsReplyQuoteInvalidError extends AppError {
+  constructor() {
+    super('La respuesta citada no pertenece a esta novedad.', 400, {
+      code: 'NEWS_REPLY_QUOTE_INVALID',
+    });
+  }
+}
+
 /** Mismo título, fecha y tipo que otro evento vigente. */
 export class EventDuplicateError extends AppError {
   constructor() {

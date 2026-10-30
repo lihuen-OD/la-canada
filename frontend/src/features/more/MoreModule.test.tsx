@@ -24,6 +24,8 @@ const api = vi.hoisted(() => ({
   fetchMoreSummary: vi.fn(),
   fetchNews: vi.fn(),
   createNews: vi.fn(),
+  fetchNewsReplies: vi.fn(),
+  createNewsReply: vi.fn(),
   fetchEvents: vi.fn(),
   createEvent: vi.fn(),
   updateEvent: vi.fn(),
@@ -224,6 +226,128 @@ describe('📝 Novedades', () => {
     api.fetchNews.mockResolvedValue(newsResponse(0));
     renderMore('/more/news');
     expect(await screen.findByText('Sin novedades aún')).toBeInTheDocument();
+  });
+
+  it('carga solo al abrir, enfoca Responder y envía saltos de línea con una clave estable', async () => {
+    const user = userEvent.setup();
+    const reply = {
+      id: 'reply-1',
+      text: 'Mañana viene el técnico\nA primera hora.',
+      createdAt: new Date().toISOString(),
+      author: { displayName: 'Administrador' },
+      quote: null,
+    };
+    api.fetchNewsReplies.mockResolvedValue({
+      replies: [reply],
+      hasOlder: false,
+      nextCursor: null,
+    });
+    api.createNewsReply.mockResolvedValue({ reply });
+    renderMore('/more/news');
+    await screen.findByText('Aviso sintético 0');
+    expect(api.fetchNewsReplies).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Responder' }));
+    const composer = await screen.findByRole('textbox', { name: 'Escribí una respuesta…' });
+    await waitFor(() => expect(composer).toHaveFocus());
+    expect(api.fetchNewsReplies).toHaveBeenCalledWith('news-0', null);
+
+    await user.type(composer, 'Mañana viene el técnico{enter}A primera hora.');
+    expect(api.createNewsReply).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Enviar' }));
+    await waitFor(() => expect(api.createNewsReply).toHaveBeenCalledTimes(1));
+    const [newsId, body, firstKey] = api.createNewsReply.mock.calls[0] as [
+      string,
+      { text: string },
+      string,
+    ];
+    expect(newsId).toBe('news-0');
+    expect(body).toEqual({ text: reply.text });
+    expect(firstKey).toMatch(/^[0-9a-f]{32}$/);
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: 'Respuestas' }).textContent).toContain(reply.text),
+    );
+  });
+
+  it('conserva el texto y reutiliza la clave al reintentar un envío fallido', async () => {
+    const user = userEvent.setup();
+    api.fetchNewsReplies.mockResolvedValue({ replies: [], hasOlder: false, nextCursor: null });
+    api.createNewsReply
+      .mockRejectedValueOnce(new Error('La red no respondió.'))
+      .mockResolvedValueOnce({
+        reply: {
+          id: 'reply-retry',
+          text: 'Texto que queda',
+          createdAt: new Date().toISOString(),
+          author: { displayName: 'Persona sintética' },
+          quote: null,
+        },
+      });
+    renderMore('/more/news');
+    await screen.findByText('Aviso sintético 0');
+    await user.click(screen.getByRole('button', { name: 'Responder' }));
+    const composer = await screen.findByRole('textbox', { name: 'Escribí una respuesta…' });
+    await user.type(composer, 'Texto que queda');
+    await user.click(screen.getByRole('button', { name: 'Enviar' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('No pudimos comunicarnos');
+    expect(composer).toHaveValue('Texto que queda');
+    await user.click(screen.getByRole('button', { name: 'Enviar' }));
+    await waitFor(() => expect(api.createNewsReply).toHaveBeenCalledTimes(2));
+    expect(api.createNewsReply.mock.calls[0]?.[2]).toBe(api.createNewsReply.mock.calls[1]?.[2]);
+    await waitFor(() => expect(composer).toHaveValue(''));
+  });
+
+  it('muestra la cita devuelta por el servidor y envía solo el ID de la respuesta citada', async () => {
+    const user = userEvent.setup();
+    const oldReply = {
+      id: 'reply-old',
+      text: 'Texto original fuera de la página cargada.',
+      createdAt: new Date(Date.now() - 60_000).toISOString(),
+      author: { displayName: 'Viki' },
+      quote: null,
+    };
+    api.fetchNewsReplies.mockResolvedValue({
+      replies: [
+        {
+          id: 'reply-new',
+          text: 'Mi respuesta',
+          createdAt: new Date().toISOString(),
+          author: { displayName: 'Administrador' },
+          quote: { id: 'reply-old', text: oldReply.text, author: oldReply.author },
+        },
+      ],
+      hasOlder: false,
+      nextCursor: null,
+    });
+    api.createNewsReply.mockResolvedValue({
+      reply: {
+        id: 'reply-quoted',
+        text: 'Lo reviso.',
+        createdAt: new Date().toISOString(),
+        author: { displayName: 'Persona sintética' },
+        quote: { id: 'reply-new', text: 'Mi respuesta', author: { displayName: 'Administrador' } },
+      },
+    });
+    renderMore('/more/news');
+    await screen.findByText('Aviso sintético 0');
+    await user.click(screen.getByRole('button', { name: 'Ver respuestas · 0' }));
+    expect(await screen.findByText(oldReply.text)).toBeInTheDocument();
+
+    const response = screen.getByText('Mi respuesta').closest('li');
+    expect(response).not.toBeNull();
+    await user.click(within(response as HTMLElement).getByRole('button', { name: 'Responder' }));
+    expect(await screen.findByText('Respondiendo a Administrador')).toBeInTheDocument();
+    expect(
+      within(response as HTMLElement).getByText('Mi respuesta', { selector: 'p' }),
+    ).toBeInTheDocument();
+    await user.type(screen.getByRole('textbox', { name: 'Escribí una respuesta…' }), 'Lo reviso.');
+    await user.click(screen.getByRole('button', { name: 'Enviar' }));
+    await waitFor(() =>
+      expect(api.createNewsReply.mock.calls[0]?.[1]).toEqual({
+        text: 'Lo reviso.',
+        quotedReplyId: 'reply-new',
+      }),
+    );
   });
 });
 

@@ -84,6 +84,52 @@ export const createNewsBodySchema = z
   })
   .strict();
 
+export const NEWS_REPLY_TEXT_MAX = 1000;
+
+function containsDisallowedControlCharacters(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0);
+    if (
+      code !== undefined &&
+      ((code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) || code === 0x7f)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const newsReplyTextSchema = z
+  .string({ message: 'La respuesta debe ser texto.' })
+  .transform((text) => text.trim().replace(/\r\n?/g, '\n'))
+  .pipe(
+    z
+      .string()
+      .min(1, 'La respuesta no puede estar vacía.')
+      .max(NEWS_REPLY_TEXT_MAX, `La respuesta no puede superar ${NEWS_REPLY_TEXT_MAX} caracteres.`)
+      .refine(
+        (text) => !containsDisallowedControlCharacters(text),
+        'La respuesta contiene caracteres inválidos.',
+      ),
+  );
+
+export const createNewsReplyBodySchema = z
+  .object({
+    text: newsReplyTextSchema,
+    quotedReplyId: uuidSchema.optional(),
+  })
+  .strict();
+
+export const listNewsRepliesQuerySchema = z
+  .object({
+    beforeCreatedAt: z.iso.datetime({ offset: true }).optional(),
+    beforeId: uuidSchema.optional(),
+  })
+  .strict()
+  .refine((query) => (query.beforeCreatedAt === undefined) === (query.beforeId === undefined), {
+    message: 'El cursor de respuestas está incompleto.',
+  });
+
 // ── 📅 Eventos ───────────────────────────────────────────────────────────
 
 export const listEventsQuerySchema = z

@@ -262,6 +262,7 @@ model User {
   /// Etapa 5X (Más) — actor real que registró una novedad / anuló un evento.
   recordedNewsReports NewsReport[] @relation("NewsReportRecordedBy")
   deletedEvents       Event[]      @relation("EventDeletedBy")
+  authoredNewsReplies NewsReply[]  @relation("NewsReplyAuthor")
 
   /// Etapa 5F — perfil personal (👤 Mi perfil de un usuario SIN `Employee`,
   /// p. ej. el ADMIN) y sus familiares (👨‍👩‍👧‍👦 Mi familia).
@@ -834,8 +835,9 @@ model NewsReport {
   recordedByUserId String? @map("recorded_by_user_id") @db.Uuid
   recordedBy       User?   @relation("NewsReportRecordedBy", fields: [recordedByUserId], references: [id])
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+  replies   NewsReply[]
 
   /// Etapa 5X — sin unicidad (empleado, texto): el prototipo permitía repetir un
   /// aviso ("Falta papel higiénico" otra semana). El seed busca por esos campos.
@@ -843,6 +845,28 @@ model NewsReport {
   /// Historial paginado del más reciente al más antiguo.
   @@index([createdAt])
   @@map("news_reports")
+}
+
+/// Respuesta plana dentro de una novedad. La clave de envío vive en
+/// `IdempotencyRecord` (actor + endpoint por novedad + clave + huella), para
+/// reutilizar la garantía transaccional común sin duplicarla en este modelo.
+model NewsReply {
+  id           String     @id @default(uuid()) @db.Uuid
+  newsReportId String     @map("news_report_id") @db.Uuid
+  newsReport   NewsReport @relation(fields: [newsReportId], references: [id], onDelete: Restrict)
+
+  authorUserId String @map("author_user_id") @db.Uuid
+  author       User   @relation("NewsReplyAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+
+  text          String
+  createdAt     DateTime    @default(now()) @map("created_at")
+  quotedReplyId String?     @map("quoted_reply_id") @db.Uuid
+  quotedReply   NewsReply?  @relation("NewsReplyQuote", fields: [quotedReplyId, newsReportId], references: [id, newsReportId], onDelete: Restrict)
+  quotes        NewsReply[] @relation("NewsReplyQuote")
+
+  @@unique([id, newsReportId])
+  @@index([newsReportId, createdAt, id])
+  @@map("news_replies")
 }
 
 /// Evento de calendario puntual (visita, mantenimiento, u otro — o un

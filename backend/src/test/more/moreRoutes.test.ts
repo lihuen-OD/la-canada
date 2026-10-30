@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../../app';
+import { createNewsReplyBodySchema, NEWS_REPLY_TEXT_MAX } from '../../more/moreSchemas';
 
 const ID = '11111111-1111-4111-8111-111111111111';
 
@@ -11,6 +12,8 @@ describe('☰ Más — ningún endpoint es público', () => {
     ['GET', '/api/v1/more/summary'],
     ['GET', '/api/v1/news'],
     ['POST', '/api/v1/news'],
+    ['GET', `/api/v1/news/${ID}/replies`],
+    ['POST', `/api/v1/news/${ID}/replies`],
     ['GET', '/api/v1/events'],
     ['POST', '/api/v1/events'],
     ['PATCH', `/api/v1/events/${ID}`],
@@ -74,6 +77,15 @@ describe('routers de Más — superficie', () => {
     expect(source).toMatch(/employeesRouter\.use\(requireAuth, requireRole\('ADMIN'\)\)/);
   });
 
+  it('las rutas de respuestas quedan detrás de requireAuth y no requieren rol admin', () => {
+    expect(source).toMatch(/newsRouter\.use\(requireAuth\)/);
+    expect(source).toMatch(/newsRouter\.get\('\/:id\/replies', getNewsRepliesHandler\)/);
+    expect(source).toMatch(
+      /newsRouter\.post\('\/:id\/replies', requireJsonContentType, postNewsReplyHandler\)/,
+    );
+    expect(source).not.toMatch(/newsRouter\.(get|post)\('\/:id\/replies', requireRole/);
+  });
+
   it('el único DELETE es un familiar propio (Etapa 5F); el único PUT es el formulario de Mi perfil', () => {
     expect([...source.matchAll(/\.delete\(/g)].map((m) => m.index)).toHaveLength(1);
     expect(source).toMatch(/meRouter\.delete\('\/family\/:id', deleteMyFamilyHandler\)/);
@@ -105,5 +117,28 @@ describe('routers de Más — superficie', () => {
 
   it('el Jardín no tiene borrado ni edición: las versiones son inmutables', () => {
     expect(source).not.toMatch(/gardenRouter\.(delete|patch|put)\(/);
+  });
+});
+
+describe('esquema de respuestas de novedades', () => {
+  it('normaliza saltos de línea sin alterar el texto multilínea', () => {
+    expect(createNewsReplyBodySchema.parse({ text: '  primera\r\nsegunda\tparte  ' })).toEqual({
+      text: 'primera\nsegunda\tparte',
+    });
+  });
+
+  it.each(['\u0000', '\u0008', '\u000b', '\u007f'])(
+    'rechaza el carácter de control %j',
+    (controlCharacter) => {
+      expect(
+        createNewsReplyBodySchema.safeParse({ text: `texto${controlCharacter}inválido` }).success,
+      ).toBe(false);
+    },
+  );
+
+  it('limita el texto a 1000 caracteres', () => {
+    expect(
+      createNewsReplyBodySchema.safeParse({ text: 'x'.repeat(NEWS_REPLY_TEXT_MAX + 1) }).success,
+    ).toBe(false);
   });
 });

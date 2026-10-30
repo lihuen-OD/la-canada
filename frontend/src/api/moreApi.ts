@@ -17,6 +17,10 @@ import type {
   MyProfileResponse,
   NewsItem,
   NewsListResponse,
+  NewsRepliesPage,
+  NewsReplyCursor,
+  CreateNewsReplyRequest,
+  NewsReply,
   OwnBirthday,
   PersonalProfile,
   PersonalProfileResponse,
@@ -39,6 +43,23 @@ export const fetchNews = (page: number, pageSize: number) =>
   apiRequest<NewsListResponse>(`/news?page=${page}&pageSize=${pageSize}`, auth);
 export const createNews = (body: { text: string; employeeId?: string }, idempotencyKey: string) =>
   post<{ news: NewsItem }>('/news', body, { 'Idempotency-Key': idempotencyKey });
+export const fetchNewsReplies = (newsId: string, cursor: NewsReplyCursor | null) => {
+  const search = new URLSearchParams();
+  if (cursor) {
+    search.set('beforeCreatedAt', cursor.createdAt);
+    search.set('beforeId', cursor.id);
+  }
+  const suffix = search.size ? `?${search.toString()}` : '';
+  return apiRequest<NewsRepliesPage>(`/news/${newsId}/replies${suffix}`, auth);
+};
+export const createNewsReply = (
+  newsId: string,
+  body: CreateNewsReplyRequest,
+  idempotencyKey: string,
+) =>
+  post<{ reply: NewsReply }>(`/news/${newsId}/replies`, body, {
+    'Idempotency-Key': idempotencyKey,
+  });
 
 // 📅 Eventos
 export function fetchEvents(params: { type?: EventType; pastPage: number; pastPageSize: number }) {

@@ -182,6 +182,9 @@ export const queryKeys = {
     summary: (userId: string) => [...scope(userId), 'more', 'summary'] as const,
     /** Historial de novedades (`useInfiniteQuery`). */
     news: (userId: string) => [...scope(userId), 'more', 'news'] as const,
+    /** Conversación diferida por novedad; `pageParams` guarda cada cursor sin mezclar hilos. */
+    newsReplies: (userId: string, newsId: string) =>
+      [...scope(userId), 'more', 'news-replies', newsId] as const,
     /** Eventos + cumpleaños derivados por filtro de tipo; el prefijo invalida todos los filtros. */
     events: (userId: string, type?: EventType | 'all') =>
       type === undefined

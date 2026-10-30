@@ -1,6 +1,12 @@
 import { useCallback } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { queryKeys } from '../../api/queryKeys';
+import type {
+  NewsRepliesPage,
+  NewsReply,
+  NewsReplyCursor,
+  NewsListResponse,
+} from '../../api/moreTypes';
 import { useSessionScope } from '../../api/useSessionScope';
 
 /**
@@ -27,6 +33,74 @@ export function useMoreCache() {
           queryKeys.dashboard(userId),
         ),
       [invalidate, userId],
+    ),
+    afterNewsReply: useCallback(
+      async (newsId: string, reply: NewsReply) => {
+        let alreadyInConversation = false;
+        const repliesKey = queryKeys.more.newsReplies(userId, newsId);
+        const newsKey = queryKeys.more.news(userId);
+        await Promise.all([
+          queryClient.cancelQueries({ queryKey: repliesKey, exact: true }),
+          queryClient.cancelQueries({ queryKey: newsKey, exact: true }),
+        ]);
+        const previousReplies =
+          queryClient.getQueryData<InfiniteData<NewsRepliesPage, NewsReplyCursor | null>>(
+            repliesKey,
+          );
+        queryClient.setQueryData<InfiniteData<NewsRepliesPage, NewsReplyCursor | null>>(
+          repliesKey,
+          (previous) => {
+            if (!previous || previous.pages.length === 0) {
+              return {
+                pages: [{ replies: [reply], hasOlder: false, nextCursor: null }],
+                pageParams: [null],
+              };
+            }
+            alreadyInConversation = previous.pages.some((page) =>
+              page.replies.some((item) => item.id === reply.id),
+            );
+            if (alreadyInConversation) return previous;
+            const pages = [...previous.pages];
+            const latestPage = pages[0];
+            if (!latestPage) return previous;
+            const replies = new Map(latestPage.replies.map((item) => [item.id, item]));
+            replies.set(reply.id, reply);
+            pages[0] = {
+              ...latestPage,
+              replies: [...replies.values()].sort(
+                (left, right) =>
+                  left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+              ),
+            };
+            return { ...previous, pages };
+          },
+        );
+        queryClient.setQueryData<InfiniteData<NewsListResponse, number>>(newsKey, (previous) => {
+          if (!previous) return previous;
+          return {
+            ...previous,
+            pages: previous.pages.map((page) => ({
+              ...page,
+              news: page.news.map((item) =>
+                item.id === newsId && !alreadyInConversation
+                  ? {
+                      ...item,
+                      replyCount: item.replyCount + 1,
+                      lastReply:
+                        item.lastReply && item.lastReply.createdAt > reply.createdAt
+                          ? item.lastReply
+                          : { createdAt: reply.createdAt, author: reply.author },
+                    }
+                  : item,
+              ),
+            })),
+          };
+        });
+        if (!previousReplies) {
+          await queryClient.invalidateQueries({ queryKey: repliesKey, exact: true });
+        }
+      },
+      [queryClient, userId],
     ),
     afterEventChange: useCallback(
       () =>
