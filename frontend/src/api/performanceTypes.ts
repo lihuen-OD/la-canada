@@ -53,6 +53,12 @@ export interface PerformanceOccurrence {
   lateCompletion?: LateCompletionBounds;
   /** «Una vez» o urgente pendiente y activa: se completa con su flujo normal, en Tareas. */
   completeInTasks?: true;
+  /**
+   * Realizada o cubierta: su ejecución vigente y si quien mira la puede
+   * deshacer (la misma regla que aplica el backend al revertir). Ausente en un
+   * backend anterior: solo se ofrece deshacer una carga olvidada.
+   */
+  execution?: { id: string; canRevert: boolean };
   /** La ejecución fue una carga olvidada: fecha real, momento del registro y si se puede deshacer. */
   lateRegistration?: {
     executionId: string;

@@ -555,7 +555,7 @@ Pedido explícito del usuario. Solo ✅ Tareas → 🏆 Desempeño → Detalle; 
 
 **Filtros** (se combinan; los valida y aplica el backend; nunca generan obligaciones fuera del rango):
 
-- **Fecha**: todas o un día del rango. Una recurrente de período largo coincide si su período contiene ese día; una «Una vez» con su fecha para realizar; las sin fecha no coinciden con ningún día. Un día fuera del rango → 400.
+- **Fecha**: todas o un día del rango, elegido con un **calendario** que solo permite días del rango (7, 14 o 30 días, nunca futuros) y muestra la fecha con el formato de la app («Miércoles 28/10/2026»); «Todas las fechas» quita la selección. Una recurrente de período largo coincide si su período contiene ese día; una «Una vez» con su fecha para realizar; las sin fecha no coinciden con ningún día. Un día escrito a mano fuera del rango no se aplica y se explica; el backend también lo rechaza (400).
 - **Frecuencia**: Todas, Diarias, Semanales, Quincenales, Mensuales, Bimestrales, Anuales, Urgentes y Una vez.
 - **Estado**, visto desde la persona del detalle: Todas, **Sin completar**, **Realizadas** (cumplimiento personal: propias hechas por ella), **Cubiertas** (propias hechas por otra persona) y **Cubrió a otros** (ajenas que hizo ella; opción aparte, nunca cumplimiento personal).
 - «Limpiar filtros» vuelve a todas. Sin coincidencias: «No hay obligaciones con estos filtros.».
@@ -568,3 +568,16 @@ Pedido explícito del usuario. Solo ✅ Tareas → 🏆 Desempeño → Detalle; 
 **Marcar como realizada**: sin cambios de reglas (fechas, permisos, concurrencia, reversión). Después de registrar o deshacer se actualizan resumen y detalle, volviendo a pedir las páginas en orden desde la primera; se conservan persona y filtros (con «Sin completar», la fila registrada deja de aparecer).
 
 **Permisos**: los de siempre, en el backend: EMPLOYEE solo su detalle; ADMIN el de cualquier persona.
+
+### Acciones compactas y «Deshacer» desde el detalle (2026-10-30)
+
+Ajuste pedido explícitamente por el usuario. Solo ✅ Tareas; 🥬 Huerta sin cambios.
+
+- **Acciones compactas**: «Marcar realizada» (botón secundario chico) y «Deshacer» (fantasma), a la derecha del estado y en la misma línea; en móvil bajan juntos a una línea propia sin pisar descripción, fecha ni estado. Área táctil de 44 px. El nombre accesible agrega la tarea y el período («Marcar realizada: Aspirar planta baja, 29/10/2026 · Diaria»). Confirmaciones y protección contra doble envío, sin cambios.
+- **«Deshacer»** aparece en toda obligación realizada o cubierta cuya ejecución vigente el backend permite revertir a quien mira (el detalle informa la ejecución y ese permiso, calculado con la misma regla que la reversión). Usa la reversión de siempre (`POST /tasks/:id/revert`, su diálogo y su auditoría), que sigue siendo la autoridad. **Límites que se conservan**:
+  - EMPLOYEE: solo lo que realizó él, y solo en el período vigente de la tarea (flujo normal) o, si fue una carga olvidada que registró él, el mismo día de negocio en que la registró. Una ejecución anterior del flujo normal (p. ej. la diaria de ayer) no muestra «Deshacer» y el backend la rechaza (403). Tampoco deshace lo que otra persona realizó por él ni lo que registró un ADMIN a su nombre fuera del período vigente.
+  - ADMIN: corrige cualquier ejecución vigente con motivo obligatorio.
+  - Nunca se borra nada: la ejecución queda revertida (quién, cuándo, motivo) y auditada (`task.completion_reverted`).
+  - Dos reversiones a la vez o una pantalla desactualizada: una sola aplica; la otra recibe un mensaje claro (409 «Esta finalización ya fue revertida.» o 403) y la pantalla se actualiza.
+- **Después de deshacer**: la obligación exacta vuelve a «Sin completar»; se actualizan resumen, porcentajes, detalle, historial, Inicio y el listado de Tareas (las mismas invalidaciones de siempre). Se conservan persona y filtros, y las páginas se vuelven a pedir desde la primera (con «Realizadas» la fila deja de aparecer; con «Todas», aparece pendiente). En Tareas: una «Una vez» completada reaparece pendiente si sigue activa; una urgente vuelve a pendiente; una recurrente del período vigente vuelve a pendiente en su única fila; deshacer un período anterior **no** cambia el período actual (si hoy está completada, sigue completada); no aparecen filas históricas ni duplicadas; y deshacer no reactiva una tarea desactivada.
+

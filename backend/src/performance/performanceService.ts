@@ -23,7 +23,11 @@ import {
   toLocalDate,
   type LocalDate,
 } from '../lib/businessTime';
-import { canRevertExecution, lateCompletionBounds } from '../tasks/completionRules';
+import {
+  canRevertExecution,
+  lateCompletionBounds,
+  type LateCompletionBounds,
+} from '../tasks/completionRules';
 import {
   DETAIL_PAGE_SIZE,
   decodeCursor,
@@ -203,41 +207,62 @@ type ObligationInputs = Awaited<ReturnType<typeof loadObligationInputs>>;
  * frontend no decide nada): `lateCompletion` = la obligación pendiente se
  * puede registrar ahora como realizada, con sus fechas admitidas;
  * `completeInTasks` = una «Una vez» o urgente pendiente se completa con su
- * flujo normal, en Tareas; `lateRegistration` = la ejecución fue una carga
- * olvidada (fecha real, momento del registro y si quien mira la puede
- * deshacer).
+ * flujo normal, en Tareas; `execution` = la ejecución vigente de una
+ * realizada o cubierta y si quien mira la puede deshacer (misma regla que la
+ * reversión); `lateRegistration` = además, fue una carga olvidada (fecha
+ * real y momento del registro).
  */
+interface DetailActions {
+  lateCompletion?: LateCompletionBounds;
+  completeInTasks?: true;
+  execution?: { id: string; canRevert: boolean };
+  lateRegistration?: {
+    executionId: string;
+    performedOn: string;
+    recordedAt: string;
+    canRevert: boolean;
+  };
+}
+
 function detailActions(inputs: ObligationInputs, actor: TaskActor, now: Date) {
   const timeZone = config.businessTimeZone;
   const { from: windowFrom, today } = lateCompletionWindow(now);
   const executionByKey = new Map(
     inputs.executions.map((row) => [`${row.taskId}:${row.periodKey}`, row]),
   );
-  return (item: Occurrence) => {
+  return (item: Occurrence): DetailActions => {
     const execution = executionByKey.get(`${item.taskId}:${item.periodKey}`);
     const plans = inputs.planRows.filter((plan) => plan.taskId === item.taskId);
     if (item.completed) {
-      if (!execution?.performedOn) return {};
+      if (!execution) return {};
+      // La misma regla que aplica `revertTaskCompletion`, con la frecuencia
+      // actual de la tarea (su última versión de planificación).
       const currentFrequency = plans.at(-1)?.frequency ?? item.frequency;
+      const canRevert = canRevertExecution(
+        actor,
+        { ...execution, completedByEmployee: { id: execution.completedByEmployeeId } },
+        computePeriodKey(currentFrequency, now, timeZone),
+        today,
+        timeZone,
+      );
       return {
-        lateRegistration: {
-          executionId: execution.id,
-          performedOn: scheduledDateText(execution.performedOn)!,
-          recordedAt: execution.completedAt.toISOString(),
-          canRevert: canRevertExecution(
-            actor,
-            { ...execution, completedByEmployee: { id: execution.completedByEmployeeId } },
-            computePeriodKey(currentFrequency, now, timeZone),
-            today,
-            timeZone,
-          ),
-        },
+        execution: { id: execution.id, canRevert },
+        ...(execution.performedOn
+          ? {
+              lateRegistration: {
+                executionId: execution.id,
+                performedOn: scheduledDateText(execution.performedOn)!,
+                recordedAt: execution.completedAt.toISOString(),
+                canRevert,
+              },
+            }
+          : {}),
       };
     }
     if (item.frequency === 'URGENT' || item.frequency === 'ONE_TIME') {
       const active = plans.some((plan) => plan.validTo === null);
       const canComplete = actor.role === 'ADMIN' || actor.employeeId !== null;
-      return active && !execution && canComplete ? { completeInTasks: true as const } : {};
+      return active && !execution && canComplete ? { completeInTasks: true } : {};
     }
     const mayRegister = actor.role === 'ADMIN' || item.assignedEmployeeId === actor.employeeId;
     const bounds = mayRegister

@@ -530,6 +530,37 @@ describe('getPerformance — detalle con orden, filtros y páginas («Ver más»
     expect(own.occurrencesPage!.total).toBe(67);
   });
 
+  it('«Deshacer»: cada realizada trae su ejecución y si quien mira la puede revertir (la regla del backend)', async () => {
+    mocks.executions.mockResolvedValue([
+      execution('a', '2026-10-30', JUAN),
+      execution('a', '2026-10-29', JUAN),
+      execution('a', '2026-10-28', COKE),
+      execution('f', '2026-10-20', JUAN, COKE),
+    ]);
+    const revertOf = async (actor: typeof admin | typeof juanActor) =>
+      new Map(
+        (await getPerformance(actor, OCT, JUAN, OCT_NOW, { limit: 50 }))
+          .occurrences!.filter((row) => row.completed)
+          .map((row) => [`${row.taskId}|${row.periodKey}`, row.execution]),
+      );
+    const juan = await revertOf(juanActor);
+    // Propia del período vigente: sí. Del flujo normal de ayer, cubierta por otra
+    // persona o una cobertura ya cerrada: no (el backend también la rechazaría).
+    expect(juan.get('a|2026-10-30')).toEqual({ id: 'x-a-2026-10-30', canRevert: true });
+    expect(juan.get('a|2026-10-29')).toEqual({ id: 'x-a-2026-10-29', canRevert: false });
+    expect(juan.get('a|2026-10-28')).toEqual({ id: 'x-a-2026-10-28', canRevert: false });
+    expect(juan.get('f|2026-10-20')).toEqual({ id: 'x-f-2026-10-20', canRevert: false });
+    // ADMIN: corrección administrativa de cualquiera (el motivo lo exige la reversión).
+    for (const value of (await revertOf(admin)).values()) {
+      expect(value).toMatchObject({ canRevert: true });
+    }
+    // Las pendientes no traen ejecución.
+    const pending = (
+      await getPerformance(juanActor, OCT, JUAN, OCT_NOW, { limit: 5, status: 'pending' })
+    ).occurrences!;
+    expect(pending.every((row) => row.execution === undefined)).toBe(true);
+  });
+
   it('el «hoy» del detalle es el de Buenos Aires: a las 23:30 (02:30 UTC del 31) el primero es el 30', async () => {
     const lateNight = new Date('2026-10-31T02:30:00Z');
     const page = await detail({ limit: 20 }, lateNight, { from: '2026-10-24', to: '2026-10-30' });

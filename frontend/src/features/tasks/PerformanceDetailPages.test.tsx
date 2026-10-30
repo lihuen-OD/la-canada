@@ -1,7 +1,8 @@
 import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '../../test/render';
+import { fireEvent, render, screen, waitFor, within } from '../../test/render';
+import { ApiError } from '../../api/httpClient';
 import type {
   PerformanceDetailFilters,
   PerformanceOccurrence,
@@ -76,6 +77,8 @@ function rowsOf(person: typeof COKE): PerformanceOccurrence[] {
       assignedEmployee: person,
       completedByEmployee: done ? person : null,
       completedAt: done ? `${date}T15:00:00.000Z` : null,
+      // Realizadas: su ejecución; el backend autoriza deshacer solo algunas.
+      ...(done ? { execution: { id: `x-${person.id}-${index}`, canRevert: index % 2 === 0 } } : {}),
       groupDate: date,
       period: { start: date, end: date },
       ...(done
@@ -298,23 +301,58 @@ describe('filtros (los valida y aplica el backend)', () => {
     expect(within(detail).queryByRole('button', { name: 'Limpiar filtros' })).toBeNull();
   });
 
-  it('día: «Todas las fechas» o uno del rango; se envía al backend y se combina con el estado', async () => {
-    const { user, detail } = await openDetail();
-    await within(detail).findByText('Mostrando 20 de 50 registros');
-    const select = within(detail).getByLabelText('Fecha') as HTMLSelectElement;
-    const options = Array.from(select.options).map((option) => option.value);
-    expect(options[0]).toBe('');
-    expect(options).toHaveLength(8); // «Todas» + 7 días del rango de 7
-    expect(options.slice(1)).toEqual([...options.slice(1)].sort().reverse());
-    await user.selectOptions(select, options[2]!);
-    expect(lastCall()[3]).toEqual({ date: options[2] });
-    await user.click(
-      within(within(detail).getByRole('group', { name: 'Filtrar por estado' })).getByRole(
-        'button',
-        { name: 'Sin completar' },
-      ),
+  it('día con calendario: solo días del rango (sin futuros), se combina con el estado y «Todas las fechas» lo quita', async () => {
+    const fetchPage = vi.fn(fakePage);
+    const pages = { key: (...args: unknown[]) => ['detalle', ...args], fetchPage };
+    render(
+      <MemoryRouter>
+        <PagedPerformanceDetail
+          pages={pages}
+          personId={COKE.id}
+          range={{ from: '2026-10-24', to: '2026-10-30' }}
+          today="2026-10-30"
+          actions={null}
+          onClose={vi.fn()}
+        />
+      </MemoryRouter>,
     );
-    expect(lastCall()[3]).toEqual({ date: options[2], status: 'pending' });
+    await screen.findByText('Mostrando 20 de 50 registros');
+    const input = screen.getByLabelText('Fecha');
+    expect(input).toHaveAttribute('type', 'date');
+    expect(input).toHaveAttribute('min', '2026-10-24');
+    expect(input).toHaveAttribute('max', '2026-10-30');
+    expect(input).toHaveValue('');
+    expect(screen.getByText('Todas las fechas del período.')).toBeInTheDocument();
+    const last = () => fetchPage.mock.calls.at(-1)!;
+
+    fireEvent.change(input, { target: { value: '2026-10-28' } });
+    expect(last()[3]).toEqual({ date: '2026-10-28' });
+    expect(last()[4]).toBeNull();
+    // La fecha en el formato de la app.
+    expect(screen.getByText('Miércoles 28/10/2026')).toBeInTheDocument();
+    fireEvent.click(
+      within(screen.getByRole('group', { name: 'Filtrar por estado' })).getByRole('button', {
+        name: 'Sin completar',
+      }),
+    );
+    expect(last()[3]).toEqual({ date: '2026-10-28', status: 'pending' });
+
+    // Fuera del rango (futura o anterior), escrita a mano: no se aplica y se explica.
+    const calls = fetchPage.mock.calls.length;
+    for (const value of ['2026-10-31', '2026-10-20']) {
+      fireEvent.change(input, { target: { value } });
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Elegí un día entre el 24/10/2026 y el 30/10/2026.',
+      );
+    }
+    expect(fetchPage.mock.calls.length).toBe(calls);
+    expect(input).toHaveValue('2026-10-28');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Todas las fechas' }));
+    expect(last()[3]).toEqual({ status: 'pending' });
+    expect(input).toHaveValue('');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Todas las fechas' })).toBeNull();
   });
 
   it('las métricas son las del rango completo: no se vuelven a pedir ni cambian con filtros o páginas', async () => {
@@ -371,7 +409,7 @@ describe('persona y escrituras', () => {
       return { completion: {} };
     });
     const row = within(detail).getAllByText(target.description)[0]!.closest('li') as HTMLElement;
-    await user.click(within(row).getByRole('button', { name: /Marcar como realizada/ }));
+    await user.click(within(row).getByRole('button', { name: /Marcar realizada/ }));
     await user.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Confirmar' }),
     );
@@ -395,7 +433,6 @@ describe('persona y escrituras', () => {
 
 describe('cambio de día y aislamiento', () => {
   it('si el día elegido queda fuera del rango (el día de negocio avanzó), se vuelve a «Todas» y se avisa', async () => {
-    const user = userEvent.setup();
     const fetchPageSpy = vi.fn(fakePage);
     const pages = { key: (...args: unknown[]) => ['detalle', ...args], fetchPage: fetchPageSpy };
     const props = {
@@ -411,7 +448,7 @@ describe('cambio de día y aislamiento', () => {
       </MemoryRouter>,
     );
     await screen.findByText('Mostrando 20 de 50 registros');
-    await user.selectOptions(screen.getByLabelText('Fecha'), '2026-10-24');
+    fireEvent.change(screen.getByLabelText('Fecha'), { target: { value: '2026-10-24' } });
     await screen.findByText(/Mostrando \d+ de \d+ registros/);
     view.rerender(
       <MemoryRouter>
@@ -471,5 +508,146 @@ describe('cambio de día y aislamiento', () => {
     expect(within(detail).queryByRole('button', { name: 'Ver más' })).toBeNull();
     expect(within(detail).queryAllByRole('heading', { level: 3 })).toHaveLength(0);
     expect(api.fetchEmployeePerformancePage).not.toHaveBeenCalled();
+  });
+});
+
+describe('acciones compactas y «Deshacer» desde el detalle', () => {
+  const statusGroup = (detail: HTMLElement) =>
+    within(detail).getByRole('group', { name: 'Filtrar por estado' });
+
+  beforeEach(() => {
+    api.revertTaskCompletion.mockImplementation(async (taskId: string, executionId: string) => {
+      // Backend simulado: la obligación exacta vuelve a «Sin completar».
+      data[COKE.id] = data[COKE.id]!.map((row) =>
+        row.taskId === taskId && row.execution?.id === executionId
+          ? {
+              ...row,
+              status: 'pending' as const,
+              completed: false,
+              completedByEmployeeId: null,
+              completedByEmployee: null,
+              completedAt: null,
+              execution: undefined,
+            }
+          : row,
+      );
+      return { task: {} };
+    });
+  });
+
+  it('textos visibles cortos, nombre accesible completo y estilo compacto; «Deshacer» solo con permiso del backend', async () => {
+    setRole('EMPLOYEE');
+    const { detail } = await openDetail();
+    await within(detail).findByText('Mostrando 20 de 50 registros');
+    const mark = within(detail).getAllByRole('button', { name: /^Marcar realizada: / })[0]!;
+    expect(mark).toHaveTextContent(/^Marcar realizada/);
+    expect(mark).toHaveAccessibleName(
+      /^Marcar realizada: Tarea \d \(sintética\), \d{2}\/10\/2026 · Diaria$/,
+    );
+    expect(mark).toHaveClass('performance-detail__action', 'button--sm');
+    expect(mark).not.toHaveClass('button--full');
+    expect(within(detail).queryByRole('button', { name: /Marcar como realizada/ })).toBeNull();
+
+    const undo = within(detail).getAllByRole('button', { name: /^Deshacer: / });
+    const allowed = data[COKE.id]!.slice(0, 20).filter((row) => row.execution?.canRevert);
+    expect(undo).toHaveLength(allowed.length);
+    // Una realizada sin permiso (p. ej. de un día anterior del flujo normal): sin botón.
+    const forbidden = data[COKE.id]!.slice(0, 20).find(
+      (row) => row.execution && !row.execution.canRevert,
+    )!;
+    const forbiddenRow = within(detail)
+      .getAllByText(forbidden.description)
+      .map((node) => node.closest('li') as HTMLElement)
+      .find((li) => li.textContent?.includes(`${forbidden.periodKey.slice(8, 10)}/10/2026`))!;
+    expect(within(forbiddenRow).queryByRole('button')).toBeNull();
+  });
+
+  it('EMPLOYEE deshace una ejecución normal: con «Realizadas» la fila deja de coincidir; persona y filtro se conservan', async () => {
+    setRole('EMPLOYEE');
+    const { user, detail, queryClient } = await openDetail();
+    await user.click(within(statusGroup(detail)).getByRole('button', { name: 'Realizadas' }));
+    await within(detail).findByText('Mostrando 10 de 10 registros');
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    const target = data[COKE.id]!.find((row) => row.execution?.canRevert)!;
+    await user.click(within(detail).getAllByRole('button', { name: /^Deshacer: / })[0]!);
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Deshacer finalización');
+    expect(within(dialog).getByLabelText('Motivo (opcional)')).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Deshacer' }));
+    await within(detail).findByText('Mostrando 9 de 9 registros');
+    expect(api.revertTaskCompletion).toHaveBeenCalledWith(
+      target.taskId,
+      target.execution!.id,
+      undefined,
+    );
+    const keys = invalidate.mock.calls.map(([filters]) => JSON.stringify(filters?.queryKey));
+    for (const prefix of ['tasks', 'performance', 'dashboard']) {
+      expect(keys).toContain(JSON.stringify(['session', 'u-EMPLOYEE', prefix]));
+    }
+    expect(lastCall()[3]).toEqual({ status: 'personal' });
+    expect(within(statusGroup(detail)).getByRole('button', { name: 'Realizadas' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(
+      await screen.findByText(`«${target.description}» volvió a quedar pendiente.`),
+    ).toBeInTheDocument();
+  });
+
+  it('con «Todas», la obligación deshecha vuelve a aparecer «Sin completar» en su lugar', async () => {
+    setRole('EMPLOYEE');
+    const { user, detail } = await openDetail();
+    await within(detail).findByText('Mostrando 20 de 50 registros');
+    const target = data[COKE.id]!.find((row) => row.execution?.canRevert)!;
+    await user.click(within(detail).getAllByRole('button', { name: /^Deshacer: / })[0]!);
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Deshacer' }),
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await within(detail).findByText('Mostrando 20 de 50 registros');
+    const row = within(detail)
+      .getAllByText(target.description)
+      .map((node) => node.closest('li') as HTMLElement)
+      .find((li) => li.textContent?.includes(`${target.periodKey.slice(8, 10)}/10/2026`))!;
+    await waitFor(() => expect(row).toHaveTextContent('Sin completar'));
+  });
+
+  it('ADMIN: mismo «Deshacer» compacto, pero la reversión administrativa exige motivo', async () => {
+    const { user, detail } = await openDetail();
+    await within(detail).findByText('Mostrando 20 de 50 registros');
+    await user.click(within(detail).getAllByRole('button', { name: /^Deshacer: / })[0]!);
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Corregir finalización');
+    await user.click(within(dialog).getByRole('button', { name: 'Corregir' }));
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('Indicá el motivo');
+    expect(api.revertTaskCompletion).not.toHaveBeenCalled();
+    await user.type(within(dialog).getByLabelText('Motivo'), 'Cargada por error');
+    await user.click(within(dialog).getByRole('button', { name: 'Corregir' }));
+    await waitFor(() =>
+      expect(api.revertTaskCompletion).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        'Cargada por error',
+      ),
+    );
+  });
+
+  it('pantalla vieja (el backend ya no lo permite o ya se deshizo): mensaje claro y datos actualizados', async () => {
+    setRole('EMPLOYEE');
+    const { user, detail, queryClient } = await openDetail();
+    await within(detail).findByText('Mostrando 20 de 50 registros');
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    api.revertTaskCompletion.mockRejectedValueOnce(
+      new ApiError(
+        403,
+        'Solo podés deshacer una tarea que completaste vos, dentro del período vigente o el mismo día en que la registraste desde Desempeño.',
+        'AUTH_FORBIDDEN',
+      ),
+    );
+    await user.click(within(detail).getAllByRole('button', { name: /^Deshacer: / })[0]!);
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Deshacer' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Solo podés deshacer');
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['session', 'u-EMPLOYEE', 'performance'] });
   });
 });

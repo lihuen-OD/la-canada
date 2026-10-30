@@ -181,7 +181,7 @@ describe('Desempeño → Detalle: acciones que decide el backend', () => {
   it('«Marcar como realizada» solo en pendientes elegibles; nada en realizadas; «Una vez» → Tareas', async () => {
     const { detail } = await openDetail();
     const button = (description: string) =>
-      within(rowOf(detail, description)).queryByRole('button', { name: /Marcar como realizada/ });
+      within(rowOf(detail, description)).queryByRole('button', { name: /Marcar realizada/ });
     expect(button('Aspirar planta baja')).toBeInTheDocument();
     expect(button('Limpiar vidrios')).toBeInTheDocument();
     expect(button('Regar macetas')).toBeNull();
@@ -207,7 +207,7 @@ describe('diaria: confirmación sencilla con la fecha fijada por la fila', () =>
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
     await user.click(
       within(rowOf(detail, 'Aspirar planta baja')).getByRole('button', {
-        name: /Marcar como realizada/,
+        name: /Marcar realizada/,
       }),
     );
     const dialog = await screen.findByRole('dialog');
@@ -247,7 +247,7 @@ describe('diaria: confirmación sencilla con la fecha fijada por la fila', () =>
     const { user, detail } = await openDetail();
     await user.click(
       within(rowOf(detail, 'Aspirar planta baja')).getByRole('button', {
-        name: /Marcar como realizada/,
+        name: /Marcar realizada/,
       }),
     );
     const confirm = within(await screen.findByRole('dialog')).getByRole('button', {
@@ -267,7 +267,7 @@ describe('diaria: confirmación sencilla con la fecha fijada por la fila', () =>
     const { user, detail } = await openDetail();
     await user.click(
       within(rowOf(detail, 'Aspirar planta baja')).getByRole('button', {
-        name: /Marcar como realizada/,
+        name: /Marcar realizada/,
       }),
     );
     await user.click(
@@ -283,7 +283,7 @@ describe('períodos más largos: se muestra el período y se pide el día real',
     const { user, detail } = await openDetail();
     await user.click(
       within(rowOf(detail, 'Limpiar vidrios')).getByRole('button', {
-        name: /Marcar como realizada/,
+        name: /Marcar realizada/,
       }),
     );
     const dialog = await screen.findByRole('dialog');
@@ -323,7 +323,7 @@ describe('errores: los datos visibles se conservan y nunca se reintenta solo', (
     const opened = await openDetail();
     await opened.user.click(
       within(rowOf(opened.detail, 'Aspirar planta baja')).getByRole('button', {
-        name: /Marcar como realizada/,
+        name: /Marcar realizada/,
       }),
     );
     const dialog = await screen.findByRole('dialog');
@@ -343,7 +343,7 @@ describe('errores: los datos visibles se conservan y nunca se reintenta solo', (
     const invalidate = vi.spyOn(opened.queryClient, 'invalidateQueries');
     await opened.user.click(
       within(rowOf(opened.detail, 'Aspirar planta baja')).getByRole('button', {
-        name: /Marcar como realizada/,
+        name: /Marcar realizada/,
       }),
     );
     const dialog = await screen.findByRole('dialog');
@@ -414,7 +414,7 @@ describe('ADMIN registra quién la realizó', () => {
     const { user, detail } = await openDetail();
     await user.click(
       within(rowOf(detail, 'Aspirar planta baja')).getByRole('button', {
-        name: /Marcar como realizada/,
+        name: /Marcar realizada/,
       }),
     );
     const dialog = await screen.findByRole('dialog');
@@ -446,7 +446,7 @@ describe('ADMIN registra quién la realizó', () => {
     const { user, detail } = await openDetail();
     await user.click(
       within(rowOf(detail, 'Limpiar vidrios')).getByRole('button', {
-        name: /Marcar como realizada/,
+        name: /Marcar realizada/,
       }),
     );
     expect(
@@ -455,7 +455,7 @@ describe('ADMIN registra quién la realizó', () => {
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancelar' }));
 
     await user.click(
-      within(rowOf(detail, 'Barrer galería')).getByRole('button', { name: /Corregir/ }),
+      within(rowOf(detail, 'Barrer galería')).getByRole('button', { name: /Deshacer/ }),
     );
     const dialog = await screen.findByRole('dialog');
     await user.click(within(dialog).getByRole('button', { name: 'Corregir' }));
@@ -493,7 +493,7 @@ describe('aislamiento: una fuente sin acciones (🥬 Huerta) no muestra ninguna'
     };
     const { detail } = await openDetail(source);
     expect(
-      within(detail).queryByRole('button', { name: /Marcar como realizada|Deshacer|Corregir/ }),
+      within(detail).queryByRole('button', { name: /Marcar realizada|Deshacer|Corregir/ }),
     ).toBeNull();
     expect(within(detail).queryByRole('link')).toBeNull();
     expect(detail).not.toHaveTextContent('Registrada el');

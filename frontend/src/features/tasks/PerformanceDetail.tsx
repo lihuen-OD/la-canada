@@ -25,8 +25,6 @@ import type { LateCompletionItem } from './LateCompletionDialog';
 import { FrequencyFilterBar, type FrequencyFilter } from './TaskFilters';
 import { FREQUENCY_LABEL, formatLateRegistration, formatPeriodKey } from './taskLabels';
 
-export type LateRegistration = NonNullable<PerformanceOccurrence['lateRegistration']>;
-
 /** Rótulo del estado que ya calculó el backend, visto desde la persona del detalle. */
 function occurrenceLabel(item: PerformanceOccurrence, personId: string): string {
   if (item.assignedEmployeeId !== personId) return '🤝 Cubrió a otros';
@@ -61,45 +59,74 @@ export interface RowActions {
   isAdmin: boolean;
   tasksPath: string;
   onLate: (item: LateCompletionItem) => void;
-  onRevert: (item: PerformanceOccurrence, late: LateRegistration) => void;
+  onRevert: (item: PerformanceOccurrence, executionId: string) => void;
 }
 
 /**
- * «Marcar como realizada» (obligación recurrente pendiente y registrable),
- * «Completar en Tareas» («Una vez» o urgente pendiente: su flujo normal) o
- * deshacer una carga olvidada que quien mira todavía puede corregir.
+ * Ejecución que se puede deshacer desde la fila, según el backend: la de
+ * `execution` (cualquier realizada o cubierta) o, con un backend anterior,
+ * la de una carga olvidada. Sin permiso, ninguna (no se ofrece algo que
+ * fallaría siempre).
+ */
+function revertibleExecutionId(item: PerformanceOccurrence): string | null {
+  if (!item.completed) return null;
+  if (item.execution) return item.execution.canRevert ? item.execution.id : null;
+  return item.lateRegistration?.canRevert ? item.lateRegistration.executionId : null;
+}
+
+/**
+ * Acción compacta de la fila (la que habilita el backend): «Marcar
+ * realizada» (recurrente pendiente y registrable), «Completar en Tareas»
+ * («Una vez» o urgente pendiente: su flujo normal) o «Deshacer» (ejecución
+ * vigente que quien mira puede revertir; el ADMIN, con motivo). El nombre
+ * accesible suma la tarea y el período.
  */
 function DetailAction({ item, actions }: { item: PerformanceOccurrence; actions: RowActions }) {
-  const { lateCompletion, lateRegistration } = item;
+  const { lateCompletion } = item;
+  const context = (
+    <span className="visually-hidden">
+      : {item.description}, {occurrencePeriod(item)}
+    </span>
+  );
   if (!item.completed && lateCompletion) {
     return (
       <Button
         size="sm"
         variant="secondary"
+        className="performance-detail__action"
         onClick={() => actions.onLate({ ...item, lateCompletion })}
       >
-        Marcar como realizada
-        <span className="visually-hidden">
-          : {item.description}, {occurrencePeriod(item)}
-        </span>
+        Marcar realizada
+        {context}
       </Button>
     );
   }
   if (!item.completed && item.completeInTasks) {
     return (
-      <Link to={actions.tasksPath} className={buttonClassName({ variant: 'ghost', size: 'sm' })}>
+      <Link
+        to={actions.tasksPath}
+        className={buttonClassName({
+          variant: 'ghost',
+          size: 'sm',
+          className: 'performance-detail__action',
+        })}
+      >
         Completar en Tareas
         <span className="visually-hidden">: {item.description}</span>
       </Link>
     );
   }
-  if (item.completed && lateRegistration?.canRevert) {
+  const executionId = revertibleExecutionId(item);
+  if (executionId) {
     return (
-      <Button size="sm" variant="ghost" onClick={() => actions.onRevert(item, lateRegistration)}>
-        {actions.isAdmin ? 'Corregir' : 'Deshacer'}
-        <span className="visually-hidden">
-          : {item.description}, {occurrencePeriod(item)}
-        </span>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="performance-detail__action"
+        onClick={() => actions.onRevert(item, executionId)}
+      >
+        Deshacer
+        {context}
       </Button>
     );
   }
@@ -194,13 +221,6 @@ function shiftDay(date: string, days: number): string {
   return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
 }
 
-/** Días del rango, del más reciente al más antiguo. */
-function daysOf(from: string, to: string): string[] {
-  const days: string[] = [];
-  for (let date = to; date >= from && days.length < 31; date = shiftDay(date, -1)) days.push(date);
-  return days;
-}
-
 /** «Hoy · Viernes 30/10/2026», «Ayer · …» o el día con su semana; `null` → «Sin fecha». */
 function dayLabel(date: string | null, today: string): string {
   if (date === null) return 'Sin fecha';
@@ -228,6 +248,7 @@ export function PagedPerformanceDetail({
   const { userId, enabled } = useSessionScope();
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [dateReset, setDateReset] = useState<string | null>(null);
+  const [dateError, setDateError] = useState<string | null>(null);
 
   // El día elegido queda fuera del rango cuando cambia el día de negocio
   // (el rango avanza): se vuelve a «Todas las fechas» y se avisa.
@@ -251,7 +272,16 @@ export function PagedPerformanceDetail({
   const hasFilters = Object.keys(applied).length > 0;
   const update = (next: Partial<Filters>) => {
     setDateReset(null);
+    setDateError(null);
     setFilters({ ...filters, ...next });
+  };
+  /** Un día del calendario: vacío = todas; fuera del rango (escrito a mano) no se aplica. */
+  const chooseDate = (value: string) => {
+    if (value && (value < range.from || value > range.to)) {
+      setDateError(`Elegí un día entre el ${formatDate(range.from)} y el ${formatDate(range.to)}.`);
+      return;
+    }
+    update({ date: value });
   };
 
   // Sin datos previos de otra persona, rango o filtro: una clave nueva
@@ -377,19 +407,33 @@ export function PagedPerformanceDetail({
           <label className="field__label" htmlFor={`${id}-date`}>
             Fecha
           </label>
-          <select
-            id={`${id}-date`}
-            className="field__input"
-            value={date}
-            onChange={(event) => update({ date: event.target.value })}
-          >
-            <option value="">Todas las fechas</option>
-            {daysOf(range.from, range.to).map((date) => (
-              <option key={date} value={date}>
-                {dayLabel(date, today)}
-              </option>
-            ))}
-          </select>
+          <div className="performance-detail-filters__date">
+            <input
+              id={`${id}-date`}
+              className="field__input"
+              type="date"
+              // Solo días del rango elegido (7, 14 o 30), nunca futuros: el
+              // rango termina hoy, en el día de negocio del servidor.
+              min={range.from}
+              max={range.to}
+              value={date}
+              aria-describedby={`${id}-date-hint`}
+              onChange={(event) => chooseDate(event.target.value)}
+            />
+            {date ? (
+              <Button size="sm" variant="ghost" onClick={() => chooseDate('')}>
+                Todas las fechas
+              </Button>
+            ) : null}
+          </div>
+          <p className="field__hint" id={`${id}-date-hint`}>
+            {date ? dayLabel(date, today) : 'Todas las fechas del período.'}
+          </p>
+          {dateError ? (
+            <p className="field__hint field__hint--error" role="alert">
+              {dateError}
+            </p>
+          ) : null}
         </div>
         {dateReset ? (
           <p className="performance__note" role="status">

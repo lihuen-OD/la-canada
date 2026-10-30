@@ -176,11 +176,20 @@
 
 .performance-detail__side {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--space-1);
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1) var(--space-2);
   margin-left: auto;
   text-align: right;
+}
+
+/* Acción compacta y discreta («Marcar realizada», «Deshacer»…): texto chico
+   y poco relleno, sin perder el alto táctil de 44px de `.button`. */
+.performance-detail__action {
+  padding-inline: var(--space-3);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
 }
 
 .late-completion__period {
@@ -222,6 +231,30 @@
 
 .performance-detail-filters__clear {
   align-self: flex-start;
+}
+
+/* Filtro de fecha: calendario nativo (días del rango) y «Todas las fechas». */
+.performance-detail-filters__date {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.performance-detail-filters__date .field__input {
+  flex: 1 1 10rem;
+  min-width: 0;
+  max-width: 16rem;
+}
+
+.performance-detail-filters .field__hint {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.performance-detail-filters .field__hint--error {
+  color: var(--color-danger);
 }
 
 .performance-detail-group + .performance-detail-group {

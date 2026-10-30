@@ -32,7 +32,6 @@ import { LateCompletionDialog, type LateCompletionItem } from './LateCompletionD
 import {
   OccurrenceRow,
   PagedPerformanceDetail,
-  type LateRegistration,
   type PerformanceDetailPages,
   type RowActions,
 } from './PerformanceDetail';
@@ -138,7 +137,7 @@ const TASKS_PERFORMANCE: PerformanceSource = {
 type DetailDialog =
   | { type: 'none' }
   | { type: 'late'; item: LateCompletionItem }
-  | { type: 'revert'; item: PerformanceOccurrence; late: LateRegistration };
+  | { type: 'revert'; item: PerformanceOccurrence; executionId: string };
 
 type Notice = { tone: 'positive' | 'danger'; text: string } | null;
 
@@ -229,9 +228,9 @@ export function PerformanceScreen({
           setNotice(null);
           setDialog({ type: 'late', item });
         },
-        onRevert: (item, late) => {
+        onRevert: (item, executionId) => {
           setNotice(null);
-          setDialog({ type: 'revert', item, late });
+          setDialog({ type: 'revert', item, executionId });
         },
       }
     : null;
@@ -245,7 +244,9 @@ export function PerformanceScreen({
       await operation();
     } catch (reason) {
       if (isSessionExpired(reason)) void logout();
-      if (reason instanceof ApiError && reason.status === 409) {
+      // Conflicto o permiso que cambió (otra persona la deshizo, pasó el día):
+      // se actualizan los datos para que la fila muestre lo que corresponde.
+      if (reason instanceof ApiError && (reason.status === 409 || reason.status === 403)) {
         current.invalidate(queryClient, userId);
       }
       throw reason;
@@ -458,7 +459,7 @@ export function PerformanceScreen({
           onConfirm={(reason) =>
             runAction(
               actions,
-              () => actions.revert(dialog.item.taskId, dialog.late.executionId, reason),
+              () => actions.revert(dialog.item.taskId, dialog.executionId, reason),
               `«${dialog.item.description}» volvió a quedar pendiente.`,
             )
           }

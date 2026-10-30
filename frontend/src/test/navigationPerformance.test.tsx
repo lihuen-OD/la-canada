@@ -669,7 +669,7 @@ describe('Desempeño → Detalle: carga olvidada y enlace a Tareas sin reiniciar
     await screen.findByRole('list', { name: 'Tareas del período' });
     await user.click(within(tasksNav()).getByRole('link', { name: /Desempeño/ }));
     await user.click(await screen.findByRole('button', { name: /Persona sintética A/ }));
-    await user.click(await screen.findByRole('button', { name: /Marcar como realizada/ }));
+    await user.click(await screen.findByRole('button', { name: /Marcar realizada/ }));
     const dialog = await screen.findByRole('dialog');
     // ADMIN: elige explícitamente quién la realizó.
     await user.click(await within(dialog).findByRole('radio', { name: /Persona sintética A/ }));

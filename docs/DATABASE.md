@@ -579,7 +579,7 @@ Lo que esta rama **no** hace, por diseño:
 - **Sin cambios en `task_planning_intervals`**: orden y sugerencia no afectan ningún cálculo; su historia es la auditoría.
 - **Sin backfill, UPDATE ni DELETE**. Verificado en `demo` antes/después en `READ ONLY`: 15 tareas, 13 ejecuciones, 15 intervalos y 23 auditorías de tareas con sumas de verificación idénticas de sus columnas anteriores; las seis columnas nuevas en NULL en todas las filas.
 
-### 🥬 Huerta (`20261027120000_kitchen_garden_module`, aplicada a `demo`; pendiente en `production`)
+### 🥬 Huerta (`20261027120000_kitchen_garden_module`, aplicada a `demo`; aplicada en `production` según confirmó el usuario el 2026-10-30 (no verificado desde esta sesión))
 
 Módulo propio, independiente de Tareas: cuatro tablas NUEVAS y vacías; ninguna tabla existente se altera (ni `tasks`, `task_executions`, `task_planning_intervals`, `users` o `employees`). Solo reutiliza el TIPO enum `TaskFrequency`.
 
