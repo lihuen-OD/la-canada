@@ -542,3 +542,29 @@ El autor de la carga sale siempre de la sesión. Ocultar el botón no reemplaza 
 **Desempeño, Inicio e historial**: la fila elegida pasa a realizada (o cubierta, si la hizo otra persona) y se recalculan resumen, detalle, porcentajes e Inicio con las reglas de siempre. El denominador no cambia, una cobertura no suma al porcentaje de quien la tenía asignada ni de quien la cubrió, y ningún otro período o métrica cambia. El historial semanal ubica la ejecución en su período (diarias y semanales por su clave; quincenales, mensuales, bimestrales, anuales, urgentes y únicas por la fecha real de realización) e interpreta cada ejecución con la frecuencia que tenía la tarea cuando se registró, no solo con la actual. Donde corresponde se muestra «Realizada el 29/10 · Registrada el 30/10».
 
 *Ejemplo* (el pedido): Coke tenía la diaria «Aspirar planta baja» el 29/10, la hizo y no la marcó. El 30/10 abre Desempeño → Detalle, toca «Marcar como realizada» en la fila del 29/10 y confirma. Queda completada solo la obligación del 29/10 (realizada por Coke, responsable Coke, `performedOn` 29/10, registrada el 30/10 por el usuario de Coke); la del 30/10 sigue pendiente, en el detalle y en Tareas. Su porcentaje sube una realización personal sin cambiar las asignadas. Ese mismo 30/10 Coke puede deshacerla; desde el 31/10, solo un ADMIN con motivo.
+
+## Detalle de Desempeño: orden, filtros y «Ver más» (2026-10-30)
+
+Pedido explícito del usuario. Solo ✅ Tareas → 🏆 Desempeño → Detalle; 🥬 Huerta conserva su detalle completo. No cambia cómo se generan las obligaciones ni ninguna regla o métrica de Desempeño: es orden, filtro y paginación sobre las obligaciones que ya calcula el backend para el rango elegido (7, 14 o 30 días).
+
+**Orden y agrupación** (los decide el backend):
+
+- Más recientes primero: hoy, ayer y los días anteriores, agrupados con un encabezado por día («Hoy · Viernes 30/10/2026», «Ayer · …», «Miércoles 28/10/2026»).
+- Diaria: en su fecha. Semanal, quincenal, mensual, bimestral y anual: en el **primer día de su período**, solo para ubicarla; la fila muestra el período completo («26/10/2026 al 01/11/2026 · Semanal»), nunca su inicio como vencimiento. «Una vez»: en su fecha para realizar (la de la planificación que usó el cálculo). «Una vez» sin fecha y urgentes: sin fecha inventada, en un grupo **«Sin fecha» al final**.
+- Con la misma fecha: por descripción y, para desempatar, por tarea y período (orden total y estable: dos obligaciones nunca empatan).
+
+**Filtros** (se combinan; los valida y aplica el backend; nunca generan obligaciones fuera del rango):
+
+- **Fecha**: todas o un día del rango. Una recurrente de período largo coincide si su período contiene ese día; una «Una vez» con su fecha para realizar; las sin fecha no coinciden con ningún día. Un día fuera del rango → 400.
+- **Frecuencia**: Todas, Diarias, Semanales, Quincenales, Mensuales, Bimestrales, Anuales, Urgentes y Una vez.
+- **Estado**, visto desde la persona del detalle: Todas, **Sin completar**, **Realizadas** (cumplimiento personal: propias hechas por ella), **Cubiertas** (propias hechas por otra persona) y **Cubrió a otros** (ajenas que hizo ella; opción aparte, nunca cumplimiento personal).
+- «Limpiar filtros» vuelve a todas. Sin coincidencias: «No hay obligaciones con estos filtros.».
+- Si al cambiar el día de negocio el día elegido queda fuera del rango, el filtro vuelve a «Todas las fechas» y se avisa.
+
+**Resumen independiente**: porcentajes, asignadas, realizadas, sin completar y coberturas (tarjetas y lista de personas) siguen siendo las de **todo** el rango; filtros y páginas solo cambian las filas del detalle.
+
+**«Ver más»**: primera carga de 20 obligaciones; «Ver más» agrega las 20 siguientes sin reemplazar las anteriores, con «Mostrando X de Y registros» (Y = total filtrado). Se oculta cuando no quedan, se deshabilita mientras carga y, si falla, conserva lo cargado y ofrece «Reintentar». Cambiar persona, rango o filtros vuelve a la primera página. Un día que cruza dos páginas sigue siendo un solo grupo, sin filas repetidas.
+
+**Marcar como realizada**: sin cambios de reglas (fechas, permisos, concurrencia, reversión). Después de registrar o deshacer se actualizan resumen y detalle, volviendo a pedir las páginas en orden desde la primera; se conservan persona y filtros (con «Sin completar», la fila registrada deja de aparecer).
+
+**Permisos**: los de siempre, en el backend: EMPLOYEE solo su detalle; ADMIN el de cualquier persona.

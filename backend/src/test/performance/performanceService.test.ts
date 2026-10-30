@@ -370,3 +370,173 @@ describe('getPerformance — acciones del detalle (carga olvidada), decididas en
     for (const row of byTask.values()) expect(row).not.toHaveProperty('lateCompletion');
   });
 });
+
+describe('getPerformance — detalle con orden, filtros y páginas («Ver más»)', () => {
+  // Viernes 30/10/2026, 12:00 en Buenos Aires; rango de 30 días (01/10–30/10).
+  const OCT_NOW = new Date('2026-10-30T15:00:00Z');
+  const OCT = { from: '2026-10-01', to: '2026-10-30' };
+  const plan = (taskId: string, frequency: string, employeeId = JUAN) => ({
+    id: `p-${taskId}`,
+    taskId,
+    employeeId,
+    frequency,
+    validFrom: new Date('2026-09-01T12:00:00Z'),
+    validTo: null,
+    task: { description: `Tarea ${taskId} (sintética)` },
+  });
+  const execution = (taskId: string, periodKey: string, by: string, assigned = JUAN) => ({
+    id: `x-${taskId}-${periodKey}`,
+    taskId,
+    periodKey,
+    assignedEmployeeId: assigned,
+    completedByEmployeeId: by,
+    completedAt: new Date(`${periodKey.length === 10 ? periodKey : '2026-10-20'}T15:00:00Z`),
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.employeeFindUnique.mockResolvedValue({ id: JUAN });
+    mocks.employeeFindMany.mockResolvedValue(employees);
+    mocks.taskCount.mockResolvedValue(1);
+    // Juan: dos diarias (30 + 30), una semanal (4 semanas que empiezan en octubre),
+    // una «Una vez» sin fecha y una urgente; además cubrió una diaria de Coke → 67 filas.
+    mocks.plans.mockResolvedValue([
+      plan('a', 'DAILY'),
+      plan('b', 'DAILY'),
+      plan('c', 'WEEKLY'),
+      plan('d', 'ONE_TIME'),
+      plan('e', 'URGENT'),
+      plan('f', 'DAILY', COKE),
+    ]);
+    mocks.executions.mockResolvedValue([
+      execution('a', '2026-10-29', JUAN),
+      execution('a', '2026-10-28', COKE),
+      execution('c', '2026-10-19', JUAN),
+      execution('f', '2026-10-20', JUAN, COKE),
+    ]);
+  });
+
+  const detail = (query: Record<string, unknown>, now = OCT_NOW, range = OCT, actor = admin) =>
+    getPerformance(actor, range, JUAN, now, query);
+  const label = (row: { groupDate: string | null; taskId: string; periodKey: string }) =>
+    `${row.groupDate ?? '—'}|${row.taskId}|${row.periodKey}`;
+
+  it('sin filtros ni página: la respuesta de siempre (todas, sin `occurrencesPage`)', async () => {
+    const legacy = await getPerformance(admin, OCT, JUAN, OCT_NOW);
+    expect(legacy.occurrences).toHaveLength(67);
+    expect(legacy).not.toHaveProperty('occurrencesPage');
+  });
+
+  it('más de 40 obligaciones: 20 + 20 + 20 + 7, más recientes primero (hoy), sin duplicados ni omisiones, sin fecha al final', async () => {
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    const sizes: number[] = [];
+    for (let guard = 0; guard < 6; guard += 1) {
+      const page = await detail({ limit: 20, ...(cursor ? { cursor } : {}) });
+      expect(page.occurrencesPage!.total).toBe(67);
+      sizes.push(page.occurrences!.length);
+      seen.push(...page.occurrences!.map(label));
+      cursor = page.occurrencesPage!.nextCursor ?? undefined;
+      if (!cursor) break;
+    }
+    expect(sizes).toEqual([20, 20, 20, 7]);
+    expect(new Set(seen).size).toBe(67);
+    expect(seen[0]).toMatch(/^2026-10-30\|/);
+    expect(seen.slice(-2).map((row) => row.split('|')[0])).toEqual(['—', '—']);
+    const legacy = await getPerformance(admin, OCT, JUAN, OCT_NOW);
+    expect(new Set(seen)).toEqual(new Set(legacy.occurrences!.map(label)));
+  });
+
+  it('las métricas son las de TODO el rango, con cualquier filtro o página', async () => {
+    const legacy = await getPerformance(admin, OCT, JUAN, OCT_NOW);
+    const pick = (r: typeof legacy) => ({
+      team: r.team,
+      employees: r.employees,
+      special: r.special,
+      trend: r.trend,
+    });
+    for (const query of [
+      { limit: 20 },
+      { limit: 5, status: 'pending' },
+      { limit: 20, date: '2026-10-28', frequency: 'DAILY' },
+    ]) {
+      const first = await detail(query);
+      expect(pick(first)).toEqual(pick(legacy));
+      const next = await detail({
+        ...query,
+        cursor: first.occurrencesPage!.nextCursor ?? undefined,
+      });
+      expect(pick(next)).toEqual(pick(legacy));
+    }
+  });
+
+  it('filtros: día (incluye la semana que lo contiene), frecuencia, estado y combinados', async () => {
+    const keys = async (query: Record<string, unknown>) =>
+      (await detail({ limit: 50, ...query })).occurrences!.map(
+        (row) => `${row.taskId}|${row.periodKey}`,
+      );
+    expect(await keys({ date: '2026-10-28' })).toEqual([
+      'a|2026-10-28',
+      'b|2026-10-28',
+      'c|2026-10-26',
+    ]);
+    expect(await keys({ frequency: 'WEEKLY' })).toEqual([
+      'c|2026-10-26',
+      'c|2026-10-19',
+      'c|2026-10-12',
+      'c|2026-10-05',
+    ]);
+    expect(await keys({ status: 'personal' })).toEqual(['a|2026-10-29', 'c|2026-10-19']);
+    expect(await keys({ status: 'covered' })).toEqual(['a|2026-10-28']);
+    expect(await keys({ status: 'coverageGiven' })).toEqual(['f|2026-10-20']);
+    expect((await detail({ limit: 50, status: 'pending' })).occurrencesPage!.total).toBe(63);
+    expect(await keys({ date: '2026-10-20', status: 'coverageGiven' })).toEqual(['f|2026-10-20']);
+    expect(await keys({ date: '2026-10-20', frequency: 'WEEKLY', status: 'personal' })).toEqual([
+      'c|2026-10-19',
+    ]);
+    expect(await keys({ date: '2026-10-13', frequency: 'WEEKLY', status: 'pending' })).toEqual([
+      'c|2026-10-12',
+    ]);
+    // Las sin fecha nunca coinciden con un día; sin coincidencias → lista vacía con total 0.
+    expect(await keys({ frequency: 'URGENT', date: '2026-10-28' })).toEqual([]);
+    expect(await keys({ frequency: 'URGENT' })).toEqual(['e|URGENT']);
+  });
+
+  it('cada fila trae su ubicación: la semanal con su período completo, la urgente sin fecha', async () => {
+    const rows = (await detail({ limit: 50, frequency: 'WEEKLY' })).occurrences!;
+    expect(rows[0]).toMatchObject({
+      groupDate: '2026-10-26',
+      period: { start: '2026-10-26', end: '2026-11-01' },
+    });
+    const urgent = (await detail({ limit: 50, frequency: 'URGENT' })).occurrences![0];
+    expect(urgent).toMatchObject({ groupDate: null, period: null });
+  });
+
+  it('día fuera del rango o cursor inválido → 400 sin leer la base', async () => {
+    await expect(detail({ date: '2026-09-30' })).rejects.toThrow(
+      'El día elegido está fuera del período.',
+    );
+    await expect(detail({ cursor: 'no-es-un-cursor' })).rejects.toThrow(
+      'No pudimos continuar la lista',
+    );
+    expect(mocks.executions).not.toHaveBeenCalled();
+  });
+
+  it('EMPLOYEE: solo su detalle, también filtrado y paginado', async () => {
+    await expect(
+      getPerformance(juanActor, OCT, COKE, OCT_NOW, { limit: 20 }),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    const own = await getPerformance(juanActor, OCT, undefined, OCT_NOW, { limit: 20 });
+    expect(own.occurrencesPage!.total).toBe(67);
+  });
+
+  it('el «hoy» del detalle es el de Buenos Aires: a las 23:30 (02:30 UTC del 31) el primero es el 30', async () => {
+    const lateNight = new Date('2026-10-31T02:30:00Z');
+    const page = await detail({ limit: 20 }, lateNight, { from: '2026-10-24', to: '2026-10-30' });
+    expect(page.range.today).toBe('2026-10-30');
+    expect(page.occurrences![0]!.groupDate).toBe('2026-10-30');
+    await expect(
+      detail({ date: '2026-10-31' }, lateNight, { from: '2026-10-24', to: '2026-10-30' }),
+    ).rejects.toThrow('fuera del período');
+  });
+});

@@ -37,6 +37,15 @@ export interface PerformanceOccurrence {
   /** Solo una «Una vez» con fecha: la de la planificación que usó el cálculo. */
   scheduledDate?: string;
   /**
+   * Día con el que se ordena y agrupa (✅ Tareas): la fecha de una diaria, el
+   * primer día del período de una recurrente más larga (solo para ubicarla:
+   * se muestra el período completo), la fecha para realizar de una «Una vez»
+   * o `null` sin fecha (al final).
+   */
+  groupDate?: string | null;
+  /** Período completo de una recurrente (`YYYY-MM-DD`); `null` en «Una vez» y urgentes. */
+  period?: { start: string; end: string } | null;
+  /**
    * Solo ✅ Tareas, decidido por el backend: la obligación pendiente se puede
    * marcar ahora como realizada (carga olvidada), con las fechas admitidas
    * (`YYYY-MM-DD`). Ausente: no se ofrece la acción.
@@ -84,4 +93,16 @@ export interface PerformanceResponse {
     percentage: number | null;
   }[];
   occurrences?: PerformanceOccurrence[];
+  /** Solo con filtros o página: total que pasa los filtros y cursor de la siguiente página. */
+  occurrencesPage?: { total: number; limit: number; nextCursor: string | null };
+}
+
+/** Estado del detalle visto desde la persona: el backend valida y filtra. */
+export type DetailStatusFilter = 'pending' | 'personal' | 'covered' | 'coverageGiven';
+
+/** Filtros del detalle (✅ Tareas → Desempeño → Detalle); ausente = todas. */
+export interface PerformanceDetailFilters {
+  date?: string;
+  frequency?: TaskFrequency;
+  status?: DetailStatusFilter;
 }

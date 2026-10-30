@@ -24,6 +24,15 @@ import {
   type LocalDate,
 } from '../lib/businessTime';
 import { canRevertExecution, lateCompletionBounds } from '../tasks/completionRules';
+import {
+  DETAIL_PAGE_SIZE,
+  decodeCursor,
+  detailPlacement,
+  detailStatusOf,
+  matchesFilters,
+  pageOf,
+  type DetailFilters,
+} from './performanceDetail';
 import { scheduledDateText } from '../tasks/taskSchedule';
 import type { TaskActor } from '../tasks/tasksService';
 import {
@@ -238,17 +247,38 @@ function detailActions(inputs: ObligationInputs, actor: TaskActor, now: Date) {
   };
 }
 
+/**
+ * Filtros y página del detalle de una persona (Tareas → Desempeño →
+ * Detalle). Opcional: sin ellos la respuesta es la de siempre (todas las
+ * obligaciones, en el orden del cálculo), así que los clientes anteriores,
+ * Inicio y 🥬 Huerta (que tiene su propio servicio) no cambian.
+ */
+export interface PerformanceDetailQuery extends DetailFilters {
+  cursor?: string;
+  limit?: number;
+}
+
 export async function getPerformance(
   actor: TaskActor,
   query: { from: string; to: string },
   requestedEmployeeId?: string,
   now = new Date(),
+  detail?: PerformanceDetailQuery,
 ) {
   if (actor.role === 'EMPLOYEE' && !actor.employeeId) throw new EmployeeLinkRequiredError();
   if (actor.role === 'EMPLOYEE' && requestedEmployeeId && requestedEmployeeId !== actor.employeeId)
     throw new ForbiddenError();
   const scopedEmployeeId = actor.role === 'EMPLOYEE' ? actor.employeeId! : requestedEmployeeId;
   const { from, to, today } = rangeOrThrow(query.from, query.to, now);
+  // Se valida antes de leer la base: un día fuera del rango o un cursor
+  // ajeno nunca generan obligaciones ni páginas.
+  if (detail?.date && (detail.date < formatLocalDate(from) || detail.date > formatLocalDate(to))) {
+    throw new ValidationError('El día elegido está fuera del período.');
+  }
+  const cursor = detail?.cursor ? decodeCursor(detail.cursor) : null;
+  if (detail?.cursor && !cursor) {
+    throw new ValidationError('No pudimos continuar la lista. Actualizá el detalle.');
+  }
   const timeZone = config.businessTimeZone;
   const rangeStart = startOfLocalDay(from, timeZone);
   const rangeEnd = startOfLocalDay(addDays(to, 1), timeZone);
@@ -346,6 +376,48 @@ export async function getPerformance(
     });
 
   const actionsOf = detailActions(inputs, actor, now);
+  const rowOf = (item: Occurrence) => ({
+    ...item,
+    status: occurrenceStatus(item),
+    assignedEmployee:
+      actor.role === 'ADMIN' || item.assignedEmployeeId === scopedEmployeeId
+        ? (employees.find((employee) => employee.id === item.assignedEmployeeId) ?? null)
+        : null,
+    completedByEmployee:
+      actor.role === 'ADMIN' || item.completedByEmployeeId === scopedEmployeeId
+        ? (employees.find((employee) => employee.id === item.completedByEmployeeId) ?? null)
+        : null,
+    completedAt: item.completedAt?.toISOString() ?? null,
+    ...detailPlacement(item),
+    ...actionsOf(item),
+  });
+  /**
+   * Obligaciones del detalle. Sin filtros ni página: todas, en el orden del
+   * cálculo (contrato de siempre). Con ellos: las de la persona que pasan los
+   * filtros, más recientes primero, y solo la página pedida; las métricas de
+   * arriba siguen siendo las de TODO el rango.
+   */
+  const occurrencesOf = () => {
+    if (!(requestedEmployeeId || actor.role === 'EMPLOYEE')) return { occurrences: undefined };
+    if (!detail || !scopedEmployeeId) return { occurrences: visibleOccurrences.map(rowOf) };
+    const rows = visibleOccurrences
+      .map((item) => ({
+        item,
+        description: item.description,
+        taskId: item.taskId,
+        periodKey: item.periodKey,
+        frequency: item.frequency,
+        status: detailStatusOf(item, scopedEmployeeId),
+        ...detailPlacement(item),
+      }))
+      .filter((row) => matchesFilters(row, detail));
+    const limit = detail.limit ?? DETAIL_PAGE_SIZE;
+    const page = pageOf(rows, cursor, limit);
+    return {
+      occurrences: page.items.map((row) => rowOf(row.item)),
+      occurrencesPage: { total: page.total, limit, nextCursor: page.nextCursor },
+    };
+  };
   return {
     // `today` y `generatedAt`: fecha de negocio y hora del servidor, para que
     // el reloj del día del frontend no dé por empezado un día que el backend
@@ -363,22 +435,6 @@ export async function getPerformance(
     special,
     employees: employeeMetrics,
     trend,
-    occurrences:
-      requestedEmployeeId || actor.role === 'EMPLOYEE'
-        ? visibleOccurrences.map((item) => ({
-            ...item,
-            status: occurrenceStatus(item),
-            assignedEmployee:
-              actor.role === 'ADMIN' || item.assignedEmployeeId === scopedEmployeeId
-                ? (employees.find((employee) => employee.id === item.assignedEmployeeId) ?? null)
-                : null,
-            completedByEmployee:
-              actor.role === 'ADMIN' || item.completedByEmployeeId === scopedEmployeeId
-                ? (employees.find((employee) => employee.id === item.completedByEmployeeId) ?? null)
-                : null,
-            completedAt: item.completedAt?.toISOString() ?? null,
-            ...actionsOf(item),
-          }))
-        : undefined,
+    ...occurrencesOf(),
   };
 }

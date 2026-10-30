@@ -209,3 +209,45 @@
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
 }
+
+/* ✅ Tareas → Desempeño → Detalle: filtros (fecha, frecuencia, estado) y
+   obligaciones agrupadas por día, más recientes primero, con «Ver más». */
+.performance-detail-filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-bottom: var(--space-3);
+}
+
+.performance-detail-filters__clear {
+  align-self: flex-start;
+}
+
+.performance-detail-group + .performance-detail-group {
+  margin-top: var(--space-3);
+}
+
+.performance-detail-group__title {
+  margin: 0;
+  padding-bottom: var(--space-1);
+  border-bottom: var(--border-width) solid var(--color-surface-muted);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+}
+
+.performance-detail-group .performance-detail {
+  margin: 0;
+}
+
+.performance-detail__footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.performance-detail__footer .stock__count {
+  margin: 0;
+}

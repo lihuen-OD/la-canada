@@ -356,6 +356,12 @@ Con el código de esta etapa ya validado (ver checklist más abajo), crear el pr
 - **Migración**: `20261030120000_task_execution_performed_on` (una columna `DATE NULL` y un CHECK), generada offline con `prisma migrate diff` y revisada; sin datos ni backfill. Aplicada **solo a `demo`** el 2026-10-30 con `db:migrate:deploy` (guarda `DATABASE_TARGET=demo`): 21 de 21 al día; huella de solo lectura de los datos reales idéntica antes y después.
 - **Pendiente para `production`** (con autorización propia, antes de publicar este código): aplicar `20261027120000_kitchen_garden_module` y `20261030120000_task_execution_performed_on`, en ese orden, con `db:migrate:deploy`. Es aditiva: el código publicado no lee la columna nueva y la deja en NULL.
 
+### Desempeño → Detalle con orden, filtros y «Ver más» 🟢 implementado y validado en `demo` (2026-10-30)
+
+- **Alcance** (pedido explícito del usuario): en Tareas → Desempeño → Detalle, obligaciones más recientes primero agrupadas por día, filtros de fecha, frecuencia y estado (con «Cubrió a otros» aparte), «Limpiar filtros» y páginas de 20 con «Ver más». Huerta sin cambios. Solo `demo`: sin PR, merge ni despliegue. Regla en `docs/BUSINESS_RULES.md`; detalle técnico en `docs/ARCHITECTURE.md` §45.
+- **Decisiones**: ampliar el endpoint de detalle con parámetros opcionales (sin ellos, la respuesta de siempre); filtros, orden y paginación en el backend sobre las obligaciones del cálculo existente (métricas del rango completo); paginación por cursor sobre un orden total; capacidad opcional de la fuente de datos para que la Huerta no la active; «Marcar como realizada» sin cambios de reglas.
+- **Sin migración ni cambios de datos.** Migraciones pendientes en `production` (de cambios anteriores, con autorización propia y antes de publicar): `20261027120000_kitchen_garden_module` y `20261030120000_task_execution_performed_on`, en ese orden.
+
 ## Etapa 6 — Integrar Neon Object Storage (fotografías y archivos)
 
 - **Objetivo**: conectar `FileAsset` (ya modelado en la Etapa 2, adaptado a Neon Object Storage en la Etapa 2.2) con el Object Storage real de Neon, gestionado desde el backend.

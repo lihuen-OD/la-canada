@@ -1,5 +1,6 @@
 import type { ChickenCoopPeriodDays } from './chickenCoopTypes';
 import type { EventType, GalleryCategory, TeamFilter } from './moreTypes';
+import type { PerformanceDetailFilters } from './performanceTypes';
 import type { MedicalRecordType, PetDueFilters } from './petTypes';
 import type {
   ListStockItemsParams,
@@ -43,6 +44,28 @@ export const queryKeys = {
       [...scope(userId), 'performance', 'summary', from, to] as const,
     employee: (userId: string, employeeId: string, from: string, to: string) =>
       [...scope(userId), 'performance', 'employee', employeeId, from, to] as const,
+    /**
+     * Detalle paginado («Ver más») de una persona: rango y filtros en la clave
+     * (cada combinación tiene sus páginas; cambiar cualquiera empieza de nuevo).
+     */
+    employeeDetail: (
+      userId: string,
+      employeeId: string,
+      from: string,
+      to: string,
+      filters: PerformanceDetailFilters,
+    ) =>
+      [
+        ...scope(userId),
+        'performance',
+        'employee-detail',
+        employeeId,
+        from,
+        to,
+        filters.date ?? 'all',
+        filters.frequency ?? 'all',
+        filters.status ?? 'all',
+      ] as const,
   },
   /**
    * 🥬 Huerta: claves PROPIAS (nunca `tasks` ni `performance`), así que sus

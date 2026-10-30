@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { AuthenticationRequiredError, ValidationError } from '../errors/AppError';
 import {
+  performanceDetailQuerySchema,
   performanceEmployeeParamsSchema,
   performanceRangeSchema,
 } from '../performance/performanceSchemas';
@@ -28,11 +29,28 @@ export async function getPerformanceSummary(req: Request, res: Response) {
     .json(await getPerformance(await actor(req), query));
 }
 
+/**
+ * Detalle de una persona. Con filtros o página (`date`, `frequency`,
+ * `status`, `cursor`, `limit`): solo esas obligaciones, más recientes
+ * primero; sin ellos, la respuesta de siempre.
+ */
 export async function getEmployeePerformance(req: Request, res: Response) {
-  const query = parse(performanceRangeSchema.safeParse(req.query), 'Rango inválido.');
+  const { from, to, ...detail } = parse(
+    performanceDetailQuerySchema.safeParse(req.query),
+    'Parámetros del detalle inválidos.',
+  );
   const params = parse(performanceEmployeeParamsSchema.safeParse(req.params), 'Empleado inválido.');
+  const detailRequested = Object.values(detail).some((value) => value !== undefined);
   res
     .set('Cache-Control', 'no-store')
     .status(200)
-    .json(await getPerformance(await actor(req), query, params.employeeId));
+    .json(
+      await getPerformance(
+        await actor(req),
+        { from, to },
+        params.employeeId,
+        new Date(),
+        detailRequested ? detail : undefined,
+      ),
+    );
 }

@@ -10,6 +10,7 @@ import type { PerformanceOccurrence, PerformanceResponse } from '../../api/perfo
 const api = vi.hoisted(() => ({
   fetchPerformance: vi.fn(),
   fetchEmployeePerformance: vi.fn(),
+  fetchEmployeePerformancePage: vi.fn(),
   registerLateCompletion: vi.fn(),
   revertTaskCompletion: vi.fn(),
   fetchTaskEmployees: vi.fn(),
@@ -18,6 +19,7 @@ const api = vi.hoisted(() => ({
 vi.mock('../../api/performanceApi', () => ({
   fetchPerformance: api.fetchPerformance,
   fetchEmployeePerformance: api.fetchEmployeePerformance,
+  fetchEmployeePerformancePage: api.fetchEmployeePerformancePage,
 }));
 vi.mock('../../api/tasksApi', () => ({
   registerLateCompletion: api.registerLateCompletion,
@@ -168,6 +170,8 @@ beforeEach(() => {
   setRole('EMPLOYEE');
   api.fetchPerformance.mockResolvedValue(response());
   api.fetchEmployeePerformance.mockResolvedValue(response());
+  // El detalle de Tareas pide páginas filtradas (una sola acá: sin `occurrencesPage`).
+  api.fetchEmployeePerformancePage.mockResolvedValue(response());
   api.registerLateCompletion.mockResolvedValue({ completion: {} });
   api.revertTaskCompletion.mockResolvedValue({ task: {} });
   api.fetchTaskEmployees.mockResolvedValue({ employees: [COKE, JUAN] });
@@ -389,7 +393,7 @@ describe('deshacer la carga olvidada', () => {
   });
 
   it('sin permiso del backend (`canRevert: false`) no hay botón', async () => {
-    api.fetchEmployeePerformance.mockResolvedValue(
+    api.fetchEmployeePerformancePage.mockResolvedValue(
       response(
         OCCURRENCES.map((item) =>
           item.lateRegistration
@@ -494,6 +498,7 @@ describe('aislamiento: una fuente sin acciones (🥬 Huerta) no muestra ninguna'
     expect(within(detail).queryByRole('link')).toBeNull();
     expect(detail).not.toHaveTextContent('Registrada el');
     expect(api.fetchEmployeePerformance).not.toHaveBeenCalled();
+    expect(api.fetchEmployeePerformancePage).not.toHaveBeenCalled();
     expect(api.fetchTaskEmployees).not.toHaveBeenCalled();
   });
 });
