@@ -14,6 +14,7 @@ import {
   createFamilyMemberBodySchema,
   createNewsBodySchema,
   createNewsReplyBodySchema,
+  deleteNewsMessageBodySchema,
   employeeStatusBodySchema,
   familyStatusBodySchema,
   idParamSchema,
@@ -24,13 +25,20 @@ import {
   teamProfilesQuerySchema,
   updateEmployeeBodySchema,
   updateEventBodySchema,
+  updateNewsBodySchema,
+  updateNewsReplyBodySchema,
   updateFamilyMemberBodySchema,
   updatePersonalProfileBodySchema,
   updateProfileBodySchema,
   uploadPhotoQuerySchema,
 } from '../more/moreSchemas';
-import { createNews, listNews } from '../more/newsService';
-import { createNewsReply, listNewsReplies } from '../more/newsRepliesService';
+import { createNews, deleteNews, listNews, updateNews } from '../more/newsService';
+import {
+  createNewsReply,
+  deleteNewsReply,
+  listNewsReplies,
+  updateNewsReply,
+} from '../more/newsRepliesService';
 import { createEvent, deleteEvent, listEvents, updateEvent } from '../more/eventsService';
 import { getWeather } from '../more/weatherService';
 import {
@@ -108,11 +116,11 @@ export async function getMoreSummaryHandler(req: Request, res: Response): Promis
 // ── 📝 Novedades ──
 
 export async function getNewsHandler(req: Request, res: Response): Promise<void> {
-  await actorFrom(req);
+  const actor = await actorFrom(req);
   send(
     res,
     200,
-    await listNews(parseOrThrow(listNewsQuerySchema, req.query, 'Filtros inválidos.')),
+    await listNews(actor, parseOrThrow(listNewsQuerySchema, req.query, 'Filtros inválidos.')),
   );
 }
 
@@ -123,15 +131,30 @@ export async function postNewsHandler(req: Request, res: Response): Promise<void
   send(res, result.kind === 'replay' ? result.status : 201, result.body);
 }
 
+/** Edición y eliminación de mensajes: el autor sale siempre de la sesión (`newsMessages.ts`). */
+export async function patchNewsHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const newsId = idFrom(req.params.id, 'novedad').toLowerCase();
+  const input = parseOrThrow(updateNewsBodySchema, req.body, 'Datos de la novedad inválidos.');
+  send(res, 200, await updateNews(actor, newsId, input, requestMeta(req)));
+}
+
+export async function postDeleteNewsHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const newsId = idFrom(req.params.id, 'novedad').toLowerCase();
+  const input = parseOrThrow(deleteNewsMessageBodySchema, req.body, 'Datos inválidos.');
+  send(res, 200, await deleteNews(actor, newsId, input, requestMeta(req)));
+}
+
 export async function getNewsRepliesHandler(req: Request, res: Response): Promise<void> {
-  await actorFrom(req);
+  const actor = await actorFrom(req);
   const newsId = idFrom(req.params.id, 'novedad');
   const query = parseOrThrow(
     listNewsRepliesQuerySchema,
     req.query,
     'Filtros de respuestas inválidos.',
   );
-  send(res, 200, await listNewsReplies(newsId, query));
+  send(res, 200, await listNewsReplies(actor, newsId, query));
 }
 
 export async function postNewsReplyHandler(req: Request, res: Response): Promise<void> {
@@ -150,6 +173,26 @@ export async function postNewsReplyHandler(req: Request, res: Response): Promise
     idempotencyKeyOf(req),
   );
   send(res, result.kind === 'replay' ? result.status : 201, result.body);
+}
+
+export async function patchNewsReplyHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const newsId = idFrom(req.params.id, 'novedad').toLowerCase();
+  const replyId = idFrom(req.params.replyId, 'respuesta').toLowerCase();
+  const input = parseOrThrow(
+    updateNewsReplyBodySchema,
+    req.body,
+    'Datos de la respuesta inválidos.',
+  );
+  send(res, 200, await updateNewsReply(actor, newsId, replyId, input, requestMeta(req)));
+}
+
+export async function postDeleteNewsReplyHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const newsId = idFrom(req.params.id, 'novedad').toLowerCase();
+  const replyId = idFrom(req.params.replyId, 'respuesta').toLowerCase();
+  const input = parseOrThrow(deleteNewsMessageBodySchema, req.body, 'Datos inválidos.');
+  send(res, 200, await deleteNewsReply(actor, newsId, replyId, input, requestMeta(req)));
 }
 
 // ── 📅 Eventos ──

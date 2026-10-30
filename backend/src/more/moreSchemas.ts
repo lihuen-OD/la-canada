@@ -120,6 +120,29 @@ export const createNewsReplyBodySchema = z
   })
   .strict();
 
+/**
+ * Versión que el cliente vio al abrir la edición o la confirmación: si el
+ * mensaje cambió desde entonces, el backend responde 409 en vez de pisarlo.
+ */
+const messageVersionSchema = z
+  .number({ message: 'Falta la versión del mensaje.' })
+  .int('La versión del mensaje es inválida.')
+  .min(1, 'La versión del mensaje es inválida.')
+  .max(2_147_483_647, 'La versión del mensaje es inválida.');
+
+/** Editar el texto de una novedad: las mismas validaciones que el alta. */
+export const updateNewsBodySchema = z
+  .object({ text: plainText('La novedad', NEWS_TEXT_MAX), version: messageVersionSchema })
+  .strict();
+
+/** Editar una respuesta: las mismas validaciones que al enviarla. */
+export const updateNewsReplyBodySchema = z
+  .object({ text: newsReplyTextSchema, version: messageVersionSchema })
+  .strict();
+
+/** Eliminar (lógicamente) una novedad o una respuesta. */
+export const deleteNewsMessageBodySchema = z.object({ version: messageVersionSchema }).strict();
+
 export const listNewsRepliesQuerySchema = z
   .object({
     beforeCreatedAt: z.iso.datetime({ offset: true }).optional(),

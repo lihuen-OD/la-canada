@@ -10,7 +10,10 @@ import {
   gardenResponse,
   gardenVersion,
   personalProfileResponse,
+  newsItem,
+  newsReply,
   newsResponse,
+  quoteOf,
   photosResponse,
   profileResponse,
   summaryResponse,
@@ -19,6 +22,7 @@ import {
 } from '../../test/fixtures/more';
 import type { TaskItem } from '../../api/taskTypes';
 import { ApiError } from '../../api/httpClient';
+import { OfflineError } from '../../api/transportErrors';
 
 const api = vi.hoisted(() => ({
   fetchMoreSummary: vi.fn(),
@@ -26,6 +30,10 @@ const api = vi.hoisted(() => ({
   createNews: vi.fn(),
   fetchNewsReplies: vi.fn(),
   createNewsReply: vi.fn(),
+  updateNews: vi.fn(),
+  deleteNews: vi.fn(),
+  updateNewsReply: vi.fn(),
+  deleteNewsReply: vi.fn(),
   fetchEvents: vi.fn(),
   createEvent: vi.fn(),
   updateEvent: vi.fn(),
@@ -230,13 +238,7 @@ describe('📝 Novedades', () => {
 
   it('carga solo al abrir, enfoca Responder y envía saltos de línea con una clave estable', async () => {
     const user = userEvent.setup();
-    const reply = {
-      id: 'reply-1',
-      text: 'Mañana viene el técnico\nA primera hora.',
-      createdAt: new Date().toISOString(),
-      author: { displayName: 'Administrador' },
-      quote: null,
-    };
+    const reply = newsReply({ text: 'Mañana viene el técnico\nA primera hora.' });
     api.fetchNewsReplies.mockResolvedValue({
       replies: [reply],
       hasOlder: false,
@@ -275,13 +277,11 @@ describe('📝 Novedades', () => {
     api.createNewsReply
       .mockRejectedValueOnce(new Error('La red no respondió.'))
       .mockResolvedValueOnce({
-        reply: {
+        reply: newsReply({
           id: 'reply-retry',
           text: 'Texto que queda',
-          createdAt: new Date().toISOString(),
           author: { displayName: 'Persona sintética' },
-          quote: null,
-        },
+        }),
       });
     renderMore('/more/news');
     await screen.findByText('Aviso sintético 0');
@@ -304,39 +304,31 @@ describe('📝 Novedades', () => {
 
   it('muestra la cita devuelta por el servidor y envía solo el ID de la respuesta citada', async () => {
     const user = userEvent.setup();
-    const oldReply = {
+    const oldText = 'Texto original fuera de la página cargada. '.repeat(8).trim();
+    const oldReply = newsReply({
       id: 'reply-old',
-      text: 'Texto original fuera de la página cargada. '.repeat(8).trim(),
+      text: oldText,
       createdAt: new Date(Date.now() - 60_000).toISOString(),
       author: { displayName: 'Viki' },
-      quote: null,
-    };
+    });
+    const newReply = newsReply({ id: 'reply-new', text: 'Mi respuesta', quote: quoteOf(oldReply) });
     api.fetchNewsReplies.mockResolvedValue({
-      replies: [
-        {
-          id: 'reply-new',
-          text: 'Mi respuesta',
-          createdAt: new Date().toISOString(),
-          author: { displayName: 'Administrador' },
-          quote: { id: 'reply-old', text: oldReply.text, author: oldReply.author },
-        },
-      ],
+      replies: [newReply],
       hasOlder: false,
       nextCursor: null,
     });
     api.createNewsReply.mockResolvedValue({
-      reply: {
+      reply: newsReply({
         id: 'reply-quoted',
         text: 'Lo reviso.',
-        createdAt: new Date().toISOString(),
         author: { displayName: 'Persona sintética' },
-        quote: { id: 'reply-new', text: 'Mi respuesta', author: { displayName: 'Administrador' } },
-      },
+        quote: quoteOf(newReply),
+      }),
     });
     renderMore('/more/news');
     await screen.findByText('Aviso sintético 0');
     await user.click(screen.getByRole('button', { name: 'Ver respuestas · 0' }));
-    expect(await screen.findByText(oldReply.text)).toBeInTheDocument();
+    expect(await screen.findByText(oldText)).toBeInTheDocument();
 
     const response = screen.getByText('Mi respuesta').closest('li');
     expect(response).not.toBeNull();
@@ -361,6 +353,371 @@ describe('📝 Novedades', () => {
         quotedReplyId: 'reply-new',
       }),
     );
+  });
+});
+
+describe('✏️ Novedades — editar y eliminar mensajes', () => {
+  const listOf = (...news: ReturnType<typeof newsItem>[]) => ({
+    ...newsResponse(0),
+    news,
+    total: news.length,
+  });
+  const repliesOf = (...replies: ReturnType<typeof newsReply>[]) => ({
+    replies,
+    hasOlder: false,
+    nextCursor: null,
+  });
+  const cardOf = (text: string) => screen.getByText(text).closest('li') as HTMLElement;
+
+  it('el menú «⋯» muestra solo las acciones que autoriza el backend', async () => {
+    const user = userEvent.setup();
+    api.fetchNews.mockResolvedValue(
+      listOf(
+        newsItem({ id: 'own', text: 'Propia sintética' }),
+        newsItem({
+          id: 'moderable',
+          text: 'Ajena moderable',
+          employee: { ...PERSON, id: 'emp-2', displayName: 'Otra sintética' },
+          permissions: { canEdit: false, canDelete: true, canReply: true },
+        }),
+        newsItem({
+          id: 'foreign',
+          text: 'Ajena sin acciones',
+          employee: { ...PERSON, id: 'emp-3', displayName: 'Tercera sintética' },
+          permissions: { canEdit: false, canDelete: false, canReply: true },
+        }),
+      ),
+    );
+    renderMore('/more/news');
+    await screen.findByText('Propia sintética');
+
+    await user.click(
+      within(cardOf('Propia sintética')).getByRole('button', {
+        name: 'Acciones de la novedad de Persona sintética',
+      }),
+    );
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      'Editar',
+      'Eliminar',
+    ]);
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+    await user.click(
+      within(cardOf('Ajena moderable')).getByRole('button', {
+        name: 'Acciones de la novedad de Otra sintética',
+      }),
+    );
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Eliminar']);
+    expect(
+      within(cardOf('Ajena sin acciones')).queryByRole('button', { name: /Acciones/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('teclado: flechas recorren el menú y Escape lo cierra devolviendo el foco al «⋯»', async () => {
+    const user = userEvent.setup();
+    renderMore('/more/news');
+    const trigger = await screen.findByRole('button', {
+      name: 'Acciones de la novedad de Persona sintética',
+    });
+    trigger.focus();
+    await user.keyboard('{Enter}');
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('menuitem', { name: 'Editar' })).toHaveFocus();
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('menuitem', { name: 'Eliminar' })).toHaveFocus();
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('menuitem', { name: 'Editar' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('editar la novedad: precarga, Cancelar no envía, sin cambios no envía y guardar usa la versión vista', async () => {
+    const user = userEvent.setup();
+    api.updateNews.mockResolvedValue({
+      news: newsItem({
+        text: 'Aviso corregido',
+        version: 2,
+        editedAt: '2026-10-30T15:32:00.000Z',
+      }),
+    });
+    renderMore('/more/news');
+    await screen.findByText('Aviso sintético 0');
+    const openEditor = async () => {
+      await user.click(
+        screen.getByRole('button', { name: 'Acciones de la novedad de Persona sintética' }),
+      );
+      await user.click(screen.getByRole('menuitem', { name: 'Editar' }));
+      return screen.getByRole('textbox', { name: 'Editar novedad' });
+    };
+
+    let editor = await openEditor();
+    expect(editor).toHaveValue('Aviso sintético 0');
+    await waitFor(() => expect(editor).toHaveFocus());
+    await user.type(editor, ' descartado');
+    await user.click(screen.getByRole('button', { name: 'Cancelar' }));
+    expect(screen.getByText('Aviso sintético 0')).toBeInTheDocument();
+
+    editor = await openEditor();
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    expect(api.updateNews).not.toHaveBeenCalled();
+    expect(screen.queryByRole('textbox', { name: 'Editar novedad' })).not.toBeInTheDocument();
+
+    editor = await openEditor();
+    await user.clear(editor);
+    await user.type(editor, '  Aviso   corregido ');
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() =>
+      expect(api.updateNews).toHaveBeenCalledWith('news-0', {
+        text: 'Aviso corregido',
+        version: 1,
+      }),
+    );
+    expect(await screen.findByText('Aviso corregido')).toBeInTheDocument();
+    expect(screen.getByText(/Editado ·/)).toHaveTextContent('Editado · 30/10/2026 12:32');
+    expect(api.fetchNews).toHaveBeenCalledTimes(1);
+  });
+
+  it('versión vieja: conserva el borrador, muestra la actual y no guarda hasta elegir', async () => {
+    const user = userEvent.setup();
+    api.fetchNews.mockResolvedValueOnce(newsResponse()).mockResolvedValue(
+      listOf(
+        newsItem({
+          text: 'Cambio de otra pantalla',
+          version: 2,
+          editedAt: new Date().toISOString(),
+        }),
+      ),
+    );
+    api.updateNews
+      .mockRejectedValueOnce(
+        new ApiError(
+          409,
+          'Este mensaje cambió desde que lo abriste. Revisá la versión actual y volvé a intentar.',
+          'NEWS_MESSAGE_VERSION_CONFLICT',
+        ),
+      )
+      .mockResolvedValueOnce({ news: newsItem({ text: 'Mi versión', version: 3 }) });
+    renderMore('/more/news');
+    await screen.findByText('Aviso sintético 0');
+    await user.click(
+      screen.getByRole('button', { name: 'Acciones de la novedad de Persona sintética' }),
+    );
+    await user.click(screen.getByRole('menuitem', { name: 'Editar' }));
+    const editor = screen.getByRole('textbox', { name: 'Editar novedad' });
+    await user.clear(editor);
+    await user.type(editor, 'Mi versión');
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+
+    expect(await screen.findByText(/cambió en otra pantalla/)).toBeInTheDocument();
+    expect(screen.getByText('Cambio de otra pantalla')).toBeInTheDocument();
+    expect(editor).toHaveValue('Mi versión');
+    expect(screen.getByRole('button', { name: 'Guardar cambios' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Conservar mi texto' }));
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(api.updateNews).toHaveBeenCalledTimes(2));
+    expect(api.updateNews.mock.calls[1]).toEqual(['news-0', { text: 'Mi versión', version: 2 }]);
+  });
+
+  it('sin conexión: no se envía otra vez sola y el texto editado se conserva', async () => {
+    const user = userEvent.setup();
+    api.updateNews.mockRejectedValue(new OfflineError());
+    renderMore('/more/news');
+    await screen.findByText('Aviso sintético 0');
+    await user.click(
+      screen.getByRole('button', { name: 'Acciones de la novedad de Persona sintética' }),
+    );
+    await user.click(screen.getByRole('menuitem', { name: 'Editar' }));
+    const editor = screen.getByRole('textbox', { name: 'Editar novedad' });
+    await user.type(editor, ' sin red');
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Sin conexión');
+    expect(editor).toHaveValue('Aviso sintético 0 sin red');
+    expect(api.updateNews).toHaveBeenCalledTimes(1);
+  });
+
+  it('eliminar una respuesta: confirmación, Cancelar conserva el borrador; marcador, cita y contador actualizados', async () => {
+    const user = userEvent.setup();
+    const mine = newsReply({
+      id: 'r-mine',
+      text: 'Texto que se elimina',
+      author: { displayName: 'Persona sintética' },
+      permissions: { canEdit: true, canDelete: true },
+    });
+    const quoting = newsReply({ id: 'r-quoting', text: 'Te cito', quote: quoteOf(mine) });
+    api.fetchNews.mockResolvedValue(
+      listOf(
+        newsItem({
+          replyCount: 2,
+          hasConversation: true,
+          lastReply: { createdAt: quoting.createdAt, author: quoting.author },
+        }),
+      ),
+    );
+    api.fetchNewsReplies.mockResolvedValue(repliesOf(mine, quoting));
+    api.deleteNewsReply.mockResolvedValue({
+      reply: {
+        ...mine,
+        text: null,
+        deleted: true,
+        version: 2,
+        permissions: { canEdit: false, canDelete: false },
+      },
+      conversation: {
+        replyCount: 1,
+        hasConversation: true,
+        lastReply: { createdAt: quoting.createdAt, author: quoting.author },
+      },
+    });
+    renderMore('/more/news');
+    await screen.findByText('Aviso sintético 0');
+    await user.click(screen.getByRole('button', { name: 'Ver respuestas · 2' }));
+    await screen.findAllByText('Texto que se elimina');
+    const composer = screen.getByRole('textbox', { name: 'Tu respuesta' });
+    await user.type(composer, 'Borrador en curso');
+
+    const openDelete = async () => {
+      await user.click(
+        screen.getByRole('button', { name: 'Acciones del mensaje de Persona sintética' }),
+      );
+      await user.click(screen.getByRole('menuitem', { name: 'Eliminar' }));
+      return screen.findByRole('dialog');
+    };
+    let dialog = await openDelete();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
+    expect(api.deleteNewsReply).not.toHaveBeenCalled();
+    expect(composer).toHaveValue('Borrador en curso');
+
+    dialog = await openDelete();
+    await user.click(within(dialog).getByRole('button', { name: 'Eliminar' }));
+    await waitFor(() => expect(api.deleteNewsReply).toHaveBeenCalledWith('news-0', 'r-mine', 1));
+    await waitFor(() => expect(screen.queryByText('Texto que se elimina')).not.toBeInTheDocument());
+    expect(screen.getAllByText('Mensaje eliminado')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Ocultar respuestas · 1' })).toBeInTheDocument();
+    expect(composer).toHaveValue('Borrador en curso');
+    const marker = screen.getAllByText('Mensaje eliminado')[0]?.closest('li') as HTMLElement;
+    expect(within(marker).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('respuesta editada: texto actual, «Editado» y la cita lo indica', async () => {
+    const user = userEvent.setup();
+    const edited = newsReply({
+      id: 'r-edited',
+      text: 'Texto corregido',
+      editedAt: '2026-10-30T15:00:00.000Z',
+    });
+    api.fetchNewsReplies.mockResolvedValue(
+      repliesOf(edited, newsReply({ id: 'r-2', text: 'Respondo', quote: quoteOf(edited) })),
+    );
+    renderMore('/more/news');
+    await screen.findByText('Aviso sintético 0');
+    await user.click(screen.getByRole('button', { name: 'Ver respuestas · 0' }));
+    const quote = (await screen.findByText('Respondo')).closest('li') as HTMLElement;
+    expect(within(quote).getByText('(editado)')).toBeInTheDocument();
+    expect(
+      within(quote).getByText(/Texto corregido/, { selector: 'blockquote p' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Editado ·/)).toHaveTextContent('30/10/2026 12:00');
+  });
+
+  it('novedad eliminada: con conversación se abre y se responde; sin conversación queda solo el marcador', async () => {
+    api.fetchNews.mockResolvedValue(
+      listOf(
+        newsItem({
+          id: 'with-thread',
+          text: null,
+          deleted: true,
+          hasConversation: true,
+          permissions: { canEdit: false, canDelete: false, canReply: true },
+        }),
+        newsItem({
+          id: 'lonely',
+          text: null,
+          deleted: true,
+          employee: { ...PERSON, id: 'emp-2', displayName: 'Otra sintética' },
+          permissions: { canEdit: false, canDelete: false, canReply: false },
+        }),
+      ),
+    );
+    renderMore('/more/news');
+    const markers = await screen.findAllByText('Novedad eliminada');
+    expect(markers).toHaveLength(2);
+    const [withThread, lonely] = markers.map((marker) => marker.closest('li') as HTMLElement);
+    expect(
+      within(withThread as HTMLElement).getByRole('button', { name: 'Responder' }),
+    ).toBeInTheDocument();
+    expect(
+      within(withThread as HTMLElement).getByRole('button', { name: 'Ver respuestas · 0' }),
+    ).toBeInTheDocument();
+    expect(within(lonely as HTMLElement).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('compatibilidad: con un backend anterior (sin permisos ni marcas nuevas) se responde como antes y no hay menú', async () => {
+    const user = userEvent.setup();
+    const legacy = {
+      id: 'news-legacy',
+      text: 'Aviso con contrato anterior',
+      createdAt: new Date().toISOString(),
+      employee: PERSON,
+      replyCount: 1,
+      lastReply: null,
+    };
+    api.fetchNews.mockResolvedValue({ ...newsResponse(0), news: [legacy], total: 1 });
+    api.fetchNewsReplies.mockResolvedValue({
+      replies: [
+        {
+          id: 'r-legacy',
+          text: 'Respuesta con contrato anterior',
+          createdAt: new Date().toISOString(),
+          author: { displayName: 'Administrador' },
+          quote: null,
+        },
+      ],
+      hasOlder: false,
+      nextCursor: null,
+    });
+    renderMore('/more/news');
+    await screen.findByText('Aviso con contrato anterior');
+    await user.click(screen.getByRole('button', { name: 'Ver respuestas · 1' }));
+    expect(await screen.findByText('Respuesta con contrato anterior')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Acciones/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Responder' })).toHaveLength(2);
+  });
+
+  it('la cita se elimina mientras se redacta: conserva el borrador, muestra el conflicto y envía sin cita', async () => {
+    const user = userEvent.setup();
+    const target = newsReply({ id: 'r-target', text: 'Mensaje a citar' });
+    api.fetchNewsReplies
+      .mockResolvedValueOnce(repliesOf(target))
+      .mockResolvedValue(repliesOf({ ...target, text: null, deleted: true, version: 2 }));
+    api.createNewsReply
+      .mockRejectedValueOnce(
+        new ApiError(
+          409,
+          'El mensaje que querés citar fue eliminado. Quitá la cita o elegí otro mensaje.',
+          'NEWS_REPLY_QUOTE_DELETED',
+        ),
+      )
+      .mockResolvedValueOnce({ reply: newsReply({ id: 'r-new', text: 'Mi borrador' }) });
+    renderMore('/more/news');
+    await screen.findByText('Aviso sintético 0');
+    await user.click(screen.getByRole('button', { name: 'Ver respuestas · 0' }));
+    const row = (await screen.findByText('Mensaje a citar')).closest('li') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: 'Responder' }));
+    const composer = screen.getByRole('textbox', { name: 'Tu respuesta' });
+    await user.type(composer, 'Mi borrador');
+    await user.click(screen.getByRole('button', { name: 'Enviar' }));
+
+    expect(await screen.findByText('El mensaje que citabas fue eliminado.')).toBeInTheDocument();
+    expect(composer).toHaveValue('Mi borrador');
+    expect(screen.getByRole('button', { name: 'Enviar' })).toBeDisabled();
+    await waitFor(() => expect(screen.queryByText('Mensaje a citar')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Quitar cita' }));
+    await user.click(screen.getByRole('button', { name: 'Enviar' }));
+    await waitFor(() => expect(api.createNewsReply).toHaveBeenCalledTimes(2));
+    expect(api.createNewsReply.mock.calls[1]?.[1]).toEqual({ text: 'Mi borrador' });
+    expect(api.createNewsReply.mock.calls[0]?.[2]).not.toBe(api.createNewsReply.mock.calls[1]?.[2]);
   });
 });
 

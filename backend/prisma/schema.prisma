@@ -263,6 +263,10 @@ model User {
   recordedNewsReports NewsReport[] @relation("NewsReportRecordedBy")
   deletedEvents       Event[]      @relation("EventDeletedBy")
   authoredNewsReplies NewsReply[]  @relation("NewsReplyAuthor")
+  /// Quién eliminó (lógicamente) una novedad o una respuesta: el autor o un
+  /// ADMIN que modera. Nunca reemplaza al autor original.
+  deletedNewsReports  NewsReport[] @relation("NewsReportDeletedBy")
+  deletedNewsReplies  NewsReply[]  @relation("NewsReplyDeletedBy")
 
   /// Etapa 5F — perfil personal (👤 Mi perfil de un usuario SIN `Employee`,
   /// p. ej. el ADMIN) y sus familiares (👨‍👩‍👧‍👦 Mi familia).
@@ -835,6 +839,18 @@ model NewsReport {
   recordedByUserId String? @map("recorded_by_user_id") @db.Uuid
   recordedBy       User?   @relation("NewsReportRecordedBy", fields: [recordedByUserId], references: [id])
 
+  /// Edición y eliminación lógica (2026-10-30). Solo el autor de carga
+  /// (`recordedByUserId`) edita el texto; el autor o un ADMIN eliminan. Sin
+  /// autor de carga (filas del seed) nadie edita y solo un ADMIN modera.
+  /// `version` sube con cada edición o eliminación (control de concurrencia
+  /// optimista); `editedAt` = última edición. Una novedad eliminada conserva
+  /// su texto solo en la base: la API nunca lo devuelve.
+  version         Int       @default(1)
+  editedAt        DateTime? @map("edited_at")
+  deletedAt       DateTime? @map("deleted_at")
+  deletedByUserId String?   @map("deleted_by_user_id") @db.Uuid
+  deletedBy       User?     @relation("NewsReportDeletedBy", fields: [deletedByUserId], references: [id], onDelete: Restrict)
+
   createdAt DateTime    @default(now()) @map("created_at")
   updatedAt DateTime    @updatedAt @map("updated_at")
   replies   NewsReply[]
@@ -863,6 +879,15 @@ model NewsReply {
   quotedReplyId String?     @map("quoted_reply_id") @db.Uuid
   quotedReply   NewsReply?  @relation("NewsReplyQuote", fields: [quotedReplyId, newsReportId], references: [id, newsReportId], onDelete: Restrict)
   quotes        NewsReply[] @relation("NewsReplyQuote")
+
+  /// Edición por su autor y eliminación lógica (autor o ADMIN), con la misma
+  /// semántica que `NewsReport`. Una respuesta eliminada queda en su lugar
+  /// como marcador y su texto nunca sale por la API.
+  version         Int       @default(1)
+  editedAt        DateTime? @map("edited_at")
+  deletedAt       DateTime? @map("deleted_at")
+  deletedByUserId String?   @map("deleted_by_user_id") @db.Uuid
+  deletedBy       User?     @relation("NewsReplyDeletedBy", fields: [deletedByUserId], references: [id], onDelete: Restrict)
 
   @@unique([id, newsReportId])
   @@index([newsReportId, createdAt, id])

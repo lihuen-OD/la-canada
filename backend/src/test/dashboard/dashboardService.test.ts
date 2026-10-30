@@ -231,4 +231,12 @@ describe('getDashboard', () => {
     expect(logged).toHaveBeenCalledWith(expect.stringContaining('mascotas'), 'timeout sintético');
     logged.mockRestore();
   });
+
+  it('📝 las novedades eliminadas se excluyen en la consulta, antes del límite de 3', async () => {
+    mocks.listTasks.mockResolvedValue({ tasks: [] });
+    await getDashboard(actor, new Date('2026-09-25T12:00:00.000Z'));
+    expect(mocks.news).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { deletedAt: null }, take: 3 }),
+    );
+  });
 });

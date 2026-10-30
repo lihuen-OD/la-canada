@@ -298,6 +298,15 @@ Desempeño se integra mediante navegación secundaria en chips `📋 Tareas | �
 - Sin columnas nuevas, alturas fijas, scrolls internos ni dependencias; solo reglas con prefijo `news-` en `more.css` (ningún estilo global).
 - Revisión con API interceptada y datos sintéticos en 360, 390, 768 y 1366 px: encabezado, formulario e historial con el mismo borde y ancho en los cuatro tamaños, sin desborde horizontal.
 
+#### Acciones sobre mensajes (2026-10-30)
+
+- Menú «⋯» (botón fantasma de 44 × 44 px, alineado a la derecha del encabezado de la novedad o de la respuesta; margen vertical negativo para no agrandar la fila). Despliega «Editar» y/o «Eliminar» (este en rojo) según los permisos del backend; sin permisos no hay botón. Panel blanco con borde suave y sombra elevada, anclado a la derecha (no desborda en 360 px).
+- Edición en el lugar del texto: textarea de tres filas (ancho de lectura), «Cancelar» y «Guardar cambios» a la derecha. Si el mensaje cambió en otra pantalla: aviso ámbar con la versión actual y «Usar la versión actual» / «Conservar mi texto»; si se eliminó: aviso ámbar y solo «Cancelar».
+- «Editado · dd/mm/aaaa HH:mm» en texto pequeño y apagado debajo del texto. En citas, «(editado)».
+- Marcadores en cursiva apagada: «Novedad eliminada» (conserva avatar, persona y fecha; con conversación sigue mostrando «Responder» y «Ver respuestas»; sin ella, ningún botón) y «Mensaje eliminado» (autor y fecha, sin cita ni botones). La cita de un eliminado muestra «Mensaje eliminado».
+- Confirmación con la hoja/diálogo existente (`ConfirmDialog`, tono peligro). Cita eliminada mientras se redacta: el bloque de cita del compositor pasa a ámbar con «El mensaje que citabas fue eliminado.» y «Quitar cita»; «Enviar» queda deshabilitado hasta resolverlo; el borrador no se toca.
+- Revisión con API interceptada y datos sintéticos en 360, 390, 768 y 1366 px (EMPLOYEE y ADMIN): menú abierto con mouse y con teclado (foco visible), edición, confirmación, conflicto de versión, conflicto de cita, marcadores y nombres/textos largos. Sin desborde horizontal; todos los botones visibles ≥ 44 px.
+
 ### Eventos
 
 - Bloque compacto de día y mes en verde oscuro.

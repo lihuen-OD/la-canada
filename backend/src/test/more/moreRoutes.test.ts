@@ -3,7 +3,15 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../../app';
-import { createNewsReplyBodySchema, NEWS_REPLY_TEXT_MAX } from '../../more/moreSchemas';
+import {
+  createNewsBodySchema,
+  createNewsReplyBodySchema,
+  deleteNewsMessageBodySchema,
+  NEWS_REPLY_TEXT_MAX,
+  NEWS_TEXT_MAX,
+  updateNewsBodySchema,
+  updateNewsReplyBodySchema,
+} from '../../more/moreSchemas';
 
 const ID = '11111111-1111-4111-8111-111111111111';
 
@@ -14,6 +22,10 @@ describe('☰ Más — ningún endpoint es público', () => {
     ['POST', '/api/v1/news'],
     ['GET', `/api/v1/news/${ID}/replies`],
     ['POST', `/api/v1/news/${ID}/replies`],
+    ['PATCH', `/api/v1/news/${ID}`],
+    ['POST', `/api/v1/news/${ID}/delete`],
+    ['PATCH', `/api/v1/news/${ID}/replies/${ID}`],
+    ['POST', `/api/v1/news/${ID}/replies/${ID}/delete`],
     ['GET', '/api/v1/events'],
     ['POST', '/api/v1/events'],
     ['PATCH', `/api/v1/events/${ID}`],
@@ -86,6 +98,22 @@ describe('routers de Más — superficie', () => {
     expect(source).not.toMatch(/newsRouter\.(get|post)\('\/:id\/replies', requireRole/);
   });
 
+  it('editar y eliminar mensajes: sesión, cuerpo JSON y permisos decididos en el servicio (sin requireRole)', () => {
+    expect(source).toMatch(
+      /newsRouter\.patch\('\/:id', requireJsonContentType, patchNewsHandler\)/,
+    );
+    expect(source).toMatch(
+      /newsRouter\.post\('\/:id\/delete', requireJsonContentType, postDeleteNewsHandler\)/,
+    );
+    expect(source).toMatch(
+      /newsRouter\.patch\('\/:id\/replies\/:replyId', requireJsonContentType, patchNewsReplyHandler\)/,
+    );
+    expect(source).toMatch(
+      /newsRouter\.post\(\s*'\/:id\/replies\/:replyId\/delete',\s*requireJsonContentType,\s*postDeleteNewsReplyHandler,?\s*\)/,
+    );
+    expect(source).not.toMatch(/newsRouter\.[a-z]+\([^;]*requireRole/);
+  });
+
   it('el único DELETE es un familiar propio (Etapa 5F); el único PUT es el formulario de Mi perfil', () => {
     expect([...source.matchAll(/\.delete\(/g)].map((m) => m.index)).toHaveLength(1);
     expect(source).toMatch(/meRouter\.delete\('\/family\/:id', deleteMyFamilyHandler\)/);
@@ -96,10 +124,10 @@ describe('routers de Más — superficie', () => {
   it('toda mutación exige un guard de cuerpo: JSON, o el parser binario acotado', () => {
     // `.*` hasta el cierre de la línea: los guards pueden traer paréntesis
     // propios (`requireRole('ADMIN')`) y no deben partirse al cortarlos.
-    const mutations = [...source.matchAll(/Router\.(post|patch|put)\((.*)\);/g)].map(
+    const mutations = [...source.matchAll(/Router\.(post|patch|put)\(([\s\S]*?)\);/g)].map(
       (m) => m[2] ?? '',
     );
-    expect(mutations.length).toBeGreaterThanOrEqual(13);
+    expect(mutations.length).toBeGreaterThanOrEqual(17);
     for (const args of mutations) {
       expect(args).toMatch(/requireJsonContentType|parseGalleryPhotoBody|parseGardenPlanBody/);
     }
@@ -140,5 +168,51 @@ describe('esquema de respuestas de novedades', () => {
     expect(
       createNewsReplyBodySchema.safeParse({ text: 'x'.repeat(NEWS_REPLY_TEXT_MAX + 1) }).success,
     ).toBe(false);
+  });
+});
+
+describe('esquemas de edición y eliminación de mensajes', () => {
+  it('editar una novedad usa las validaciones del alta y exige la versión vista', () => {
+    expect(updateNewsBodySchema.parse({ text: '  Se cortó   la luz ', version: 3 })).toEqual({
+      text: createNewsBodySchema.parse({ text: '  Se cortó   la luz ' }).text,
+      version: 3,
+    });
+    expect(updateNewsBodySchema.safeParse({ text: 'Aviso' }).success).toBe(false);
+    expect(updateNewsBodySchema.safeParse({ text: '   ', version: 1 }).success).toBe(false);
+    expect(
+      updateNewsBodySchema.safeParse({ text: 'x'.repeat(NEWS_TEXT_MAX + 1), version: 1 }).success,
+    ).toBe(false);
+    expect(updateNewsBodySchema.safeParse({ text: '<b>x</b>', version: 1 }).success).toBe(false);
+  });
+
+  it('editar una respuesta conserva saltos de línea y limita a 1000 caracteres', () => {
+    expect(updateNewsReplyBodySchema.parse({ text: ' a\r\nb ', version: 1 })).toEqual({
+      text: 'a\nb',
+      version: 1,
+    });
+    expect(
+      updateNewsReplyBodySchema.safeParse({ text: 'x'.repeat(NEWS_REPLY_TEXT_MAX + 1), version: 1 })
+        .success,
+    ).toBe(false);
+    expect(updateNewsReplyBodySchema.safeParse({ text: ' \n ', version: 1 }).success).toBe(false);
+  });
+
+  it.each([
+    { text: 'x', version: 1, authorUserId: ID },
+    { text: 'x', version: 1, employeeId: ID },
+    { text: 'x', version: 0 },
+    { text: 'x', version: 1.5 },
+    { text: 'x', version: '1' },
+  ])('rechaza autor, persona o versión enviados por el cliente: %j', (body) => {
+    expect(updateNewsBodySchema.safeParse(body).success).toBe(false);
+    expect(updateNewsReplyBodySchema.safeParse(body).success).toBe(false);
+  });
+
+  it('eliminar solo recibe la versión', () => {
+    expect(deleteNewsMessageBodySchema.parse({ version: 2 })).toEqual({ version: 2 });
+    expect(deleteNewsMessageBodySchema.safeParse({}).success).toBe(false);
+    expect(deleteNewsMessageBodySchema.safeParse({ version: 2, deletedByUserId: ID }).success).toBe(
+      false,
+    );
   });
 });

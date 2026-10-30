@@ -21,28 +21,56 @@ interface Page {
 }
 
 // 📝 Novedades
-export interface NewsItem {
+/** Acciones que el BACKEND autoriza a quien mira (nunca se deducen en el cliente). */
+export interface NewsMessagePermissions {
+  canEdit: boolean;
+  canDelete: boolean;
+}
+export interface NewsLastReply {
+  createdAt: string;
+  author: { displayName: string };
+}
+/** Contador y última respuesta vigentes de una novedad. */
+export interface NewsConversationStats {
+  /** Solo respuestas NO eliminadas. */
+  replyCount: number;
+  /** Hay al menos una respuesta, aunque estén todas eliminadas. */
+  hasConversation: boolean;
+  lastReply: NewsLastReply | null;
+}
+export interface NewsItem extends NewsConversationStats {
   id: string;
-  text: string;
+  /** `null` = eliminada: la API nunca devuelve su texto. */
+  text: string | null;
   createdAt: string;
   employee: PersonRef;
-  replyCount: number;
-  lastReply: { createdAt: string; author: { displayName: string } } | null;
+  version: number;
+  deleted: boolean;
+  editedAt: string | null;
+  permissions: NewsMessagePermissions & { canReply: boolean };
 }
 export interface NewsListResponse extends Page {
   news: NewsItem[];
 }
 export interface NewsReplyQuote {
   id: string;
-  text: string;
+  /** `null` = el mensaje citado fue eliminado. */
+  text: string | null;
   author: { displayName: string };
+  deleted: boolean;
+  editedAt: string | null;
 }
 export interface NewsReply {
   id: string;
-  text: string;
+  /** `null` = eliminada (queda «Mensaje eliminado» en su lugar). */
+  text: string | null;
   createdAt: string;
   author: { displayName: string };
+  version: number;
+  deleted: boolean;
+  editedAt: string | null;
   quote: NewsReplyQuote | null;
+  permissions: NewsMessagePermissions;
 }
 export interface NewsReplyCursor {
   createdAt: string;

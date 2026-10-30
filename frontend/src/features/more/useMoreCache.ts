@@ -2,12 +2,61 @@ import { useCallback } from 'react';
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { queryKeys } from '../../api/queryKeys';
 import type {
+  NewsConversationStats,
+  NewsItem,
   NewsRepliesPage,
   NewsReply,
   NewsReplyCursor,
   NewsListResponse,
 } from '../../api/moreTypes';
 import { useSessionScope } from '../../api/useSessionScope';
+
+type RepliesData = InfiniteData<NewsRepliesPage, NewsReplyCursor | null>;
+type NewsData = InfiniteData<NewsListResponse, number>;
+
+/** Reemplaza una novedad del listado cargado (sin recargar páginas). */
+function patchNewsItem(
+  data: NewsData | undefined,
+  newsId: string,
+  update: (item: NewsItem) => NewsItem,
+): NewsData | undefined {
+  if (!data) return data;
+  return {
+    ...data,
+    pages: data.pages.map((page) => ({
+      ...page,
+      news: page.news.map((item) => (item.id === newsId ? update(item) : item)),
+    })),
+  };
+}
+
+/**
+ * Un mensaje editado o eliminado: su fila y TODAS las citas a él en las
+ * páginas cargadas (texto actual, «Editado» o «Mensaje eliminado»).
+ */
+function patchReplyEverywhere(data: RepliesData | undefined, reply: NewsReply) {
+  if (!data) return data;
+  return {
+    ...data,
+    pages: data.pages.map((page) => ({
+      ...page,
+      replies: page.replies.map((item) => {
+        if (item.id === reply.id) return reply;
+        if (item.quote?.id !== reply.id) return item;
+        return {
+          ...item,
+          quote: {
+            id: reply.id,
+            author: reply.author,
+            text: reply.text,
+            deleted: reply.deleted,
+            editedAt: reply.editedAt,
+          },
+        };
+      }),
+    })),
+  };
+}
 
 /**
  * Invalidaciones selectivas de ☰ Más (Etapa 5X) — nunca un
@@ -43,39 +92,33 @@ export function useMoreCache() {
           queryClient.cancelQueries({ queryKey: repliesKey, exact: true }),
           queryClient.cancelQueries({ queryKey: newsKey, exact: true }),
         ]);
-        const previousReplies =
-          queryClient.getQueryData<InfiniteData<NewsRepliesPage, NewsReplyCursor | null>>(
-            repliesKey,
-          );
-        queryClient.setQueryData<InfiniteData<NewsRepliesPage, NewsReplyCursor | null>>(
-          repliesKey,
-          (previous) => {
-            if (!previous || previous.pages.length === 0) {
-              return {
-                pages: [{ replies: [reply], hasOlder: false, nextCursor: null }],
-                pageParams: [null],
-              };
-            }
-            alreadyInConversation = previous.pages.some((page) =>
-              page.replies.some((item) => item.id === reply.id),
-            );
-            if (alreadyInConversation) return previous;
-            const pages = [...previous.pages];
-            const latestPage = pages[0];
-            if (!latestPage) return previous;
-            const replies = new Map(latestPage.replies.map((item) => [item.id, item]));
-            replies.set(reply.id, reply);
-            pages[0] = {
-              ...latestPage,
-              replies: [...replies.values()].sort(
-                (left, right) =>
-                  left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
-              ),
+        const previousReplies = queryClient.getQueryData<RepliesData>(repliesKey);
+        queryClient.setQueryData<RepliesData>(repliesKey, (previous) => {
+          if (!previous || previous.pages.length === 0) {
+            return {
+              pages: [{ replies: [reply], hasOlder: false, nextCursor: null }],
+              pageParams: [null],
             };
-            return { ...previous, pages };
-          },
-        );
-        queryClient.setQueryData<InfiniteData<NewsListResponse, number>>(newsKey, (previous) => {
+          }
+          alreadyInConversation = previous.pages.some((page) =>
+            page.replies.some((item) => item.id === reply.id),
+          );
+          if (alreadyInConversation) return previous;
+          const pages = [...previous.pages];
+          const latestPage = pages[0];
+          if (!latestPage) return previous;
+          const replies = new Map(latestPage.replies.map((item) => [item.id, item]));
+          replies.set(reply.id, reply);
+          pages[0] = {
+            ...latestPage,
+            replies: [...replies.values()].sort(
+              (left, right) =>
+                left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+            ),
+          };
+          return { ...previous, pages };
+        });
+        queryClient.setQueryData<NewsData>(newsKey, (previous) => {
           if (!previous) return previous;
           return {
             ...previous,
@@ -86,6 +129,7 @@ export function useMoreCache() {
                   ? {
                       ...item,
                       replyCount: item.replyCount + 1,
+                      hasConversation: true,
                       lastReply:
                         item.lastReply && item.lastReply.createdAt > reply.createdAt
                           ? item.lastReply
@@ -100,6 +144,64 @@ export function useMoreCache() {
           await queryClient.invalidateQueries({ queryKey: repliesKey, exact: true });
         }
       },
+      [queryClient, userId],
+    ),
+    /**
+     * Novedad original editada o eliminada: la respuesta del backend
+     * reemplaza la fila del listado; Inicio muestra su texto (se invalida) y
+     * la tarjeta de Más cuenta solo las vigentes (solo al eliminar).
+     */
+    afterNewsMessageChange: useCallback(
+      (news: NewsItem, change: 'edit' | 'delete') => {
+        queryClient.setQueryData<NewsData>(queryKeys.more.news(userId), (previous) =>
+          patchNewsItem(previous, news.id, () => news),
+        );
+        if (change === 'delete') {
+          invalidate(queryKeys.dashboard(userId), queryKeys.more.summary(userId));
+        } else {
+          invalidate(queryKeys.dashboard(userId));
+        }
+      },
+      [invalidate, queryClient, userId],
+    ),
+    /**
+     * Respuesta editada o eliminada: solo esa conversación (fila y citas
+     * cargadas) y, al eliminar, el contador y la última respuesta vigentes
+     * que devuelve el backend. Inicio no muestra respuestas.
+     */
+    afterNewsReplyChange: useCallback(
+      (newsId: string, reply: NewsReply, conversation?: NewsConversationStats) => {
+        queryClient.setQueryData<RepliesData>(
+          queryKeys.more.newsReplies(userId, newsId),
+          (previous) => patchReplyEverywhere(previous, reply),
+        );
+        if (conversation) {
+          queryClient.setQueryData<NewsData>(queryKeys.more.news(userId), (previous) =>
+            patchNewsItem(previous, newsId, (item) => ({
+              ...item,
+              ...conversation,
+              permissions: {
+                ...item.permissions,
+                canReply: !item.deleted || conversation.hasConversation,
+              },
+            })),
+          );
+        }
+      },
+      [queryClient, userId],
+    ),
+    /** Conflicto o mensaje ausente: revalidar SOLO lo afectado. */
+    refreshNewsList: useCallback(
+      () =>
+        void queryClient.invalidateQueries({ queryKey: queryKeys.more.news(userId), exact: true }),
+      [queryClient, userId],
+    ),
+    refreshNewsConversation: useCallback(
+      (newsId: string) =>
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.more.newsReplies(userId, newsId),
+          exact: true,
+        }),
       [queryClient, userId],
     ),
     afterEventChange: useCallback(

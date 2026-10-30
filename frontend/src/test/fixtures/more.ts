@@ -5,7 +5,10 @@ import type {
   GardenVersionsResponse,
   ManagedEmployee,
   MoreSummary,
+  NewsItem,
   NewsListResponse,
+  NewsReply,
+  NewsReplyQuote,
   PersonalProfileResponse,
   PhotosListResponse,
   TeamMember,
@@ -30,13 +33,46 @@ export const newsResponse = (count = 1): NewsListResponse => ({
     text: `Aviso sintético ${index}`,
     createdAt: new Date(Date.now() - 3 * 3600_000).toISOString(),
     employee: PERSON,
+    version: 1,
+    deleted: false,
+    editedAt: null,
     replyCount: 0,
+    hasConversation: false,
     lastReply: null,
+    permissions: { canEdit: true, canDelete: true, canReply: true },
   })),
   page: 1,
   pageSize: 20,
   total: count,
   totalPages: 1,
+});
+
+/** Novedad sintética con el contrato completo (permisos según quien mira). */
+export const newsItem = (overrides: Partial<NewsItem> = {}): NewsItem => ({
+  ...(newsResponse().news[0] as NewsItem),
+  ...overrides,
+});
+
+export const newsReply = (overrides: Partial<NewsReply> = {}): NewsReply => ({
+  id: 'reply-1',
+  text: 'Respuesta sintética',
+  createdAt: new Date().toISOString(),
+  author: { displayName: 'Administrador' },
+  version: 1,
+  deleted: false,
+  editedAt: null,
+  quote: null,
+  permissions: { canEdit: false, canDelete: false },
+  ...overrides,
+});
+
+/** La cita tal como la arma el backend: estado actual del mensaje citado. */
+export const quoteOf = (reply: NewsReply): NewsReplyQuote => ({
+  id: reply.id,
+  text: reply.text,
+  author: reply.author,
+  deleted: reply.deleted,
+  editedAt: reply.editedAt,
 });
 
 export const eventsResponse = (): EventsResponse => ({

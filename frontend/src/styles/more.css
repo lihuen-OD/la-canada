@@ -439,6 +439,143 @@
   margin-top: var(--space-3);
 }
 
+/* Edición y eliminación de mensajes (2026-10-30): menú «⋯», edición en el
+   lugar, «Editado» y marcadores de eliminados. Solo dentro de Novedades. */
+
+.news-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.news-reply__head .news-menu {
+  margin-left: auto;
+}
+
+/* Área táctil de 44 px sin agrandar la fila del encabezado (avatar pequeño):
+   el sobrante vertical se compensa con margen negativo. */
+.news-menu__trigger {
+  width: var(--tap-target);
+  min-height: var(--tap-target);
+  margin-block: calc((var(--avatar-sm) - var(--tap-target)) / 2);
+  padding: 0;
+  font-size: var(--font-size-lg);
+  line-height: 1;
+}
+
+.news-menu__list {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: calc(var(--z-header) - 1);
+  display: grid;
+  min-width: 10rem;
+  padding: var(--space-1);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-raised);
+}
+
+.news-menu__item {
+  min-height: var(--tap-target);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.news-menu__item:hover,
+.news-menu__item:focus-visible {
+  background: var(--color-surface-hover);
+}
+
+.news-menu__item--danger {
+  color: var(--color-danger);
+}
+
+.news-edited {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.news-deleted,
+.news-reply__deleted,
+.news-quote__deleted {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-style: italic;
+}
+
+.news-reply__deleted {
+  margin-top: var(--space-1);
+  padding-bottom: var(--space-3);
+}
+
+.news-quote__edited {
+  font-size: var(--font-size-xs);
+}
+
+.news-edit {
+  display: grid;
+  gap: var(--space-2);
+  max-width: var(--news-reading-width);
+  margin-top: var(--space-1);
+}
+
+.news-edit__notice {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--color-warning-accent);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+.news-edit__notice p,
+.news-edit__notice blockquote {
+  margin: 0 0 var(--space-2);
+  white-space: pre-wrap;
+}
+
+.news-edit__notice blockquote {
+  color: var(--color-text);
+}
+
+.news-edit__notice-actions,
+.news-edit__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.news-edit .button {
+  min-height: var(--tap-target);
+}
+
+.news-reply-form__quote--conflict {
+  border-left-color: var(--color-warning-accent);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+@media (min-width: 48rem) {
+  .news-reply .news-edited,
+  .news-reply .news-edit,
+  .news-reply__deleted {
+    margin-left: calc(var(--avatar-sm) + var(--space-2));
+  }
+}
+
 /* ── Eventos ───────────────────────────────────────────────────────────── */
 
 .more__card + .more__eyebrow {

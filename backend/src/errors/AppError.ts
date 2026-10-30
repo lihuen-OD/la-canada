@@ -535,6 +535,52 @@ export class NewsReplyQuoteInvalidError extends AppError {
   }
 }
 
+export class NewsReplyNotFoundError extends AppError {
+  constructor() {
+    super('La respuesta no existe en esta novedad.', 404, { code: 'NEWS_REPLY_NOT_FOUND' });
+  }
+}
+
+/** Cita de una respuesta eliminada: el borrador se conserva y se elige otra cita o ninguna. */
+export class NewsReplyQuoteDeletedError extends AppError {
+  constructor() {
+    super('El mensaje que querés citar fue eliminado. Quitá la cita o elegí otro mensaje.', 409, {
+      code: 'NEWS_REPLY_QUOTE_DELETED',
+    });
+  }
+}
+
+/** Novedad eliminada que no tenía conversación: queda como marcador, sin respuestas nuevas. */
+export class NewsConversationClosedError extends AppError {
+  constructor() {
+    super('Esta novedad fue eliminada y no tiene una conversación para continuar.', 409, {
+      code: 'NEWS_CONVERSATION_CLOSED',
+    });
+  }
+}
+
+/** Editar un mensaje (novedad o respuesta) ya eliminado. */
+export class NewsMessageDeletedError extends AppError {
+  constructor() {
+    super('Este mensaje fue eliminado y ya no se puede editar.', 409, {
+      code: 'NEWS_MESSAGE_DELETED',
+    });
+  }
+}
+
+/** La versión enviada no es la vigente: otra pantalla editó o eliminó el mensaje. */
+export class NewsMessageVersionConflictError extends AppError {
+  constructor() {
+    super(
+      'Este mensaje cambió desde que lo abriste. Revisá la versión actual y volvé a intentar.',
+      409,
+      {
+        code: 'NEWS_MESSAGE_VERSION_CONFLICT',
+      },
+    );
+  }
+}
+
 /** Mismo título, fecha y tipo que otro evento vigente. */
 export class EventDuplicateError extends AppError {
   constructor() {

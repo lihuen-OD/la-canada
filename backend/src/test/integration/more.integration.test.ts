@@ -742,6 +742,555 @@ describe('💬 Conversaciones por novedad', () => {
   });
 });
 
+describe('✏️ Edición y eliminación de mensajes de Novedades', () => {
+  let other: Actor;
+  let otherEmployeeId = '';
+
+  beforeAll(async () => {
+    const emp = await prisma.employee.create({
+      data: {
+        code: `${RUN}-emp-other`,
+        displayName: `Otra sintética ${NAME_TAG}`,
+        role: 'Otro',
+        colorHex: '#8a6d3b',
+      },
+      select: { id: true },
+    });
+    otherEmployeeId = emp.id;
+    employeeIds.push(emp.id);
+    other = await createActor('EMPLOYEE', 'emp-other', otherEmployeeId);
+  });
+
+  /** Novedad sintética con fecha vieja (no aparece arriba del historial real de `demo`). */
+  async function syntheticNews(text: string, recordedByUserId: string | null) {
+    return prisma.newsReport.create({
+      data: {
+        employeeId,
+        text: `${RUN} ${text}`,
+        recordedByUserId,
+        createdAt: new Date('2020-02-03T04:05:06.000Z'),
+      },
+      select: { id: true, text: true, createdAt: true, employeeId: true },
+    });
+  }
+
+  async function reply(newsId: string, actor: Actor, text: string, quotedReplyId?: string) {
+    const response = await request(app)
+      .post(`/api/v1/news/${newsId}/replies`)
+      .set(as(actor))
+      .set('Idempotency-Key', key())
+      .send({ text: `${RUN} ${text}`, ...(quotedReplyId ? { quotedReplyId } : {}) });
+    expect(response.status).toBe(201);
+    return response.body.reply as { id: string; text: string; createdAt: string; version: number };
+  }
+
+  const edit = (actor: Actor, path: string, body: object) =>
+    request(app).patch(`/api/v1/news/${path}`).set(as(actor)).send(body);
+  const remove = (actor: Actor, path: string, version: number) =>
+    request(app).post(`/api/v1/news/${path}/delete`).set(as(actor)).send({ version });
+  const audits = (entityId: string, action: string) =>
+    prisma.auditLog.findMany({ where: { entityId, action }, orderBy: { createdAt: 'asc' } });
+
+  it('EMPLOYEE autor edita novedad y respuesta: misma fila, autor, fecha y cantidad; auditoría; sin cambios no escribe', async () => {
+    const news = await syntheticNews('Aviso para editar', employee.userId);
+    const original = await reply(news.id, employee, 'línea uno');
+    const repliesBefore = await prisma.newsReply.count({ where: { newsReportId: news.id } });
+    const newsBefore = await prisma.newsReport.count({ where: { employeeId } });
+
+    const editedNews = await edit(employee, news.id, {
+      text: `  ${RUN}   Aviso   corregido `,
+      version: 1,
+    });
+    expect(editedNews.status).toBe(200);
+    expect(editedNews.body.news).toMatchObject({
+      id: news.id,
+      text: `${RUN} Aviso corregido`,
+      createdAt: news.createdAt.toISOString(),
+      employee: { id: employeeId },
+      version: 2,
+      deleted: false,
+      editedAt: expect.any(String),
+      permissions: { canEdit: true, canDelete: true, canReply: true },
+    });
+    const editedReply = await edit(employee, `${news.id}/replies/${original.id}`, {
+      text: `${RUN} línea uno\nlínea dos`,
+      version: 1,
+    });
+    expect(editedReply.status).toBe(200);
+    expect(editedReply.body.reply).toMatchObject({
+      id: original.id,
+      text: `${RUN} línea uno\nlínea dos`,
+      createdAt: original.createdAt,
+      author: { displayName: `Sintético ${NAME_TAG}` },
+      version: 2,
+      editedAt: expect.any(String),
+    });
+
+    const newsRow = await prisma.newsReport.findUniqueOrThrow({ where: { id: news.id } });
+    expect(newsRow).toMatchObject({
+      recordedByUserId: employee.userId,
+      employeeId,
+      createdAt: news.createdAt,
+      deletedAt: null,
+    });
+    const replyRow = await prisma.newsReply.findUniqueOrThrow({ where: { id: original.id } });
+    expect(replyRow).toMatchObject({ authorUserId: employee.userId, newsReportId: news.id });
+    expect(await prisma.newsReply.count({ where: { newsReportId: news.id } })).toBe(repliesBefore);
+    expect(await prisma.newsReport.count({ where: { employeeId } })).toBe(newsBefore);
+
+    const [newsAudit] = await audits(news.id, 'news.updated');
+    expect(newsAudit).toMatchObject({
+      actorUserId: employee.userId,
+      previousState: { text: news.text, version: 1 },
+      newState: { text: `${RUN} Aviso corregido`, version: 2 },
+    });
+    const [replyAudit] = await audits(original.id, 'news.reply.updated');
+    expect(replyAudit).toMatchObject({
+      actorUserId: employee.userId,
+      previousState: { text: `${RUN} línea uno`, version: 1 },
+      newState: { text: `${RUN} línea uno\nlínea dos`, version: 2 },
+    });
+
+    // Guardar sin cambios (incluso con una versión vieja): 200, sin escritura ni auditoría.
+    const auditsBefore = await prisma.auditLog.count({ where: { entityId: news.id } });
+    const unchanged = await edit(employee, news.id, { text: `${RUN} Aviso corregido`, version: 1 });
+    expect(unchanged.status).toBe(200);
+    expect(unchanged.body.news.version).toBe(2);
+    expect(await prisma.auditLog.count({ where: { entityId: news.id } })).toBe(auditsBefore);
+    expect(
+      (await prisma.newsReport.findUniqueOrThrow({ where: { id: news.id } })).updatedAt,
+    ).toEqual(newsRow.updatedAt);
+  });
+
+  it('el ADMIN edita y elimina lo propio; un usuario ajeno no puede ni con requests manuales; el ADMIN modera sin editar', async () => {
+    const adminNews = await syntheticNews('Aviso del administrador', admin.userId);
+    expect((await edit(admin, adminNews.id, { text: `${RUN} propio`, version: 1 })).status).toBe(
+      200,
+    );
+    const employeeReply = await reply(adminNews.id, employee, 'respuesta de la persona');
+
+    const forbidden = [
+      await edit(employee, adminNews.id, { text: `${RUN} ajeno`, version: 2 }),
+      await remove(employee, adminNews.id, 2),
+      await edit(other, `${adminNews.id}/replies/${employeeReply.id}`, {
+        text: `${RUN} ajeno`,
+        version: 1,
+      }),
+      await remove(other, `${adminNews.id}/replies/${employeeReply.id}`, 1),
+      // El ADMIN modera (elimina) pero no edita palabras ajenas.
+      await edit(admin, `${adminNews.id}/replies/${employeeReply.id}`, {
+        text: `${RUN} moderado`,
+        version: 1,
+      }),
+    ];
+    expect(forbidden.map((response) => response.status)).toEqual([403, 403, 403, 403, 403]);
+    // El autor nunca viaja en el cuerpo: un request manual que lo envía se rechaza.
+    const spoofed = await edit(employee, adminNews.id, {
+      text: `${RUN} con autor`,
+      version: 2,
+      authorUserId: employee.userId,
+    });
+    expect(spoofed.status).toBe(400);
+    expect(
+      (await prisma.newsReply.findUniqueOrThrow({ where: { id: employeeReply.id } })).text,
+    ).toBe(`${RUN} respuesta de la persona`);
+
+    const moderated = await remove(admin, `${adminNews.id}/replies/${employeeReply.id}`, 1);
+    expect(moderated.status).toBe(200);
+    expect(moderated.body.reply).toMatchObject({
+      id: employeeReply.id,
+      deleted: true,
+      text: null,
+      author: { displayName: `Sintético ${NAME_TAG}` },
+      permissions: { canEdit: false, canDelete: false },
+    });
+    expect(
+      await prisma.newsReply.findUniqueOrThrow({ where: { id: employeeReply.id } }),
+    ).toMatchObject({ authorUserId: employee.userId, deletedByUserId: admin.userId });
+    const [moderation] = await audits(employeeReply.id, 'news.reply.deleted');
+    expect(moderation).toMatchObject({
+      actorUserId: admin.userId,
+      newState: { deleted: true, authorUserId: employee.userId, moderated: true },
+    });
+
+    const ownDelete = await remove(admin, adminNews.id, 2);
+    expect(ownDelete.status).toBe(200);
+    const [ownAudit] = await audits(adminNews.id, 'news.deleted');
+    expect(ownAudit).toMatchObject({ actorUserId: admin.userId, newState: { moderated: false } });
+
+    // Una novedad registrada por el ADMIN a nombre de la persona: la persona
+    // que reporta NO es su autora (no se habilita por coincidencia de empleado).
+    const onBehalf = await syntheticNews(
+      'Reportada por la persona, cargada por ADMIN',
+      admin.userId,
+    );
+    expect((await edit(employee, onBehalf.id, { text: `${RUN} intento`, version: 1 })).status).toBe(
+      403,
+    );
+  });
+
+  it('una novedad antigua sin autor de carga: nadie la edita, el ADMIN la modera, sin atribución inventada', async () => {
+    const legacy = await syntheticNews('Aviso antiguo sin autor', null);
+    for (const actor of [employee, admin, other]) {
+      expect((await edit(actor, legacy.id, { text: `${RUN} x`, version: 1 })).status).toBe(403);
+    }
+    expect((await remove(employee, legacy.id, 1)).status).toBe(403);
+    const deleted = await remove(admin, legacy.id, 1);
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.news).toMatchObject({
+      deleted: true,
+      text: null,
+      employee: { id: employeeId },
+      permissions: { canEdit: false, canDelete: false, canReply: false },
+    });
+    const row = await prisma.newsReport.findUniqueOrThrow({ where: { id: legacy.id } });
+    expect(row).toMatchObject({ recordedByUserId: null, deletedByUserId: admin.userId });
+    const [audit] = await audits(legacy.id, 'news.deleted');
+    expect(audit).toMatchObject({
+      actorUserId: admin.userId,
+      newState: { authorUserId: null, moderated: true },
+    });
+  });
+
+  it('dos ediciones simultáneas: una gana y la otra recibe conflicto sin pisarla; versión vieja → 409', async () => {
+    const news = await syntheticNews('Concurrencia de edición', employee.userId);
+    const target = await reply(news.id, employee, 'texto base');
+    const results = await Promise.all(
+      ['A', 'B'].map((tag) =>
+        edit(employee, `${news.id}/replies/${target.id}`, {
+          text: `${RUN} versión ${tag}`,
+          version: 1,
+        }),
+      ),
+    );
+    const statuses = results.map((response) => response.status).sort();
+    expect(statuses).toEqual([200, 409]);
+    const winner = results.find((response) => response.status === 200);
+    const loser = results.find((response) => response.status === 409);
+    expect(loser?.body.error.code).toBe('NEWS_MESSAGE_VERSION_CONFLICT');
+    const row = await prisma.newsReply.findUniqueOrThrow({ where: { id: target.id } });
+    expect(row.text).toBe(winner?.body.reply.text);
+    expect(row.version).toBe(2);
+    expect(await audits(target.id, 'news.reply.updated')).toHaveLength(1);
+
+    const stale = await edit(employee, `${news.id}/replies/${target.id}`, {
+      text: `${RUN} pantalla vieja`,
+      version: 1,
+    });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error.code).toBe('NEWS_MESSAGE_VERSION_CONFLICT');
+    expect((await prisma.newsReply.findUniqueOrThrow({ where: { id: target.id } })).text).toBe(
+      row.text,
+    );
+  });
+
+  it('carrera editar/eliminar y doble eliminación: un solo resultado, auditoría única y sin editar lo eliminado', async () => {
+    const news = await syntheticNews('Carreras', employee.userId);
+    const raced = await reply(news.id, employee, 'en carrera');
+    const [edited, deleted] = await Promise.all([
+      edit(employee, `${news.id}/replies/${raced.id}`, { text: `${RUN} editado`, version: 1 }),
+      remove(employee, `${news.id}/replies/${raced.id}`, 1),
+    ]);
+    const statuses = [edited.status, deleted.status].sort();
+    expect(statuses).toEqual([200, 409]);
+    const row = await prisma.newsReply.findUniqueOrThrow({ where: { id: raced.id } });
+    if (deleted.status === 200) {
+      expect(row.deletedAt).not.toBeNull();
+      expect(row.text).toBe(`${RUN} en carrera`);
+      expect(['NEWS_MESSAGE_DELETED', 'NEWS_MESSAGE_VERSION_CONFLICT']).toContain(
+        edited.body.error.code,
+      );
+    } else {
+      expect(row.deletedAt).toBeNull();
+      expect(row.text).toBe(`${RUN} editado`);
+      expect(deleted.body.error.code).toBe('NEWS_MESSAGE_VERSION_CONFLICT');
+    }
+    const raceAudits =
+      (await audits(raced.id, 'news.reply.updated')).length +
+      (await audits(raced.id, 'news.reply.deleted')).length;
+    expect(raceAudits).toBe(1);
+
+    const twice = await reply(news.id, employee, 'doble eliminación');
+    const both = await Promise.all([
+      remove(employee, `${news.id}/replies/${twice.id}`, 1),
+      remove(admin, `${news.id}/replies/${twice.id}`, 1),
+    ]);
+    expect(both.map((response) => response.status)).toEqual([200, 200]);
+    expect(both.every((response) => response.body.reply.deleted === true)).toBe(true);
+    const repeat = await remove(employee, `${news.id}/replies/${twice.id}`, 1);
+    expect(repeat.status).toBe(200);
+    expect(await audits(twice.id, 'news.reply.deleted')).toHaveLength(1);
+    const editDeleted = await edit(employee, `${news.id}/replies/${twice.id}`, {
+      text: `${RUN} revivir`,
+      version: 2,
+    });
+    expect(editDeleted.status).toBe(409);
+    expect(editDeleted.body.error.code).toBe('NEWS_MESSAGE_DELETED');
+    expect((await prisma.newsReply.findUniqueOrThrow({ where: { id: twice.id } })).text).toBe(
+      `${RUN} doble eliminación`,
+    );
+  });
+
+  it('eliminar la novedad original conserva sus respuestas y la conversación sigue; sin respuestas queda cerrada', async () => {
+    const withReplies = await syntheticNews('Original con conversación', employee.userId);
+    const first = await reply(withReplies.id, admin, 'primera');
+    await reply(withReplies.id, other, 'segunda', first.id);
+    const before = await prisma.newsReply.findMany({
+      where: { newsReportId: withReplies.id },
+      orderBy: { id: 'asc' },
+    });
+    const deleted = await remove(employee, withReplies.id, 1);
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.news).toMatchObject({
+      id: withReplies.id,
+      text: null,
+      deleted: true,
+      editedAt: null,
+      replyCount: 2,
+      hasConversation: true,
+      permissions: { canEdit: false, canDelete: false, canReply: true },
+    });
+    expect(JSON.stringify(deleted.body)).not.toContain('Original con conversación');
+    expect(
+      await prisma.newsReply.findMany({
+        where: { newsReportId: withReplies.id },
+        orderBy: { id: 'asc' },
+      }),
+    ).toEqual(before);
+    await reply(withReplies.id, other, 'seguimos conversando', first.id);
+    expect(
+      (await edit(employee, withReplies.id, { text: `${RUN} x`, version: 2 })).body.error.code,
+    ).toBe('NEWS_MESSAGE_DELETED');
+
+    const lonely = await syntheticNews('Original sin respuestas', employee.userId);
+    expect((await remove(employee, lonely.id, 1)).body.news).toMatchObject({
+      hasConversation: false,
+      permissions: { canReply: false },
+    });
+    const closed = await request(app)
+      .post(`/api/v1/news/${lonely.id}/replies`)
+      .set(as(other))
+      .set('Idempotency-Key', key())
+      .send({ text: `${RUN} no debería` });
+    expect(closed.status).toBe(409);
+    expect(closed.body.error.code).toBe('NEWS_CONVERSATION_CLOSED');
+    expect(await prisma.newsReply.count({ where: { newsReportId: lonely.id } })).toBe(0);
+  });
+
+  it('citas de mensajes editados y eliminados, aun fuera de la página cargada; no se cita un eliminado', async () => {
+    const news = await syntheticNews('Citas', employee.userId);
+    const oldest = await prisma.newsReply.create({
+      data: {
+        newsReportId: news.id,
+        authorUserId: employee.userId,
+        text: `${RUN} texto original citado`,
+        createdAt: new Date('2026-10-01T00:00:00.000Z'),
+      },
+      select: { id: true },
+    });
+    await prisma.newsReply.createMany({
+      data: Array.from({ length: 21 }, (_, index) => ({
+        newsReportId: news.id,
+        authorUserId: admin.userId,
+        text: `${RUN} relleno-${index}`,
+        createdAt: new Date(Date.UTC(2026, 9, 2, 0, index)),
+      })),
+    });
+    const quoting = await reply(news.id, other, 'cito la más vieja', oldest.id);
+
+    expect(
+      (
+        await edit(employee, `${news.id}/replies/${oldest.id}`, {
+          text: `${RUN} texto corregido`,
+          version: 1,
+        })
+      ).status,
+    ).toBe(200);
+    const afterEdit = await request(app).get(`/api/v1/news/${news.id}/replies`).set(as(other));
+    expect(afterEdit.body.replies.some((item: { id: string }) => item.id === oldest.id)).toBe(
+      false,
+    );
+    const quoted = afterEdit.body.replies.find((item: { id: string }) => item.id === quoting.id);
+    expect(quoted.quote).toMatchObject({
+      id: oldest.id,
+      text: `${RUN} texto corregido`,
+      deleted: false,
+      editedAt: expect.any(String),
+    });
+
+    expect((await remove(employee, `${news.id}/replies/${oldest.id}`, 2)).status).toBe(200);
+    const afterDelete = await request(app).get(`/api/v1/news/${news.id}/replies`).set(as(other));
+    const quotedDeleted = afterDelete.body.replies.find(
+      (item: { id: string }) => item.id === quoting.id,
+    );
+    expect(quotedDeleted.quote).toEqual({
+      id: oldest.id,
+      text: null,
+      author: { displayName: `Sintético ${NAME_TAG}` },
+      deleted: true,
+      editedAt: null,
+    });
+    expect(JSON.stringify(afterDelete.body)).not.toMatch(/texto (original citado|corregido)/);
+    const older = await request(app)
+      .get(`/api/v1/news/${news.id}/replies`)
+      .query({
+        beforeCreatedAt: afterDelete.body.nextCursor.createdAt,
+        beforeId: afterDelete.body.nextCursor.id,
+      })
+      .set(as(other));
+    expect(older.body.replies[0]).toMatchObject({
+      id: oldest.id,
+      deleted: true,
+      text: null,
+      quote: null,
+      editedAt: null,
+    });
+
+    const quoteDeleted = await request(app)
+      .post(`/api/v1/news/${news.id}/replies`)
+      .set(as(other))
+      .set('Idempotency-Key', key())
+      .send({ text: `${RUN} cito lo eliminado`, quotedReplyId: oldest.id });
+    expect(quoteDeleted.status).toBe(409);
+    expect(quoteDeleted.body.error.code).toBe('NEWS_REPLY_QUOTE_DELETED');
+  });
+
+  it('reintentar un envío viejo después de editarlo o eliminarlo devuelve el estado actual, nunca el texto original', async () => {
+    const news = await syntheticNews('Idempotencia con edición', employee.userId);
+    const idem = key();
+    const body = { text: `${RUN} primer texto enviado` };
+    const post = () =>
+      request(app)
+        .post(`/api/v1/news/${news.id}/replies`)
+        .set(as(employee))
+        .set('Idempotency-Key', idem)
+        .send(body);
+    const created = await post();
+    expect(created.status).toBe(201);
+    await edit(employee, `${news.id}/replies/${created.body.reply.id}`, {
+      text: `${RUN} texto editado`,
+      version: 1,
+    });
+    const replayAfterEdit = await post();
+    expect(replayAfterEdit.status).toBe(201);
+    expect(replayAfterEdit.body.reply).toMatchObject({
+      id: created.body.reply.id,
+      text: `${RUN} texto editado`,
+      version: 2,
+    });
+    await remove(employee, `${news.id}/replies/${created.body.reply.id}`, 2);
+    const replayAfterDelete = await post();
+    expect(replayAfterDelete.body.reply).toMatchObject({
+      id: created.body.reply.id,
+      deleted: true,
+      text: null,
+    });
+    expect(JSON.stringify(replayAfterDelete.body)).not.toMatch(/primer texto|texto editado/);
+    expect(await prisma.newsReply.count({ where: { newsReportId: news.id } })).toBe(1);
+
+    const newsKey = key();
+    const newsBody = { text: `${RUN} novedad para reintentar` };
+    const postNews = () =>
+      request(app)
+        .post('/api/v1/news')
+        .set(as(employee))
+        .set('Idempotency-Key', newsKey)
+        .send(newsBody);
+    const createdNews = await postNews();
+    expect(createdNews.status).toBe(201);
+    const newsId = createdNews.body.news.id as string;
+    await edit(employee, newsId, { text: `${RUN} novedad corregida`, version: 1 });
+    expect((await postNews()).body.news).toMatchObject({
+      id: newsId,
+      text: `${RUN} novedad corregida`,
+    });
+    await remove(employee, newsId, 2);
+    const replayDeletedNews = await postNews();
+    expect(replayDeletedNews.body.news).toMatchObject({ id: newsId, deleted: true, text: null });
+    expect(JSON.stringify(replayDeletedNews.body)).not.toMatch(
+      /novedad (para reintentar|corregida)/,
+    );
+
+    // Inicio y la tarjeta de Más: la eliminada no aparece ni deja huecos.
+    const dashboard = await request(app).get('/api/v1/dashboard').set(as(admin));
+    expect(dashboard.status).toBe(200);
+    const latest = dashboard.body.latestNews as { id: string; text: string }[];
+    expect(latest.some((item) => item.id === newsId)).toBe(false);
+    const liveCount = await prisma.newsReport.count({ where: { deletedAt: null } });
+    expect(latest).toHaveLength(Math.min(3, liveCount));
+    expect(JSON.stringify(dashboard.body)).not.toMatch(/novedad (para reintentar|corregida)/);
+    const summary = await request(app).get('/api/v1/more/summary').set(as(employee));
+    expect(summary.body.news.total).toBe(
+      await prisma.newsReport.count({ where: { deletedAt: null } }),
+    );
+
+    const history = await request(app).get('/api/v1/news?pageSize=50').set(as(employee));
+    const marker = history.body.news.find((item: { id: string }) => item.id === newsId);
+    expect(marker).toMatchObject({ deleted: true, text: null });
+  }, 60_000);
+
+  it('contadores y última respuesta solo cuentan las vigentes; los marcadores conservan su lugar en la paginación', async () => {
+    const news = await syntheticNews('Contadores', employee.userId);
+    const ids = Array.from({ length: 22 }, () => crypto.randomUUID());
+    await prisma.newsReply.createMany({
+      data: ids.map((id, index) => ({
+        id,
+        newsReportId: news.id,
+        authorUserId: index % 2 === 0 ? admin.userId : employee.userId,
+        text: `${RUN} contador-${index}`,
+        createdAt: new Date(Date.UTC(2026, 9, 3, 0, index)),
+      })),
+    });
+    const newest = ids[21] as string;
+    const secondNewest = ids[20] as string;
+    const deletion = await remove(employee, `${news.id}/replies/${newest}`, 1);
+    expect(deletion.status).toBe(200);
+    expect(deletion.body.conversation).toEqual({
+      replyCount: 21,
+      hasConversation: true,
+      lastReply: {
+        createdAt: new Date(Date.UTC(2026, 9, 3, 0, 20)).toISOString(),
+        author: { displayName: 'Administrador' },
+      },
+    });
+    expect((await remove(admin, `${news.id}/replies/${secondNewest}`, 1)).status).toBe(200);
+
+    const history = await request(app).get('/api/v1/news?pageSize=50').set(as(employee));
+    const listed = history.body.news.find((item: { id: string }) => item.id === news.id);
+    expect(listed).toMatchObject({
+      replyCount: 20,
+      hasConversation: true,
+      lastReply: { createdAt: new Date(Date.UTC(2026, 9, 3, 0, 19)).toISOString() },
+    });
+
+    const first = await request(app).get(`/api/v1/news/${news.id}/replies`).set(as(employee));
+    expect(first.body.replies).toHaveLength(20);
+    expect(first.body.replies.at(-1)).toMatchObject({ id: newest, deleted: true, text: null });
+    expect(first.body.replies.at(-2)).toMatchObject({ id: secondNewest, deleted: true });
+    const second = await request(app)
+      .get(`/api/v1/news/${news.id}/replies`)
+      .query({
+        beforeCreatedAt: first.body.nextCursor.createdAt,
+        beforeId: first.body.nextCursor.id,
+      })
+      .set(as(employee));
+    expect(second.body.replies.map((item: { id: string }) => item.id)).toEqual(ids.slice(0, 2));
+
+    await prisma.newsReply.updateMany({
+      where: { id: { in: ids.slice(0, 20) } },
+      data: { deletedAt: new Date(), deletedByUserId: admin.userId },
+    });
+    const onlyMarkers = await request(app).get('/api/v1/news?pageSize=50').set(as(employee));
+    expect(onlyMarkers.body.news.find((item: { id: string }) => item.id === news.id)).toMatchObject(
+      {
+        replyCount: 0,
+        hasConversation: true,
+        lastReply: null,
+      },
+    );
+  });
+});
+
 describe('🌤️ Clima', () => {
   it('usa la ubicación real sembrada y responde el informe (Open-Meteo reemplazado)', async () => {
     const urls: string[] = [];

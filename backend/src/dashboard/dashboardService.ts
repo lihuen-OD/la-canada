@@ -97,7 +97,10 @@ export async function getDashboard(actor: TaskActor, now = new Date()) {
         _sum: { goodEggsCount: true },
       }),
       listUpcomingEvents(actor, 3, now),
+      // Novedades eliminadas fuera ANTES del límite: nunca dejan huecos ni
+      // exponen su texto. Las respuestas no generan tarjetas.
       prisma.newsReport.findMany({
+        where: { deletedAt: null },
         select: newsSelect,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: 3,

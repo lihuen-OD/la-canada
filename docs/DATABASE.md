@@ -515,6 +515,14 @@ Migración `20260925200000_more_module` (offline con `prisma migrate diff`, revi
 - FK `news_report_id → news_reports.id` y `author_user_id → users.id`, ambas `ON DELETE RESTRICT`. La cita referencia `(id, news_report_id)` de otra fila de `news_replies`, también con `RESTRICT`; esto hace cumplir que una cita no cruce de novedad aun si se eludiera la validación del servicio. No hay cascadas ni operaciones de borrado de conversaciones en la aplicación.
 - Índice `(news_report_id, created_at, id)` para buscar páginas de 20 respuestas por cursor estable; índice único `(id, news_report_id)` como clave referenciada por la FK compuesta.
 - La clave del intento no se duplica como columna en `news_replies`: `IdempotencyRecord` ya conserva actor, endpoint con ID de la novedad, clave, huella y respuesta, y `executeIdempotent` confirma reserva, respuesta y auditoría en una transacción. No se purgan ni se reescriben registros previos.
+
+### Edición y eliminación lógica de mensajes — `20261030140000_news_message_edit_delete` (aplicada solo a `demo`)
+
+- `news_reports` y `news_replies` agregan `version INTEGER NOT NULL DEFAULT 1` (control de concurrencia optimista: sube con cada edición o eliminación), `edited_at TIMESTAMP(3)` (última edición), `deleted_at TIMESTAMP(3)` y `deleted_by_user_id UUID` (FK `users`, `ON DELETE RESTRICT`: quién eliminó, el autor o un ADMIN; nunca reemplaza al autor).
+- `CHECK (("deleted_at" IS NULL) = ("deleted_by_user_id" IS NULL))` en ambas tablas (mismo criterio que `events`) y `CHECK ("version" >= 1)`.
+- Solo `ADD COLUMN` / `ADD CONSTRAINT`: sin `UPDATE`, `DELETE`, `DROP` ni reescritura. Las filas existentes conservan texto, autor, fecha y relaciones, con versión 1 y sin marcas de edición ni eliminación; no se inventa autor para las 2 novedades del seed (`recorded_by_user_id` nulo).
+- El texto de un mensaje eliminado permanece en su fila (y en `audit_logs` / `idempotency_records`); la API nunca lo devuelve. Sin índices nuevos.
+- Generada offline con `prisma migrate diff` (schema de `7427f95` → schema nuevo) más los `CHECK` manuales; revisada antes de aplicar con `db:migrate:deploy` y `DATABASE_TARGET=demo`. Pendiente en `production`.
 - SQL generado offline con `prisma migrate diff` desde el schema de `517a5e5`, comparado exactamente con el archivo versionado; solo CREATE TABLE/INDEX y ALTER ADD FOREIGN KEY, sin `DROP`, `DELETE`, `UPDATE`, `TRUNCATE`, `CASCADE` ni backfill. Estado previo en `demo`: 22 migraciones conocidas, exactamente esta pendiente. Guarda de destino confirmó `DATABASE_TARGET=demo`; desplegada allí con `db:migrate:deploy`. Pendiente en `production`.
 
 ### Etapa 5Y — Jardín: versiones del plano (aplicada a `demo`)

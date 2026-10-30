@@ -15,6 +15,7 @@ import type {
   ManagedEmployee,
   MoreSummary,
   MyProfileResponse,
+  NewsConversationStats,
   NewsItem,
   NewsListResponse,
   NewsRepliesPage,
@@ -35,6 +36,8 @@ import type {
 const auth = { authenticated: true } as const;
 const post = <T>(path: string, body: unknown, headers?: Record<string, string>) =>
   apiRequest<T>(path, { method: 'POST', body, headers, ...auth });
+const patch = <T>(path: string, body: unknown) =>
+  apiRequest<T>(path, { method: 'PATCH', body, ...auth });
 
 export const fetchMoreSummary = () => apiRequest<MoreSummary>('/more/summary', auth);
 
@@ -60,6 +63,21 @@ export const createNewsReply = (
   post<{ reply: NewsReply }>(`/news/${newsId}/replies`, body, {
     'Idempotency-Key': idempotencyKey,
   });
+/** Edición y eliminación: `version` = la que se vio al abrir (409 si cambió). */
+export const updateNews = (newsId: string, body: { text: string; version: number }) =>
+  patch<{ news: NewsItem }>(`/news/${newsId}`, body);
+export const deleteNews = (newsId: string, version: number) =>
+  post<{ news: NewsItem }>(`/news/${newsId}/delete`, { version });
+export const updateNewsReply = (
+  newsId: string,
+  replyId: string,
+  body: { text: string; version: number },
+) => patch<{ reply: NewsReply }>(`/news/${newsId}/replies/${replyId}`, body);
+export const deleteNewsReply = (newsId: string, replyId: string, version: number) =>
+  post<{ reply: NewsReply; conversation: NewsConversationStats }>(
+    `/news/${newsId}/replies/${replyId}/delete`,
+    { version },
+  );
 
 // 📅 Eventos
 export function fetchEvents(params: { type?: EventType; pastPage: number; pastPageSize: number }) {

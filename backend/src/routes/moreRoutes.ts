@@ -24,7 +24,11 @@ import {
   patchEventHandler,
   patchMyFamilyHandler,
   patchMyFamilyStatusHandler,
+  patchNewsHandler,
+  patchNewsReplyHandler,
   postDeleteEventHandler,
+  postDeleteNewsHandler,
+  postDeleteNewsReplyHandler,
   postDeletePhotoHandler,
   postEmployeeHandler,
   postEventHandler,
@@ -42,6 +46,8 @@ import {
  * ☰ Más (Etapa 5X). Ningún endpoint es público. Sin `DELETE`: los eventos se
  * anulan, las fotos se dan de baja lógica antes del borrado físico y las
  * personas se desactivan; solo un hijo del propio perfil se elimina de verdad.
+ * Los mensajes de Novedades se eliminan lógicamente (`POST …/delete`); los
+ * permisos por autor/rol se deciden en el servicio, nunca con `requireRole`.
  */
 
 export const moreRouter = Router();
@@ -52,8 +58,12 @@ export const newsRouter = Router();
 newsRouter.use(requireAuth);
 newsRouter.get('/', getNewsHandler);
 newsRouter.post('/', requireJsonContentType, postNewsHandler);
+newsRouter.patch('/:id', requireJsonContentType, patchNewsHandler);
+newsRouter.post('/:id/delete', requireJsonContentType, postDeleteNewsHandler);
 newsRouter.get('/:id/replies', getNewsRepliesHandler);
 newsRouter.post('/:id/replies', requireJsonContentType, postNewsReplyHandler);
+newsRouter.patch('/:id/replies/:replyId', requireJsonContentType, patchNewsReplyHandler);
+newsRouter.post('/:id/replies/:replyId/delete', requireJsonContentType, postDeleteNewsReplyHandler);
 
 export const eventsRouter = Router();
 eventsRouter.use(requireAuth);
