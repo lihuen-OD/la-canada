@@ -14,6 +14,7 @@ import {
   getNewsHandler,
   getNewsRepliesHandler,
   getPhotoContentHandler,
+  getPhotoFoldersHandler,
   getPhotosHandler,
   getTeamProfilesHandler,
   getWeatherHandler,
@@ -26,17 +27,21 @@ import {
   patchMyFamilyStatusHandler,
   patchNewsHandler,
   patchNewsReplyHandler,
+  patchPhotoFolderHandler,
   postDeleteEventHandler,
   postDeleteNewsHandler,
   postDeleteNewsReplyHandler,
+  postDeletePhotoFolderHandler,
   postDeletePhotoHandler,
   postEmployeeHandler,
   postEventHandler,
   postGardenVersionHandler,
   postMyChildHandler,
+  postMovePhotoHandler,
   postMyFamilyHandler,
   postNewsHandler,
   postNewsReplyHandler,
+  postPhotoFolderHandler,
   postPhotoHandler,
   postRemoveMyChildHandler,
   putMyProfileHandler,
@@ -76,12 +81,22 @@ export const weatherRouter = Router();
 weatherRouter.use(requireAuth);
 weatherRouter.get('/', getWeatherHandler);
 
+/**
+ * 📸 Fotos y sus carpetas: ver, subir, crear carpetas y mover fotos es de
+ * todos; renombrar o eliminar una carpeta, de su creador o un ADMIN, y
+ * eliminar una foto, solo ADMIN — lo decide cada servicio, nunca `requireRole`.
+ */
 export const photosRouter = Router();
 photosRouter.use(requireAuth);
 photosRouter.get('/', getPhotosHandler);
 photosRouter.post('/', parseGalleryPhotoBody, postPhotoHandler);
+photosRouter.get('/folders', getPhotoFoldersHandler);
+photosRouter.post('/folders', requireJsonContentType, postPhotoFolderHandler);
+photosRouter.patch('/folders/:id', requireJsonContentType, patchPhotoFolderHandler);
+photosRouter.post('/folders/:id/delete', requireJsonContentType, postDeletePhotoFolderHandler);
 photosRouter.get('/:id/content', getPhotoContentHandler);
 photosRouter.post('/:id/delete', requireJsonContentType, postDeletePhotoHandler);
+photosRouter.post('/:id/move', requireJsonContentType, postMovePhotoHandler);
 
 /**
  * 🌳 Jardín: ver el plano y el historial es de todos (paridad con Fotos);

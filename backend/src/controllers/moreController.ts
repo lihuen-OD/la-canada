@@ -14,7 +14,9 @@ import {
   createFamilyMemberBodySchema,
   createNewsBodySchema,
   createNewsReplyBodySchema,
+  createPhotoFolderBodySchema,
   deleteNewsMessageBodySchema,
+  deletePhotoFolderBodySchema,
   employeeStatusBodySchema,
   familyStatusBodySchema,
   idParamSchema,
@@ -22,6 +24,8 @@ import {
   listNewsQuerySchema,
   listNewsRepliesQuerySchema,
   listPhotosQuerySchema,
+  movePhotoBodySchema,
+  renamePhotoFolderBodySchema,
   teamProfilesQuerySchema,
   updateEmployeeBodySchema,
   updateEventBodySchema,
@@ -57,6 +61,13 @@ import {
   readPhotoObject,
   uploadPhoto,
 } from '../more/photosService';
+import {
+  createPhotoFolder,
+  deletePhotoFolder,
+  listPhotoFolders,
+  movePhoto,
+  renamePhotoFolder,
+} from '../more/photoFoldersService';
 import {
   createEmployee,
   listEmployees,
@@ -278,6 +289,42 @@ export async function postPhotoHandler(req: Request, res: Response): Promise<voi
 export async function postDeletePhotoHandler(req: Request, res: Response): Promise<void> {
   const actor = await actorFrom(req);
   send(res, 200, await deletePhoto(actor, idFrom(req.params.id, 'foto'), requestMeta(req)));
+}
+
+/** «Mover a carpeta»: cualquier usuario activo; el servicio compara la carpeta vista. */
+export async function postMovePhotoHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const photoId = idFrom(req.params.id, 'foto');
+  const input = parseOrThrow(movePhotoBodySchema, req.body, 'Datos inválidos.');
+  send(res, 200, await movePhoto(actor, photoId, input, requestMeta(req)));
+}
+
+// ── 📸 Carpetas de Fotos ──
+
+export async function getPhotoFoldersHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  send(res, 200, await listPhotoFolders(actor));
+}
+
+export async function postPhotoFolderHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const input = parseOrThrow(createPhotoFolderBodySchema, req.body, 'Datos inválidos.');
+  const result = await createPhotoFolder(actor, input, requestMeta(req), idempotencyKeyOf(req));
+  send(res, result.kind === 'replay' ? result.status : 201, result.body);
+}
+
+export async function patchPhotoFolderHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const folderId = idFrom(req.params.id, 'carpeta');
+  const input = parseOrThrow(renamePhotoFolderBodySchema, req.body, 'Datos inválidos.');
+  send(res, 200, await renamePhotoFolder(actor, folderId.toLowerCase(), input, requestMeta(req)));
+}
+
+export async function postDeletePhotoFolderHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const folderId = idFrom(req.params.id, 'carpeta');
+  const input = parseOrThrow(deletePhotoFolderBodySchema, req.body, 'Datos inválidos.');
+  send(res, 200, await deletePhotoFolder(actor, folderId.toLowerCase(), input, requestMeta(req)));
 }
 
 /**

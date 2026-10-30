@@ -10,6 +10,8 @@ import type {
   NewsReply,
   NewsReplyQuote,
   PersonalProfileResponse,
+  PhotoFolder,
+  PhotoFoldersResponse,
   PhotosListResponse,
   TeamMember,
   WeatherReport,
@@ -185,6 +187,7 @@ export const photosResponse = (
       title: 'Foto sintética',
       category: 'MEMORY',
       createdAt: new Date().toISOString(),
+      folderId: null,
       employee: PERSON,
     },
   ],
@@ -192,6 +195,32 @@ export const photosResponse = (
   pageSize: 24,
   total: 1,
   totalPages: 1,
+  photoStorage: storage,
+});
+
+/** Carpetas SINTÉTICAS de Fotos (sin datos reales): ids, nombres y conteos inventados para pruebas. */
+export const photoFolder = (
+  id: string,
+  name: string,
+  overrides: Partial<PhotoFolder> = {},
+): PhotoFolder => ({
+  id,
+  name,
+  version: 1,
+  createdAt: new Date().toISOString(),
+  photoCount: 0,
+  permissions: { canRename: false, canDelete: false },
+  ...overrides,
+});
+
+export const photoFoldersResponse = (
+  folders: PhotoFolder[] = [],
+  storage: 'configured' | 'unconfigured' = 'configured',
+  unfiled = 1,
+): PhotoFoldersResponse => ({
+  folders,
+  unfiled: { photoCount: unfiled },
+  all: { photoCount: unfiled + folders.reduce((sum, folder) => sum + folder.photoCount, 0) },
   photoStorage: storage,
 });
 

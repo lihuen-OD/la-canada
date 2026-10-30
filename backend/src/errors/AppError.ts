@@ -656,6 +656,64 @@ export class PhotoNotFoundError extends AppError {
   }
 }
 
+// ── 📸 Carpetas de Fotos ──────────────────────────────────────────────────
+
+/** La carpeta pedida no existe o fue eliminada (ya no se ve ni se edita). */
+export class PhotoFolderNotFoundError extends AppError {
+  constructor() {
+    super('La carpeta no existe o fue eliminada.', 404, { code: 'PHOTO_FOLDER_NOT_FOUND' });
+  }
+}
+
+/** Destino de una subida o de un movimiento eliminado mientras se elegía: nunca se usa otro. */
+export class PhotoFolderUnavailableError extends AppError {
+  constructor() {
+    super('La carpeta elegida ya no existe. Elegí otra carpeta o «Sin carpeta».', 409, {
+      code: 'PHOTO_FOLDER_UNAVAILABLE',
+    });
+  }
+}
+
+/** Otra carpeta vigente ya usa ese nombre (sin distinguir mayúsculas ni espacios). */
+export class PhotoFolderNameTakenError extends AppError {
+  constructor() {
+    super('Ya existe una carpeta con ese nombre.', 409, { code: 'PHOTO_FOLDER_NAME_TAKEN' });
+  }
+}
+
+/** La versión enviada no es la vigente: otra pantalla renombró la carpeta. */
+export class PhotoFolderVersionConflictError extends AppError {
+  constructor() {
+    super(
+      'Otra persona cambió esta carpeta mientras la tenías abierta. Revisá su nombre actual y volvé a intentar.',
+      409,
+      { code: 'PHOTO_FOLDER_VERSION_CONFLICT' },
+    );
+  }
+}
+
+/** Solo se eliminan carpetas sin fotos: nunca se borran ni se mueven fotos para vaciarla. */
+export class PhotoFolderNotEmptyError extends AppError {
+  constructor() {
+    super(
+      'La carpeta todavía tiene fotos. Movelas a otra carpeta o a «Sin carpeta» antes de eliminarla.',
+      409,
+      { code: 'PHOTO_FOLDER_NOT_EMPTY' },
+    );
+  }
+}
+
+/** La foto ya no está donde la vio quien la mueve: otra persona la movió antes. */
+export class PhotoMoveConflictError extends AppError {
+  constructor() {
+    super(
+      'Otra persona movió esta foto mientras la tenías abierta. Revisá dónde está ahora y volvé a intentar.',
+      409,
+      { code: 'PHOTO_MOVE_CONFLICT' },
+    );
+  }
+}
+
 // ── Jardín (Etapa 5Y) ─────────────────────────────────────────────────────
 
 /** Etapa 5Y — la versión pedida no existe. El historial nunca se elimina, así que

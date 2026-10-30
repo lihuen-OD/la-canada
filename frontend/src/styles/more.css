@@ -871,6 +871,153 @@
   color: var(--color-text-muted);
 }
 
+/* Carpetas de Fotos: tarjetas como las de la grilla de Más (icono, nombre,
+   cantidad), 2 columnas en móvil y más en pantallas anchas. El «⋯» queda en
+   la esquina, fuera del enlace (no se anidan controles). */
+
+.photo-folders-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.photo-folders-section__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.photo-folders-section__head .more__section-title {
+  margin: 0;
+}
+
+.photo-folders-section__notice {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.photo-folders-section__notice:empty {
+  display: none;
+}
+
+.photo-folders {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 768px) {
+  .photo-folders {
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  }
+}
+
+.photo-folders > li {
+  min-width: 0;
+}
+
+.photo-folder {
+  position: relative;
+  height: 100%;
+}
+
+.photo-folder__link {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  height: 100%;
+  min-height: 7rem;
+  padding: var(--space-4) var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  color: var(--color-text);
+  text-decoration: none;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.photo-folder__link:hover {
+  background: var(--color-surface-hover);
+}
+
+.photo-folder--special .photo-folder__link {
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.photo-folder__icon {
+  font-size: 1.75rem;
+  line-height: 1;
+  margin-bottom: var(--space-1);
+}
+
+/* Nombres largos: dos líneas como máximo, sin desbordar la tarjeta; el
+   espacio a la derecha deja lugar al «⋯». */
+.photo-folder__name {
+  display: -webkit-box;
+  max-width: 100%;
+  padding-right: var(--space-6);
+  overflow: hidden;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.photo-folder--special .photo-folder__name {
+  padding-right: 0;
+}
+
+.photo-folder__count {
+  margin-top: auto;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+/* Solo dentro de la tarjeta: en el encabezado de una carpeta el mismo menú
+   va en el flujo, junto a «Fotos». */
+.photo-folder > .photo-folder__menu {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+}
+
+.photo-folder > .photo-folder__menu .news-menu__trigger {
+  margin-block: 0;
+}
+
+.photo-gallery__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.photo-gallery__actions .news-menu__trigger {
+  margin-block: 0;
+}
+
+.photo-viewer__folder {
+  overflow-wrap: anywhere;
+}
+
+.photo-move__title {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .gallery {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

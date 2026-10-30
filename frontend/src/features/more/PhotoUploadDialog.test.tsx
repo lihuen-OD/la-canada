@@ -3,13 +3,18 @@ import { StrictMode, useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '../../test/render';
 
-const { uploadPhoto } = vi.hoisted(() => ({ uploadPhoto: vi.fn() }));
+const { uploadPhoto, fetchPhotoFolders } = vi.hoisted(() => ({
+  uploadPhoto: vi.fn(),
+  fetchPhotoFolders: vi.fn(),
+}));
 const { fetchTaskEmployees } = vi.hoisted(() => ({ fetchTaskEmployees: vi.fn() }));
 const { useAuthMock } = vi.hoisted(() => ({ useAuthMock: vi.fn() }));
-vi.mock('../../api/moreApi', () => ({ uploadPhoto }));
+vi.mock('../../api/moreApi', () => ({ uploadPhoto, fetchPhotoFolders }));
 vi.mock('../../api/tasksApi', () => ({ fetchTaskEmployees }));
 vi.mock('../../auth/useAuth', () => ({ useAuth: useAuthMock }));
 
+import { ApiError } from '../../api/httpClient';
+import { photoFolder, photoFoldersResponse } from '../../test/fixtures/more';
 import { PhotoUploadDialog } from './PhotoUploadDialog';
 
 /**
@@ -30,10 +35,17 @@ function photoFile(name = 'foto.jpg', type = 'image/jpeg', bytes = 6): File {
 }
 
 function renderDialog(
-  options: { file?: File; strict?: boolean; onClose?: () => void; onSaved?: () => void } = {},
+  options: {
+    file?: File;
+    strict?: boolean;
+    onClose?: () => void;
+    onSaved?: () => void;
+    defaultFolderId?: string | null;
+  } = {},
 ) {
   const props = {
     file: options.file ?? photoFile(),
+    defaultFolderId: options.defaultFolderId ?? null,
     onClose: options.onClose ?? vi.fn(),
     onSaved: options.onSaved ?? vi.fn(),
     onSessionExpired: vi.fn(),
@@ -69,6 +81,10 @@ beforeEach(() => {
   revokeEffect = null;
   uploadPhoto.mockReset();
   uploadPhoto.mockResolvedValue({ photo: { id: 'photo-1' } });
+  fetchPhotoFolders.mockReset();
+  fetchPhotoFolders.mockResolvedValue(
+    photoFoldersResponse([photoFolder('folder-a', 'Jardín'), photoFolder('folder-b', 'Visitas')]),
+  );
   fetchTaskEmployees.mockReset();
   fetchTaskEmployees.mockResolvedValue({ employees: [] });
   useAuthMock.mockReturnValue({
@@ -138,6 +154,7 @@ describe('📸 Fotos · vista previa del diálogo de subida', () => {
     rerender(
       <PhotoUploadDialog
         file={photoFile('foto-2.jpg')}
+        defaultFolderId={null}
         onClose={vi.fn()}
         onSaved={vi.fn()}
         onSessionExpired={vi.fn()}
@@ -165,6 +182,7 @@ describe('📸 Fotos · vista previa del diálogo de subida', () => {
       return open ? (
         <PhotoUploadDialog
           file={photoFile()}
+          defaultFolderId={null}
           onClose={() => {
             onClose();
             setOpen(false);
@@ -231,5 +249,75 @@ describe('📸 Fotos · vista previa del diálogo de subida', () => {
     expect(maybePreview()).not.toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('La foto debe ser JPG, PNG o WebP.');
     expect(saveButton()).toBeDisabled();
+  });
+});
+
+describe('📸 Fotos · carpeta de la subida', () => {
+  const folderSelect = () => within(screen.getByRole('dialog')).getByLabelText('Carpeta');
+
+  it('desde una carpeta queda preseleccionada y viaja con la subida', async () => {
+    const user = userEvent.setup();
+    renderDialog({ defaultFolderId: 'folder-b' });
+    await waitFor(() => expect(folderSelect()).toHaveValue('folder-b'));
+    await loadPreview(preview());
+    await user.click(saveButton());
+    await waitFor(() => expect(uploadPhoto).toHaveBeenCalledTimes(1));
+    expect(uploadPhoto.mock.calls[0]?.[1]).toMatchObject({ folderId: 'folder-b' });
+  });
+
+  it('desde la galería general: «Sin carpeta» por defecto y se puede elegir otra', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await waitFor(() =>
+      expect(within(folderSelect()).getByRole('option', { name: 'Jardín' })).toBeInTheDocument(),
+    );
+    expect(folderSelect()).toHaveValue('');
+    expect(
+      within(folderSelect())
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual(['Sin carpeta', 'Jardín', 'Visitas']);
+    await user.selectOptions(folderSelect(), 'folder-a');
+    await loadPreview(preview());
+    await user.click(saveButton());
+    await waitFor(() => expect(uploadPhoto).toHaveBeenCalledTimes(1));
+    expect(uploadPhoto.mock.calls[0]?.[1]).toMatchObject({ folderId: 'folder-a' });
+  });
+
+  it('si la carpeta deja de existir: avisa, conserva el formulario y exige elegir otra (sin destino silencioso)', async () => {
+    const user = userEvent.setup();
+    const onSaved = vi.fn();
+    uploadPhoto.mockRejectedValueOnce(
+      new ApiError(
+        409,
+        'La carpeta elegida ya no existe. Elegí otra carpeta o «Sin carpeta».',
+        'PHOTO_FOLDER_UNAVAILABLE',
+      ),
+    );
+    renderDialog({ defaultFolderId: 'folder-b', onSaved });
+    const dialog = within(screen.getByRole('dialog'));
+    await waitFor(() => expect(folderSelect()).toHaveValue('folder-b'));
+    await user.type(dialog.getByLabelText('Título'), 'Rosas');
+    await loadPreview(preview());
+    // El listado se actualiza sin «Visitas» (otra persona la eliminó).
+    fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([photoFolder('folder-a', 'Jardín')]));
+    await user.click(saveButton());
+    expect(await dialog.findByRole('alert')).toHaveTextContent(/ya no existe/);
+    await waitFor(() => expect(fetchPhotoFolders).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(dialog.getByRole('option', { name: /Ya no existe/ })).toBeInTheDocument(),
+    );
+    expect(dialog.getByLabelText('Título')).toHaveValue('Rosas');
+    expect(saveButton()).toBeDisabled();
+    expect(onSaved).not.toHaveBeenCalled();
+
+    await user.selectOptions(folderSelect(), '');
+    expect(saveButton()).toBeEnabled();
+    await user.click(saveButton());
+    await waitFor(() => expect(uploadPhoto).toHaveBeenCalledTimes(2));
+    expect(uploadPhoto.mock.calls[1]?.[1]).toMatchObject({ folderId: null, title: 'Rosas' });
+    // Otra intención (otro destino): otra clave de idempotencia.
+    expect(uploadPhoto.mock.calls[1]?.[2]).not.toBe(uploadPhoto.mock.calls[0]?.[2]);
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
   });
 });

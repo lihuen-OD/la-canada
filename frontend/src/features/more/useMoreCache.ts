@@ -2,17 +2,48 @@ import { useCallback } from 'react';
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { queryKeys } from '../../api/queryKeys';
 import type {
+  GalleryPhoto,
   NewsConversationStats,
   NewsItem,
   NewsRepliesPage,
   NewsReply,
   NewsReplyCursor,
   NewsListResponse,
+  PhotoFolder,
+  PhotoFoldersResponse,
+  PhotosListResponse,
 } from '../../api/moreTypes';
 import { useSessionScope } from '../../api/useSessionScope';
+import { comparePhotoFolders } from './photoFolders';
 
 type RepliesData = InfiniteData<NewsRepliesPage, NewsReplyCursor | null>;
 type NewsData = InfiniteData<NewsListResponse, number>;
+type PhotosData = InfiniteData<PhotosListResponse, number>;
+
+/** La foto sale de una vista ya cargada (todas sus páginas), con el total al día. */
+function withoutPhoto(data: PhotosData | undefined, photoId: string): PhotosData | undefined {
+  if (!data?.pages.some((page) => page.photos.some((photo) => photo.id === photoId))) return data;
+  return {
+    ...data,
+    pages: data.pages.map((page) => ({
+      ...page,
+      photos: page.photos.filter((photo) => photo.id !== photoId),
+      total: Math.max(0, page.total - 1),
+    })),
+  };
+}
+
+/** La misma foto con datos nuevos (p. ej. su carpeta) donde ya estaba cargada. */
+function withPhoto(data: PhotosData | undefined, next: GalleryPhoto): PhotosData | undefined {
+  if (!data) return data;
+  return {
+    ...data,
+    pages: data.pages.map((page) => ({
+      ...page,
+      photos: page.photos.map((photo) => (photo.id === next.id ? next : photo)),
+    })),
+  };
+}
 
 /** Reemplaza una novedad del listado cargado (sin recargar páginas). */
 function patchNewsItem(
@@ -213,8 +244,99 @@ export function useMoreCache() {
         ),
       [invalidate, userId],
     ),
+    /**
+     * 📸 Foto nueva o eliminada: «Todas las fotos», la vista de SU carpeta (o
+     * «Sin carpeta»), los conteos de carpetas y la tarjeta de Más. Las demás
+     * carpetas no cambian y no se piden.
+     */
     afterPhotoChange: useCallback(
-      () => invalidate(queryKeys.more.photos(userId), queryKeys.more.summary(userId)),
+      (folderId: string | null) =>
+        invalidate(
+          queryKeys.more.photos(userId, 'all'),
+          queryKeys.more.photos(userId, folderId ?? 'none'),
+          queryKeys.more.photoFolders(userId),
+          queryKeys.more.summary(userId),
+        ),
+      [invalidate, userId],
+    ),
+    /**
+     * Foto movida: sale de la vista de origen sin pedirla de nuevo (salvo que
+     * queden páginas por cargar: la paginación por posición saltearía una
+     * foto), cambia de carpeta en «Todas las fotos» sin moverse de lugar, y
+     * se revalidan el destino (orden real) y los conteos.
+     */
+    afterPhotoMove: useCallback(
+      (photo: GalleryPhoto, fromFolderId: string | null) => {
+        const from = queryKeys.more.photos(userId, fromFolderId ?? 'none');
+        queryClient.setQueriesData<PhotosData>({ queryKey: from }, (data) =>
+          withoutPhoto(data, photo.id),
+        );
+        for (const [queryKey, data] of queryClient.getQueriesData<PhotosData>({ queryKey: from })) {
+          const last = data?.pages.at(-1);
+          if (last && last.page < last.totalPages) {
+            void queryClient.invalidateQueries({ queryKey, exact: true });
+          }
+        }
+        queryClient.setQueriesData<PhotosData>(
+          { queryKey: queryKeys.more.photos(userId, 'all') },
+          (data) => withPhoto(data, photo),
+        );
+        invalidate(
+          queryKeys.more.photos(userId, photo.folderId ?? 'none'),
+          queryKeys.more.photoFolders(userId),
+        );
+      },
+      [invalidate, queryClient, userId],
+    ),
+    /** Carpeta nueva: solo el listado de carpetas (el backend la ubica y la cuenta). */
+    afterFolderCreated: useCallback(
+      () =>
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.more.photoFolders(userId),
+          exact: true,
+        }),
+      [queryClient, userId],
+    ),
+    /**
+     * Carpeta renombrada: la respuesta reemplaza su tarjeta y se reordena; el
+     * encabezado y los selectores leen ese listado. Sin pedir fotos.
+     */
+    afterFolderRenamed: useCallback(
+      (folder: PhotoFolder) =>
+        queryClient.setQueryData<PhotoFoldersResponse>(
+          queryKeys.more.photoFolders(userId),
+          (previous) =>
+            previous && {
+              ...previous,
+              folders: previous.folders
+                .map((item) => (item.id === folder.id ? folder : item))
+                .sort(comparePhotoFolders),
+            },
+        ),
+      [queryClient, userId],
+    ),
+    /** Carpeta eliminada (estaba vacía): sale del listado y se descarta su galería en caché. */
+    afterFolderDeleted: useCallback(
+      (folderId: string) => {
+        queryClient.setQueryData<PhotoFoldersResponse>(
+          queryKeys.more.photoFolders(userId),
+          (previous) =>
+            previous && {
+              ...previous,
+              folders: previous.folders.filter((item) => item.id !== folderId),
+            },
+        );
+        queryClient.removeQueries({ queryKey: queryKeys.more.photos(userId, folderId) });
+      },
+      [queryClient, userId],
+    ),
+    /** Conflicto (otra persona cambió una carpeta o una foto): revalidar solo lo afectado. */
+    refreshPhotoFolders: useCallback(
+      (...scopes: readonly (string | null)[]) =>
+        invalidate(
+          queryKeys.more.photoFolders(userId),
+          ...scopes.map((scope) => queryKeys.more.photos(userId, scope ?? 'none')),
+        ),
       [invalidate, userId],
     ),
     /**

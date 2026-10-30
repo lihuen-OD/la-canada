@@ -35,6 +35,11 @@ describe('☰ Más — ningún endpoint es público', () => {
     ['POST', '/api/v1/photos'],
     ['GET', `/api/v1/photos/${ID}/content`],
     ['POST', `/api/v1/photos/${ID}/delete`],
+    ['POST', `/api/v1/photos/${ID}/move`],
+    ['GET', '/api/v1/photos/folders'],
+    ['POST', '/api/v1/photos/folders'],
+    ['PATCH', `/api/v1/photos/folders/${ID}`],
+    ['POST', `/api/v1/photos/folders/${ID}/delete`],
     ['GET', '/api/v1/more/garden/versions'],
     ['POST', '/api/v1/more/garden/versions'],
     ['GET', `/api/v1/more/garden/versions/${ID}/content`],
@@ -141,6 +146,27 @@ describe('routers de Más — superficie', () => {
       /gardenRouter\.post\('\/versions', requireRole\('ADMIN'\), parseGardenPlanBody/,
     );
     expect(source).not.toMatch(/express\.json/);
+  });
+
+  it('carpetas y mover: sesión y cuerpo JSON; permisos (creador o ADMIN) en el servicio, sin requireRole', () => {
+    expect(source).toMatch(/photosRouter\.get\('\/folders', getPhotoFoldersHandler\)/);
+    expect(source).toMatch(
+      /photosRouter\.post\('\/folders', requireJsonContentType, postPhotoFolderHandler\)/,
+    );
+    expect(source).toMatch(
+      /photosRouter\.patch\('\/folders\/:id', requireJsonContentType, patchPhotoFolderHandler\)/,
+    );
+    expect(source).toMatch(
+      /photosRouter\.post\('\/folders\/:id\/delete', requireJsonContentType, postDeletePhotoFolderHandler\)/,
+    );
+    expect(source).toMatch(
+      /photosRouter\.post\('\/:id\/move', requireJsonContentType, postMovePhotoHandler\)/,
+    );
+    expect(source).not.toMatch(/photosRouter\.[a-z]+\([^;]*requireRole/);
+    // `/folders` antes que las rutas por id de foto.
+    expect(source.indexOf("photosRouter.get('/folders'")).toBeLessThan(
+      source.indexOf("photosRouter.get('/:id/content'"),
+    );
   });
 
   it('el Jardín no tiene borrado ni edición: las versiones son inmutables', () => {

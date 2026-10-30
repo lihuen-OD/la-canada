@@ -158,10 +158,33 @@ export interface GalleryPhoto {
   title: string;
   category: GalleryCategory;
   createdAt: string;
+  /** Carpeta de la foto; `null` = «Sin carpeta». El nombre sale del listado de carpetas. */
+  folderId: string | null;
   employee: PersonRef | null;
 }
 export interface PhotosListResponse extends Page {
   photos: GalleryPhoto[];
+  photoStorage: 'configured' | 'unconfigured';
+}
+/**
+ * Qué parte de la galería se mira: `all` (Todas las fotos), `none` (Sin
+ * carpeta) o el id de una carpeta. Va en la clave de caché y en la ruta.
+ */
+export type PhotoScope = 'all' | 'none' | (string & {});
+/** Carpeta de Fotos con las acciones que el backend autoriza a la sesión. */
+export interface PhotoFolder {
+  id: string;
+  name: string;
+  /** Versión vista: renombrar o eliminar con otra responde 409 sin pisar. */
+  version: number;
+  createdAt: string;
+  photoCount: number;
+  permissions: { canRename: boolean; canDelete: boolean };
+}
+export interface PhotoFoldersResponse {
+  folders: PhotoFolder[];
+  unfiled: { photoCount: number };
+  all: { photoCount: number };
   photoStorage: 'configured' | 'unconfigured';
 }
 

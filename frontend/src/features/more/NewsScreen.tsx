@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import type { FormEvent, KeyboardEvent, RefObject } from 'react';
+import type { FormEvent, RefObject } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import {
   createNews,
@@ -27,7 +27,6 @@ import { useSessionScope } from '../../api/useSessionScope';
 import { useAuth } from '../../auth/useAuth';
 import { Avatar } from '../../components/ui/Avatar';
 import { Button } from '../../components/ui/Button';
-import { buttonClassName } from '../../components/ui/buttonStyles';
 import { Card } from '../../components/ui/Card';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
@@ -36,6 +35,7 @@ import { formatDateTime } from '../../utils/dateFormat';
 import { ConfirmDialog } from '../admin/ConfirmDialog';
 import { useSubmitGuard } from '../tasks/useSubmitGuard';
 import { errorCodeOf, errorMessageOf, humanError, isSessionExpired } from '../pets/petErrors';
+import { ActionsMenu } from './ActionsMenu';
 import { MoreBackLink } from './MoreBackLink';
 import { normalizeText, timeAgo } from './moreLabels';
 import { useMoreCache } from './useMoreCache';
@@ -161,10 +161,8 @@ function EditedNote({ editedAt }: { editedAt: string }) {
 }
 
 /**
- * Menú «⋯» (patrón de menú de botones): solo con las acciones autorizadas
- * por el backend; sin ninguna, no se muestra. Flechas, Inicio/Fin y Escape;
- * al cerrarlo el foco vuelve al disparador (también antes de abrir la
- * confirmación, para que Cancelar devuelva el foco acá).
+ * Menú «⋯» de un mensaje: «Editar» y «Eliminar» solo si el backend los
+ * autoriza (`ActionsMenu`: flechas, Inicio/Fin, Escape y foco devuelto).
  */
 function MessageActionsMenu({
   label,
@@ -179,105 +177,17 @@ function MessageActionsMenu({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const menuId = useId();
-
-  useEffect(() => {
-    if (!open) return;
-    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
-    function closeOnOutsidePointer(event: PointerEvent): void {
-      const target = event.target as Node;
-      if (!menuRef.current?.contains(target) && !triggerRef.current?.contains(target)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener('pointerdown', closeOnOutsidePointer);
-    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer);
-  }, [open, triggerRef]);
-
-  if (!permissions.canEdit && !permissions.canDelete) return null;
-
-  function close(): void {
-    setOpen(false);
-    triggerRef.current?.focus();
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
-    const items = [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
-    const current = items.findIndex((item) => item === document.activeElement);
-    const focusAt = (index: number) => {
-      event.preventDefault();
-      items[(index + items.length) % items.length]?.focus();
-    };
-    if (event.key === 'ArrowDown') focusAt(current + 1);
-    else if (event.key === 'ArrowUp') focusAt(current - 1);
-    else if (event.key === 'Home') focusAt(0);
-    else if (event.key === 'End') focusAt(items.length - 1);
-    else if (event.key === 'Escape') {
-      event.preventDefault();
-      close();
-    } else if (event.key === 'Tab') setOpen(false);
-  }
-
   return (
-    <div className="news-menu">
-      <button
-        ref={triggerRef}
-        type="button"
-        className={buttonClassName({
-          variant: 'ghost',
-          size: 'sm',
-          className: 'news-menu__trigger',
-        })}
-        aria-label={label}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={open ? menuId : undefined}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span aria-hidden="true">⋯</span>
-      </button>
-      {open ? (
-        <div
-          id={menuId}
-          ref={menuRef}
-          role="menu"
-          aria-label={label}
-          className="news-menu__list"
-          onKeyDown={handleKeyDown}
-        >
-          {permissions.canEdit ? (
-            <button
-              type="button"
-              role="menuitem"
-              tabIndex={-1}
-              className="news-menu__item"
-              onClick={() => {
-                close();
-                onEdit();
-              }}
-            >
-              Editar
-            </button>
-          ) : null}
-          {permissions.canDelete ? (
-            <button
-              type="button"
-              role="menuitem"
-              tabIndex={-1}
-              className="news-menu__item news-menu__item--danger"
-              onClick={() => {
-                close();
-                onDelete();
-              }}
-            >
-              Eliminar
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
+    <ActionsMenu
+      label={label}
+      triggerRef={triggerRef}
+      items={[
+        ...(permissions.canEdit ? [{ key: 'edit', label: 'Editar', onSelect: onEdit }] : []),
+        ...(permissions.canDelete
+          ? [{ key: 'delete', label: 'Eliminar', danger: true, onSelect: onDelete }]
+          : []),
+      ]}
+    />
   );
 }
 

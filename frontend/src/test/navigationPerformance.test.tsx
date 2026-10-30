@@ -22,7 +22,15 @@ import {
   typesResponse,
   dueResponse,
 } from './fixtures/pets';
-import { eventsResponse, gardenResponse, newsResponse, summaryResponse } from './fixtures/more';
+import {
+  eventsResponse,
+  gardenResponse,
+  newsResponse,
+  photoFolder,
+  photoFoldersResponse,
+  photosResponse,
+  summaryResponse,
+} from './fixtures/more';
 
 /**
  * Etapa 5P — presupuesto de navegación sobre la APP COMPLETA (`App`: mismos
@@ -117,6 +125,13 @@ function body(path: string): unknown {
     return new Blob(['plano-sintetico'], { type: 'image/jpeg' });
   }
   if (path.startsWith('/more/garden/versions')) return gardenResponse();
+  if (path.startsWith('/photos/folders')) {
+    return photoFoldersResponse([photoFolder('carpeta-sintetica', 'Carpeta sintética')]);
+  }
+  if (/^\/photos\/[^/?]+\/content/.test(path)) {
+    return new Blob(['foto-sintetica'], { type: 'image/jpeg' });
+  }
+  if (path.startsWith('/photos')) return photosResponse();
   if (path.startsWith('/news')) return newsResponse();
   if (path.startsWith('/events')) return eventsResponse();
   if (path.startsWith('/admin/users'))
@@ -585,6 +600,50 @@ describe('\u{1F333} Jardín (Etapa 5Y)', () => {
     // Volver no pide ni el historial ni ningún binario otra vez.
     expect(gardenListCalls().length).toBe(1);
     expect(gardenContentCalls().length).toBe(2);
+    expect(count('/auth/refresh')).toBe(1);
+    expect(count('/auth/me')).toBe(1);
+    expect(document.querySelector('.app-header')).toBe(shellHeader);
+    expect(prevented.every(Boolean)).toBe(true);
+  });
+});
+
+describe('📸 Fotos y carpetas — navegación', () => {
+  it('Más → Fotos → carpeta → Fotos → Todas las fotos → revisita: SPA, sin refresh/me, carpetas una vez', async () => {
+    const user = userEvent.setup();
+    await bootToHome();
+    const shellHeader = document.querySelector('.app-header');
+    const prevented: boolean[] = [];
+    const listener = (event: MouseEvent) => {
+      if ((event.target as HTMLElement | null)?.closest('a'))
+        prevented.push(event.defaultPrevented);
+    };
+    window.addEventListener('click', listener);
+    const folderCalls = () => calls.filter((call) => /^GET \/photos\/folders/.test(call));
+    const photoListCalls = (scope: string) =>
+      calls.filter((call) => /^GET \/photos\?/.test(call) && call.includes(scope));
+
+    await user.click(within(mainNav()).getByRole('link', { name: 'Más' }));
+    await user.click(await screen.findByRole('link', { name: /Fotos/ }));
+    const folderLink = await screen.findByRole('link', { name: /Carpeta sintética/ });
+    await user.click(folderLink);
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Carpeta sintética' }),
+    ).toBeInTheDocument();
+    await screen.findByRole('button', { name: 'Ver Foto sintética' });
+    await user.click(screen.getByRole('link', { name: /Fotos/ }));
+    await user.click(await screen.findByRole('link', { name: /Todas las fotos/ }));
+    await screen.findByRole('button', { name: 'Ver Foto sintética' });
+    await user.click(screen.getByRole('link', { name: /Fotos/ }));
+    await user.click(await screen.findByRole('link', { name: /Carpeta sintética/ }));
+    expect(screen.getByRole('button', { name: 'Ver Foto sintética' })).toBeInTheDocument();
+    expect(screen.queryByText(/Cargando/)).not.toBeInTheDocument();
+    window.removeEventListener('click', listener);
+
+    // Un listado de carpetas para todo el recorrido (pantalla, encabezado y
+    // selectores) y una página por vista; la revisita sale de la caché.
+    expect(folderCalls().length).toBe(1);
+    expect(photoListCalls('folder=carpeta-sintetica').length).toBe(1);
+    expect(calls.filter((call) => /^GET \/photos\?/.test(call)).length).toBe(2);
     expect(count('/auth/refresh')).toBe(1);
     expect(count('/auth/me')).toBe(1);
     expect(document.querySelector('.app-header')).toBe(shellHeader);

@@ -25,6 +25,9 @@ import type {
   OwnBirthday,
   PersonalProfile,
   PersonalProfileResponse,
+  PhotoFolder,
+  PhotoFoldersResponse,
+  PhotoScope,
   PhotosListResponse,
   TeamFilter,
   TeamMember,
@@ -99,6 +102,8 @@ export const fetchWeather = () => apiRequest<WeatherReport>('/weather', auth);
 // 📸 Fotos
 export function fetchPhotos(params: {
   category?: GalleryCategory;
+  /** Sin valor (o `all`) = todas; `none` = «Sin carpeta»; o el id de una carpeta. */
+  scope?: PhotoScope;
   page: number;
   pageSize: number;
 }) {
@@ -107,6 +112,7 @@ export function fetchPhotos(params: {
     pageSize: String(params.pageSize),
   });
   if (params.category) search.set('category', params.category);
+  if (params.scope && params.scope !== 'all') search.set('folder', params.scope);
   return apiRequest<PhotosListResponse>(`/photos?${search.toString()}`, auth);
 }
 /** Imagen servida por el backend (proxy autenticado): nunca una URL del bucket. */
@@ -114,11 +120,18 @@ export const fetchPhotoContent = (photoId: string) =>
   apiRequest<Blob>(`/photos/${photoId}/content`, { ...auth, responseType: 'blob' });
 export function uploadPhoto(
   file: File,
-  metadata: { title: string; category: GalleryCategory; employeeId: string | null },
+  metadata: {
+    title: string;
+    category: GalleryCategory;
+    employeeId: string | null;
+    /** `null` = «Sin carpeta». */
+    folderId: string | null;
+  },
   idempotencyKey: string,
 ) {
   const search = new URLSearchParams({ category: metadata.category, title: metadata.title });
   if (metadata.employeeId) search.set('employeeId', metadata.employeeId);
+  if (metadata.folderId) search.set('folderId', metadata.folderId);
   return apiRequest<{ photo: GalleryPhoto }>(`/photos?${search.toString()}`, {
     method: 'POST',
     rawBody: file,
@@ -128,6 +141,20 @@ export function uploadPhoto(
   });
 }
 export const deletePhoto = (photoId: string) => post<unknown>(`/photos/${photoId}/delete`, {});
+/** Mover: destino y carpeta en la que se VIO la foto (409 si otra persona la movió). */
+export const movePhoto = (
+  photoId: string,
+  body: { folderId: string | null; fromFolderId: string | null },
+) => post<{ photo: GalleryPhoto; moved: boolean }>(`/photos/${photoId}/move`, body);
+export const fetchPhotoFolders = () => apiRequest<PhotoFoldersResponse>('/photos/folders', auth);
+export const createPhotoFolder = (name: string, idempotencyKey: string) =>
+  post<{ folder: PhotoFolder }>('/photos/folders', { name }, { 'Idempotency-Key': idempotencyKey });
+export const renamePhotoFolder = (folderId: string, body: { name: string; version: number }) =>
+  patch<{ folder: PhotoFolder }>(`/photos/folders/${folderId}`, body);
+export const deletePhotoFolder = (folderId: string, version: number) =>
+  post<{ folder: { id: string; deleted: true } }>(`/photos/folders/${folderId}/delete`, {
+    version,
+  });
 
 // 🌳 Jardín
 export function fetchGardenPlanVersions(page: number, pageSize: number) {

@@ -14,6 +14,8 @@ import {
   newsReply,
   newsResponse,
   quoteOf,
+  photoFolder,
+  photoFoldersResponse,
   photosResponse,
   profileResponse,
   summaryResponse,
@@ -43,6 +45,11 @@ const api = vi.hoisted(() => ({
   fetchPhotoContent: vi.fn(),
   uploadPhoto: vi.fn(),
   deletePhoto: vi.fn(),
+  movePhoto: vi.fn(),
+  fetchPhotoFolders: vi.fn(),
+  createPhotoFolder: vi.fn(),
+  renamePhotoFolder: vi.fn(),
+  deletePhotoFolder: vi.fn(),
   fetchGardenPlanVersions: vi.fn(),
   fetchGardenPlanContent: vi.fn(),
   publishGardenPlanVersion: vi.fn(),
@@ -136,6 +143,7 @@ beforeEach(() => {
   api.fetchEvents.mockResolvedValue(eventsResponse());
   api.fetchWeather.mockResolvedValue(weatherResponse());
   api.fetchPhotos.mockResolvedValue(photosResponse());
+  api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse());
   api.fetchPhotoContent.mockResolvedValue(new Blob(['x'], { type: 'image/jpeg' }));
   api.fetchGardenPlanVersions.mockResolvedValue(gardenResponse());
   api.fetchGardenPlanContent.mockResolvedValue(new Blob(['x'], { type: 'image/jpeg' }));
@@ -866,32 +874,38 @@ describe('🌤️ Clima', () => {
 });
 
 describe('📸 Fotos', () => {
-  it('EMPLOYEE ve la galería y el visor sin "Eliminar" (solo ADMIN)', async () => {
+  it('EMPLOYEE ve la galería y el visor sin "Eliminar" (solo ADMIN), con «Mover a carpeta»', async () => {
     const user = userEvent.setup();
-    renderMore('/more/photos');
+    renderMore('/more/photos/all');
     await user.click(await screen.findByRole('button', { name: 'Ver Foto sintética' }));
     const viewer = within(screen.getByRole('dialog'));
     expect(viewer.getByText('Foto sintética')).toBeInTheDocument();
     expect(viewer.getByText(/Persona sintética · recuerdo/)).toBeInTheDocument();
+    expect(viewer.getByText('Sin carpeta')).toBeInTheDocument();
+    expect(viewer.getByRole('button', { name: /Mover a carpeta/ })).toBeInTheDocument();
     expect(viewer.queryByRole('button', { name: /Eliminar/ })).not.toBeInTheDocument();
+    expect(api.fetchPhotos).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: 'all', page: 1, category: undefined }),
+    );
   });
 
   it('ADMIN elimina con confirmación', async () => {
     asAdmin();
     const user = userEvent.setup();
     api.deletePhoto.mockResolvedValue({});
-    renderMore('/more/photos');
+    renderMore('/more/photos/all');
     await user.click(await screen.findByRole('button', { name: 'Ver Foto sintética' }));
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Eliminar/ }));
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Eliminar' }));
     await waitFor(() => expect(api.deletePhoto).toHaveBeenCalledWith('photo-1'));
   });
 
-  it('subir: título, tipo y persona viajan como metadatos con Idempotency-Key', async () => {
+  it('subir: título, tipo, persona y carpeta («Sin carpeta» desde la pantalla principal) con Idempotency-Key', async () => {
     const user = userEvent.setup();
     api.uploadPhoto.mockResolvedValue({ photo: photosResponse().photos[0] });
     const { container } = renderMore('/more/photos');
     await screen.findByRole('button', { name: /Subir foto/ });
+    await waitFor(() => expect(screen.getByRole('button', { name: /Subir foto/ })).toBeEnabled());
     const file = new File([new Uint8Array([0xff, 0xd8, 0xff])], 'jardin.jpg', {
       type: 'image/jpeg',
     });
@@ -910,15 +924,304 @@ describe('📸 Fotos', () => {
     await waitFor(() => expect(api.uploadPhoto).toHaveBeenCalledTimes(1));
     const [sent, metadata, key] = api.uploadPhoto.mock.calls[0] as [File, object, string];
     expect(sent).toBe(file);
-    expect(metadata).toEqual({ title: 'Jardín', category: 'TASK_EVIDENCE', employeeId: null });
+    expect(metadata).toEqual({
+      title: 'Jardín',
+      category: 'TASK_EVIDENCE',
+      employeeId: null,
+      folderId: null,
+    });
     expect(key).toMatch(/^[0-9a-f]{32}$/);
+    // Conteos de carpetas al día tras subir.
+    await waitFor(() => expect(api.fetchPhotoFolders).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('La foto se guardó en «Sin carpeta».')).toBeInTheDocument();
   });
 
   it('sin almacenamiento configurado, la subida queda deshabilitada con aviso claro', async () => {
-    api.fetchPhotos.mockResolvedValue(photosResponse('unconfigured'));
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([], 'unconfigured'));
     renderMore('/more/photos');
     expect(await screen.findByText(/falta configurar el almacenamiento/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Subir foto/ })).toBeDisabled();
+  });
+});
+
+describe('📁 Carpetas de Fotos', () => {
+  const garden = photoFolder('folder-1', 'Jardín de invierno con un nombre bastante largo', {
+    photoCount: 2,
+    permissions: { canRename: true, canDelete: true },
+  });
+  const visits = photoFolder('folder-2', 'Visitas', { photoCount: 1 });
+  const inFolder = (folderId: string | null) => ({
+    ...photosResponse(),
+    photos: [{ ...photosResponse().photos[0]!, folderId }],
+  });
+
+  it('pantalla principal: «Todas las fotos», «Sin carpeta» y carpetas en el orden del backend, con conteos; una sola request', async () => {
+    api.fetchPhotoFolders.mockResolvedValue(
+      photoFoldersResponse([garden, visits], 'configured', 3),
+    );
+    renderMore('/more/photos');
+    const list = within(await screen.findByRole('list', { name: 'Carpetas de fotos' }));
+    const links = list.getAllByRole('link');
+    expect(links.map((link) => link.getAttribute('href'))).toEqual([
+      '/more/photos/all',
+      '/more/photos/unfiled',
+      '/more/photos/folders/folder-1',
+      '/more/photos/folders/folder-2',
+    ]);
+    expect(links.map((link) => link.textContent)).toEqual([
+      '🖼️Todas las fotos6 fotos',
+      '🗂️Sin carpeta3 fotos',
+      `📁${garden.name}2 fotos`,
+      '📁Visitas1 foto',
+    ]);
+    // Acciones solo donde el backend las autoriza; nunca en los accesos especiales.
+    expect(list.getAllByRole('button', { name: /Acciones de la carpeta/ })).toHaveLength(1);
+    expect(api.fetchPhotoFolders).toHaveBeenCalledTimes(1);
+    expect(api.fetchPhotos).not.toHaveBeenCalled();
+    expect(api.fetchPhotoContent).not.toHaveBeenCalled();
+  });
+
+  it('sin carpetas: estado vacío claro y los accesos especiales siguen', async () => {
+    renderMore('/more/photos');
+    expect(await screen.findByText(/Todavía no hay carpetas/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Sin carpeta/ })).toBeInTheDocument();
+  });
+
+  it('crear: valida sin request, envía el nombre normalizado una sola vez con Idempotency-Key y conserva el formulario ante un duplicado', async () => {
+    const user = userEvent.setup();
+    let reject!: (error: unknown) => void;
+    api.createPhotoFolder.mockReturnValueOnce(
+      new Promise((_, fail) => {
+        reject = fail;
+      }),
+    );
+    renderMore('/more/photos');
+    await user.click(await screen.findByRole('button', { name: /Nueva carpeta/ }));
+    const dialog = within(screen.getByRole('dialog'));
+    await user.click(dialog.getByRole('button', { name: 'Crear carpeta' }));
+    expect(dialog.getByRole('alert')).toHaveTextContent('Escribí un nombre para la carpeta.');
+    await user.type(dialog.getByLabelText('Nombre'), ' sin   CARPETA ');
+    await user.click(dialog.getByRole('button', { name: 'Crear carpeta' }));
+    expect(dialog.getByRole('alert')).toHaveTextContent(/Sin carpeta.*Todas las fotos/);
+    expect(api.createPhotoFolder).not.toHaveBeenCalled();
+
+    await user.clear(dialog.getByLabelText('Nombre'));
+    await user.type(dialog.getByLabelText('Nombre'), '  Jardín   de invierno ');
+    await user.click(dialog.getByRole('button', { name: 'Crear carpeta' }));
+    await user.click(dialog.getByRole('button', { name: /Crear carpeta/ }));
+    expect(api.createPhotoFolder).toHaveBeenCalledTimes(1);
+    const [name, key] = api.createPhotoFolder.mock.calls[0] as [string, string];
+    expect(name).toBe('Jardín de invierno');
+    expect(key).toMatch(/^[0-9a-f]{32}$/);
+    reject(new ApiError(409, 'Ya existe una carpeta con ese nombre.', 'PHOTO_FOLDER_NAME_TAKEN'));
+    expect(await dialog.findByText('Ya existe una carpeta con ese nombre.')).toBeInTheDocument();
+    expect(dialog.getByLabelText('Nombre')).toHaveValue('  Jardín   de invierno ');
+
+    api.createPhotoFolder.mockResolvedValueOnce({ folder: photoFolder('folder-9', 'Huerta') });
+    await user.clear(dialog.getByLabelText('Nombre'));
+    await user.type(dialog.getByLabelText('Nombre'), 'Huerta');
+    await user.click(dialog.getByRole('button', { name: 'Crear carpeta' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(await screen.findByText('Se creó la carpeta «Huerta».')).toBeInTheDocument();
+    // Solo se revalida el listado de carpetas (sin pedir fotos).
+    await waitFor(() => expect(api.fetchPhotoFolders).toHaveBeenCalledTimes(2));
+    expect(api.fetchPhotos).not.toHaveBeenCalled();
+  });
+
+  it('sin conexión: la carpeta no se crea, se avisa y el formulario queda', async () => {
+    const user = userEvent.setup();
+    api.createPhotoFolder.mockRejectedValue(new OfflineError());
+    renderMore('/more/photos');
+    await user.click(await screen.findByRole('button', { name: /Nueva carpeta/ }));
+    const dialog = within(screen.getByRole('dialog'));
+    await user.type(dialog.getByLabelText('Nombre'), 'Huerta');
+    await user.click(dialog.getByRole('button', { name: 'Crear carpeta' }));
+    expect(await dialog.findByRole('alert')).toHaveTextContent(/conexión/i);
+    expect(dialog.getByLabelText('Nombre')).toHaveValue('Huerta');
+    expect(api.createPhotoFolder).toHaveBeenCalledTimes(1);
+  });
+
+  it('dentro de una carpeta: nombre, cantidad, camino a Fotos, filtros y subida con la carpeta preseleccionada', async () => {
+    const user = userEvent.setup();
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([garden, visits]));
+    api.fetchPhotos.mockResolvedValue(inFolder('folder-1'));
+    const { container } = renderMore('/more/photos/folders/folder-1');
+    expect(await screen.findByRole('heading', { level: 1, name: garden.name })).toBeInTheDocument();
+    expect(screen.getByText('2 fotos')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Fotos/ })).toHaveAttribute('href', '/more/photos');
+    expect(api.fetchPhotos).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: 'folder-1', page: 1 }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Tareas' }));
+    await waitFor(() =>
+      expect(api.fetchPhotos).toHaveBeenLastCalledWith(
+        expect.objectContaining({ scope: 'folder-1', category: 'TASK_EVIDENCE' }),
+      ),
+    );
+    await user.upload(
+      container.ownerDocument.querySelector('input[type="file"]') as HTMLInputElement,
+      new File([new Uint8Array([0xff, 0xd8, 0xff])], 'x.jpg', { type: 'image/jpeg' }),
+    );
+    expect(within(await screen.findByRole('dialog')).getByLabelText('Carpeta')).toHaveValue(
+      'folder-1',
+    );
+  });
+
+  it('una carpeta eliminada o inexistente muestra un estado claro (404 del backend o ausente del listado)', async () => {
+    // Carpetas y fotos se piden en paralelo (sin cascada al recargar el enlace).
+    api.fetchPhotoFolders.mockReturnValue(new Promise(() => undefined));
+    api.fetchPhotos.mockRejectedValue(
+      new ApiError(404, 'La carpeta no existe o fue eliminada.', 'PHOTO_FOLDER_NOT_FOUND'),
+    );
+    const first = renderMore('/more/photos/folders/folder-1');
+    expect(await screen.findByText('Esta carpeta no existe o fue eliminada.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Volver a Fotos' })).toHaveAttribute(
+      'href',
+      '/more/photos',
+    );
+    first.unmount();
+
+    api.fetchPhotos.mockReset();
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([visits]));
+    api.fetchPhotos.mockReturnValue(new Promise(() => undefined));
+    renderMore('/more/photos/folders/folder-1');
+    expect(await screen.findByText('Esta carpeta no existe o fue eliminada.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Subir foto/ })).not.toBeInTheDocument();
+  });
+
+  it('mover: destino precargado, una request con la carpeta vista; sale de la vista de origen sin recargarla', async () => {
+    const user = userEvent.setup();
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([garden, visits]));
+    api.fetchPhotos.mockResolvedValue(inFolder('folder-1'));
+    api.movePhoto.mockResolvedValue({
+      moved: true,
+      photo: { ...photosResponse().photos[0], folderId: 'folder-2' },
+    });
+    renderMore('/more/photos/folders/folder-1');
+    await user.click(await screen.findByRole('button', { name: 'Ver Foto sintética' }));
+    await user.click(screen.getByRole('button', { name: /Mover a carpeta/ }));
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByLabelText('Carpeta')).toHaveValue('folder-1');
+    expect(dialog.getByRole('button', { name: 'Mover' })).toBeDisabled();
+    await user.selectOptions(dialog.getByLabelText('Carpeta'), 'folder-2');
+    const photosCalls = api.fetchPhotos.mock.calls.length;
+    await user.click(dialog.getByRole('button', { name: 'Mover' }));
+    await user.click(dialog.getByRole('button', { name: /Mover/ }));
+    expect(api.movePhoto).toHaveBeenCalledTimes(1);
+    expect(api.movePhoto).toHaveBeenCalledWith('photo-1', {
+      folderId: 'folder-2',
+      fromFolderId: 'folder-1',
+    });
+    expect(await screen.findByText('«Foto sintética» se movió a «Visitas».')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Ver Foto sintética' })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText('No hay fotos acá.')).toBeInTheDocument();
+    // Conteos sí; la vista de origen no se vuelve a pedir.
+    await waitFor(() => expect(api.fetchPhotoFolders).toHaveBeenCalledTimes(2));
+    expect(api.fetchPhotos).toHaveBeenCalledTimes(photosCalls);
+  });
+
+  it('mover cuando otra persona ya la movió: conflicto visible, sin pisar, y la vista se actualiza', async () => {
+    const user = userEvent.setup();
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([garden, visits]));
+    api.fetchPhotos.mockResolvedValue(inFolder('folder-1'));
+    api.movePhoto.mockRejectedValue(
+      new ApiError(
+        409,
+        'Otra persona movió esta foto mientras la tenías abierta. Revisá dónde está ahora y volvé a intentar.',
+        'PHOTO_MOVE_CONFLICT',
+      ),
+    );
+    renderMore('/more/photos/folders/folder-1');
+    await user.click(await screen.findByRole('button', { name: 'Ver Foto sintética' }));
+    await user.click(screen.getByRole('button', { name: /Mover a carpeta/ }));
+    await user.selectOptions(within(screen.getByRole('dialog')).getByLabelText('Carpeta'), '');
+    const photosCalls = api.fetchPhotos.mock.calls.length;
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mover' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Otra persona movió esta foto/);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(api.fetchPhotos.mock.calls.length).toBeGreaterThan(photosCalls));
+  });
+
+  it('renombrar desde la carpeta: versión vista y encabezado al día sin volver a pedir fotos', async () => {
+    const user = userEvent.setup();
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([garden, visits]));
+    api.fetchPhotos.mockResolvedValue(inFolder('folder-1'));
+    api.renamePhotoFolder.mockResolvedValue({ folder: { ...garden, name: 'Huerta', version: 2 } });
+    renderMore('/more/photos/folders/folder-1');
+    await user.click(await screen.findByRole('button', { name: /Acciones de la carpeta/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Renombrar' }));
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByLabelText('Nombre')).toHaveValue(garden.name);
+    await user.clear(dialog.getByLabelText('Nombre'));
+    await user.type(dialog.getByLabelText('Nombre'), 'Huerta');
+    const photosCalls = api.fetchPhotos.mock.calls.length;
+    await user.click(dialog.getByRole('button', { name: 'Guardar' }));
+    expect(api.renamePhotoFolder).toHaveBeenCalledWith('folder-1', { name: 'Huerta', version: 1 });
+    expect(await screen.findByRole('heading', { level: 1, name: 'Huerta' })).toBeInTheDocument();
+    expect(api.fetchPhotos).toHaveBeenCalledTimes(photosCalls);
+    expect(api.fetchPhotoFolders).toHaveBeenCalledTimes(1);
+  });
+
+  it('renombrar con el mismo nombre no envía nada', async () => {
+    const user = userEvent.setup();
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([garden]));
+    renderMore('/more/photos');
+    await user.click(await screen.findByRole('button', { name: /Acciones de la carpeta/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Renombrar' }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(api.renamePhotoFolder).not.toHaveBeenCalled();
+  });
+
+  it('eliminar: confirmación explícita, una carpeta con fotos informa el 409 y una vacía vuelve a Fotos', async () => {
+    const user = userEvent.setup();
+    const empty = { ...garden, photoCount: 0 };
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([garden]));
+    api.deletePhotoFolder.mockRejectedValueOnce(
+      new ApiError(
+        409,
+        'La carpeta todavía tiene fotos. Movelas a otra carpeta o a «Sin carpeta» antes de eliminarla.',
+        'PHOTO_FOLDER_NOT_EMPTY',
+      ),
+    );
+    renderMore('/more/photos');
+    await user.click(await screen.findByRole('button', { name: /Acciones de la carpeta/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Eliminar' }));
+    let dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByText(/tiene 2 fotos/)).toBeInTheDocument();
+    // Mientras tanto otra persona vació la carpeta: el 409 revalida el listado.
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([empty]));
+    await user.click(dialog.getByRole('button', { name: 'Eliminar' }));
+    expect(await dialog.findByText(/todavía tiene fotos/)).toBeInTheDocument();
+    expect(api.deletePhotoFolder).toHaveBeenCalledWith('folder-1', 1);
+    await waitFor(() => expect(api.fetchPhotoFolders).toHaveBeenCalledTimes(2));
+    await user.click(dialog.getByRole('button', { name: 'Cancelar' }));
+
+    api.fetchPhotos.mockResolvedValue({ ...photosResponse(), photos: [], total: 0 });
+    api.deletePhotoFolder.mockResolvedValueOnce({ folder: { id: 'folder-1', deleted: true } });
+    await user.click(await screen.findByRole('link', { name: new RegExp(empty.name) }));
+    await user.click(await screen.findByRole('button', { name: /Acciones de la carpeta/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Eliminar' }));
+    dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByText(/Las fotos nunca se borran/)).toBeInTheDocument();
+    await user.click(dialog.getByRole('button', { name: 'Eliminar' }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Fotos' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: new RegExp(empty.name) })).not.toBeInTheDocument();
+  });
+
+  it('un EMPLOYEE ajeno no ve acciones de la carpeta, pero sí puede mover fotos', async () => {
+    const user = userEvent.setup();
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([visits]));
+    api.fetchPhotos.mockResolvedValue(inFolder('folder-2'));
+    renderMore('/more/photos/folders/folder-2');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Visitas' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Acciones de la carpeta/ }),
+    ).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'Ver Foto sintética' }));
+    expect(screen.getByRole('button', { name: /Mover a carpeta/ })).toBeInTheDocument();
   });
 });
 

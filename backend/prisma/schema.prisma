@@ -277,6 +277,11 @@ model User {
   /// plano del jardín. Siempre un ADMIN (el servicio lo exige otra vez).
   publishedGardenPlanVersions GardenPlanVersion[] @relation("GardenPlanVersionPublishedBy")
 
+  /// 📸 Carpetas de Fotos: quién creó cada una (usuario de la sesión) y
+  /// quién la eliminó lógicamente (su creador o un ADMIN).
+  createdPhotoFolders PhotoFolder[] @relation("PhotoFolderCreatedBy")
+  deletedPhotoFolders PhotoFolder[] @relation("PhotoFolderDeletedBy")
+
   /// Participante ADMIN sin `Employee` (quien consumió / juntó), distinto del
   /// actor que registró. Ver `StockMovement.participantUserId`.
   participatedStockMovements StockMovement[] @relation("StockMovementParticipantUser")
@@ -1083,6 +1088,15 @@ model FileAsset {
   /// confirmadas mientras la copia estaba activada.
   driveBackupJob DriveBackupJob?
 
+  /// 📸 Carpeta de la galería (`null` = «Sin carpeta»). Solo fotos de la
+  /// galería (`MEMORY`/`TASK_EVIDENCE`) y solo confirmadas: se asigna al
+  /// confirmar la subida y una foto eliminada la conserva como historia
+  /// (CHECK en la migración). Es organización en la base: no cambia el
+  /// objeto, su clave ni la copia en Drive. `RESTRICT`: una carpeta con
+  /// fotos (aun eliminadas) nunca se borra físicamente.
+  folderId String?      @map("folder_id") @db.Uuid
+  folder   PhotoFolder? @relation(fields: [folderId], references: [id], onDelete: Restrict)
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -1091,10 +1105,48 @@ model FileAsset {
   @@unique([bucket, objectKey])
   /// Etapa 5X — galería de 📸 Fotos: por categoría y estado, más recientes primero.
   @@index([category, status, createdAt])
+  /// 📸 Galería de una carpeta (o «Sin carpeta», `folder_id IS NULL`) y conteos por carpeta.
+  @@index([folderId, status, createdAt])
   @@index([taskId])
   @@index([animalId])
   @@index([uploadedByEmployeeId])
   @@map("file_assets")
+}
+
+/// 📸 Carpeta de la galería de Fotos: galería compartida, un solo nivel (sin
+/// subcarpetas). Módulo nuevo — sin filas sembradas ni asignaciones: las
+/// fotos existentes quedan en «Sin carpeta» (`file_assets.folder_id` nulo).
+///
+/// - Cualquier usuario activo crea; renombra o elimina quien la creó o un ADMIN.
+/// - Nombre visible normalizado (extremos recortados, espacios colapsados,
+///   NFC, ≤ 80); `nameKey` = ese nombre en minúsculas: dos carpetas VIGENTES
+///   nunca comparten clave (único parcial, también ante altas simultáneas).
+///   «Sin carpeta» y «Todas las fotos» son accesos de la pantalla, no carpetas.
+/// - Eliminar es LÓGICO y solo vacía (sin fotos `AVAILABLE`): la fila queda
+///   para las fotos eliminadas que la referencian; su nombre vuelve a estar
+///   libre. Una eliminada no recibe fotos (bloqueo de fila en la misma
+///   transacción que mueve o confirma).
+/// - `version` sube con cada renombre o eliminación (concurrencia optimista).
+model PhotoFolder {
+  id      String @id @default(uuid()) @db.Uuid
+  name    String
+  nameKey String @map("name_key")
+
+  createdByUserId String @map("created_by_user_id") @db.Uuid
+  createdBy       User   @relation("PhotoFolderCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  version   Int      @default(1)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  deletedAt       DateTime? @map("deleted_at")
+  deletedByUserId String?   @map("deleted_by_user_id") @db.Uuid
+  deletedBy       User?     @relation("PhotoFolderDeletedBy", fields: [deletedByUserId], references: [id], onDelete: Restrict)
+
+  photos FileAsset[]
+
+  @@unique([nameKey], map: "photo_folders_active_name_key", where: raw("deleted_at IS NULL"))
+  @@map("photo_folders")
 }
 
 // ═══════════════════════════════════════════════════════════════════════

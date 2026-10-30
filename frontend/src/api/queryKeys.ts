@@ -1,5 +1,5 @@
 import type { ChickenCoopPeriodDays } from './chickenCoopTypes';
-import type { EventType, GalleryCategory, TeamFilter } from './moreTypes';
+import type { EventType, GalleryCategory, PhotoScope, TeamFilter } from './moreTypes';
 import type { PerformanceDetailFilters } from './performanceTypes';
 import type { MedicalRecordType, PetDueFilters } from './petTypes';
 import type {
@@ -191,11 +191,20 @@ export const queryKeys = {
         ? ([...scope(userId), 'more', 'events'] as const)
         : ([...scope(userId), 'more', 'events', type] as const),
     weather: (userId: string) => [...scope(userId), 'more', 'weather'] as const,
-    /** Galería por tipo (`useInfiniteQuery`); el prefijo invalida todos los filtros. */
-    photos: (userId: string, category?: GalleryCategory | 'all') =>
-      category === undefined
+    /**
+     * Galería (`useInfiniteQuery`) por parte de la galería (`all`, `none` =
+     * «Sin carpeta» o el id de una carpeta) y tipo; la página vive en
+     * `pageParams`. Cada prefijo invalida lo que contiene: sin argumentos,
+     * toda la galería; con `photoScope`, esa vista en todos sus tipos.
+     */
+    photos: (userId: string, photoScope?: PhotoScope, category?: GalleryCategory | 'all') =>
+      photoScope === undefined
         ? ([...scope(userId), 'more', 'photos'] as const)
-        : ([...scope(userId), 'more', 'photos', category] as const),
+        : category === undefined
+          ? ([...scope(userId), 'more', 'photos', photoScope] as const)
+          : ([...scope(userId), 'more', 'photos', photoScope, category] as const),
+    /** Carpetas de Fotos con sus conteos, «Sin carpeta» y «Todas las fotos» (una request). */
+    photoFolders: (userId: string) => [...scope(userId), 'more', 'photo-folders'] as const,
     /** Imagen por id de foto: inmutable (una foto nueva es otro id). */
     photoContent: (userId: string, photoId: string) =>
       [...scope(userId), 'more', 'photo-content', photoId] as const,

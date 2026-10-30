@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { z } from 'zod';
-import type { Prisma } from '../generated/prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import type { PhotoCategory } from '../generated/prisma/enums';
 import { config } from '../config';
 import { recordAuditLog } from '../auth/auditLog';
@@ -13,6 +13,8 @@ import {
   ObjectStorageNotConfiguredError,
   ObjectStorageUnavailableError,
   PetPhotoInvalidError,
+  PhotoFolderNotFoundError,
+  PhotoFolderUnavailableError,
   PhotoNotFoundError,
 } from '../errors/AppError';
 import { toLocalDate } from '../lib/businessTime';
@@ -35,6 +37,11 @@ import type { uploadPhotoQuerySchema } from './moreSchemas';
  * cualquiera): es irreversible y ya estaba aprobada (docs/ARCHITECTURE.md §7).
  * Eliminar es baja lógica confirmada y luego borrado físico; un fallo del
  * borrado físico deja la fila `PENDING_DELETION` para `reconcileFileAssets`.
+ *
+ * Carpetas (`photoFoldersService.ts`): organización en la base. Una foto nueva
+ * recibe su carpeta recién al CONFIRMARSE, con la carpeta bloqueada en la
+ * misma transacción (`lockLiveFolder`); la clave del objeto y la copia en
+ * Drive no dependen de la carpeta.
  */
 
 export const MAX_GALLERY_PHOTO_BYTES = 10 * 1024 * 1024;
@@ -52,28 +59,31 @@ const KEY_PREFIX: Record<string, string> = {
 
 type UploadMetadata = z.infer<typeof uploadPhotoQuerySchema>;
 
-const photoSelect = {
+export const photoSelect = {
   id: true,
   title: true,
   category: true,
   createdAt: true,
+  folderId: true,
   taggedEmployee: { select: { id: true, displayName: true, colorHex: true } },
 } as const;
-type PhotoRow = Prisma.FileAssetGetPayload<{ select: typeof photoSelect }>;
+export type PhotoRow = Prisma.FileAssetGetPayload<{ select: typeof photoSelect }>;
 
-function serializePhoto(row: PhotoRow) {
+/** `folderId`: carpeta de la foto o `null` («Sin carpeta»); el nombre sale del listado de carpetas. */
+export function serializePhoto(row: PhotoRow) {
   return {
     id: row.id,
     title: row.title ?? 'Sin título',
     category: row.category as 'TASK_EVIDENCE' | 'MEMORY',
     createdAt: row.createdAt.toISOString(),
+    folderId: row.folderId,
     employee: row.taggedEmployee,
   };
 }
 
 export type SerializedPhoto = ReturnType<typeof serializePhoto>;
 
-const storageStatus = () => (getObjectStorage() ? 'configured' : 'unconfigured');
+export const storageStatus = () => (getObjectStorage() ? 'configured' : 'unconfigured');
 
 function requireStorage(): ObjectStorageClient {
   const storage = getObjectStorage();
@@ -81,19 +91,48 @@ function requireStorage(): ObjectStorageClient {
   return storage;
 }
 
-const galleryWhere = (category?: PhotoCategory): Prisma.FileAssetWhereInput => ({
+/** Fotos VIGENTES de la galería (las que se ven y cuentan; también dentro de una carpeta). */
+export const galleryWhere = (category?: PhotoCategory): Prisma.FileAssetWhereInput => ({
   status: 'AVAILABLE',
   category: category ? category : { in: [...GALLERY_CATEGORY_LIST] },
 });
 
-/** Galería más reciente primero, filtrable por tipo. Dos sentencias fijas (más una por relación). */
+/**
+ * Bloquea una carpeta VIGENTE hasta el fin de la transacción (`FOR KEY
+ * SHARE`: no frena un renombre, sí una eliminación, que toma `FOR UPDATE`).
+ * Si la eliminación confirmó antes, Postgres reevalúa `deleted_at IS NULL`
+ * al obtener el bloqueo y no devuelve la fila: `false`. Así ninguna foto
+ * confirmada o movida queda en una carpeta eliminada.
+ */
+export async function lockLiveFolder(
+  tx: Prisma.TransactionClient,
+  folderId: string,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<{ id: string }[]>(
+    Prisma.sql`SELECT "id" FROM "photo_folders" WHERE "id" = ${folderId}::uuid AND "deleted_at" IS NULL FOR KEY SHARE`,
+  );
+  return rows.length === 1;
+}
+
+/**
+ * Galería más reciente primero, filtrable por tipo y por carpeta (`none` =
+ * «Sin carpeta»). Dos sentencias fijas (más una por relación); con una
+ * carpeta, una más en paralelo para responder 404 si no existe o se eliminó.
+ */
 export async function listPhotos(filters: {
   category?: PhotoCategory;
+  folder?: string;
   page: number;
   pageSize: number;
 }) {
-  const where = galleryWhere(filters.category);
-  const [total, rows] = await Promise.all([
+  const where: Prisma.FileAssetWhereInput = {
+    ...galleryWhere(filters.category),
+    ...(filters.folder === undefined
+      ? {}
+      : { folderId: filters.folder === 'none' ? null : filters.folder }),
+  };
+  const folderId = filters.folder && filters.folder !== 'none' ? filters.folder : null;
+  const [total, rows, folder] = await Promise.all([
     prisma.fileAsset.count({ where }),
     prisma.fileAsset.findMany({
       where,
@@ -102,7 +141,14 @@ export async function listPhotos(filters: {
       skip: (filters.page - 1) * filters.pageSize,
       take: filters.pageSize,
     }),
+    folderId
+      ? prisma.photoFolder.findFirst({
+          where: { id: folderId, deletedAt: null },
+          select: { id: true },
+        })
+      : undefined,
   ]);
+  if (folder === null) throw new PhotoFolderNotFoundError();
   return {
     photos: rows.map(serializePhoto),
     page: filters.page,
@@ -184,12 +230,16 @@ export async function uploadPhoto(
   if (!mime || declared !== mime) throw new PetPhotoInvalidError();
   const checksum = createHash('sha256').update(body).digest('hex');
   const employeeId = metadata.employeeId?.toLowerCase() ?? null;
+  const folderId = metadata.folderId ?? null;
+  // Sin carpeta, la huella es la de siempre: un reintento que cruce el
+  // despliegue sigue reconociendo su envío anterior.
   const requestHash = canonicalRequestHash([
     UPLOAD_ENDPOINT,
     checksum,
     metadata.category,
     employeeId,
     metadata.title,
+    ...(folderId ? [folderId] : []),
   ]);
 
   if (idempotencyKey !== undefined) {
@@ -218,6 +268,17 @@ export async function uploadPhoto(
       select: { active: true },
     });
     if (!employee?.active) throw new EmployeeInvalidError();
+  }
+  // Antes de subir los bytes: una carpeta ya eliminada no hace subir nada.
+  // La comprobación que vale es la de la confirmación (bloqueo de la fila).
+  if (
+    folderId &&
+    !(await prisma.photoFolder.findFirst({
+      where: { id: folderId, deletedAt: null },
+      select: { id: true },
+    }))
+  ) {
+    throw new PhotoFolderUnavailableError();
   }
 
   const year = toLocalDate(now, config.businessTimeZone).year;
@@ -249,9 +310,12 @@ export async function uploadPhoto(
   }
 
   const confirm = async (tx: Prisma.TransactionClient) => {
+    // La pertenencia se asigna al confirmar, nunca a una carpeta eliminada
+    // mientras se subía: 409 y el objeto se descarta (sin otro destino).
+    if (folderId && !(await lockLiveFolder(tx, folderId))) throw new PhotoFolderUnavailableError();
     const { count } = await tx.fileAsset.updateMany({
       where: { id: file.id, status: 'PENDING_UPLOAD' },
-      data: { status: 'AVAILABLE', etag: etag ?? null },
+      data: { status: 'AVAILABLE', etag: etag ?? null, folderId },
     });
     if (count === 0) throw new PhotoNotFoundError();
     // Copia adicional en Drive (si está activada): el trabajo se confirma junto
@@ -269,6 +333,7 @@ export async function uploadPhoto(
       newState: {
         category: metadata.category,
         taggedEmployeeId: employeeId,
+        folderId,
         mimeType: mime,
         sizeBytes: body.length,
       },
@@ -315,7 +380,13 @@ export async function deletePhoto(
   const file = await prisma.$transaction(async (tx) => {
     const existing = await tx.fileAsset.findFirst({
       where: { id: photoId, ...galleryWhere() },
-      select: { id: true, objectKey: true, category: true, taggedEmployeeId: true },
+      select: {
+        id: true,
+        objectKey: true,
+        category: true,
+        taggedEmployeeId: true,
+        folderId: true,
+      },
     });
     if (!existing) throw new PhotoNotFoundError();
     const { count } = await tx.fileAsset.updateMany({
@@ -331,6 +402,7 @@ export async function deletePhoto(
       previousState: {
         category: existing.category,
         taggedEmployeeId: existing.taggedEmployeeId,
+        folderId: existing.folderId,
         status: 'AVAILABLE',
       },
       newState: { status: 'PENDING_DELETION' },
