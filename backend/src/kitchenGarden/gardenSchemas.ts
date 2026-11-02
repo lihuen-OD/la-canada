@@ -23,12 +23,17 @@ export const addParticipantBodySchema = z.object({ userId: uuidSchema }).strict(
 
 export const participantStatusBodySchema = z.object({ active: z.boolean() }).strict();
 
-export const GARDEN_ACTIVITY_KINDS = ['SOWING', 'TRANSPLANT', 'HARVEST', 'OTHER'] as const;
+/**
+ * Tipos que acepta la aplicación. `HARVEST` existe en el enum de la base (se
+ * agregó y se retiró el 2026-11-02) pero no se acepta: ni al crear, ni al
+ * editar, ni como filtro del historial.
+ */
+export const GARDEN_ACTIVITY_KINDS = ['SOWING', 'TRANSPLANT', 'OTHER'] as const;
 export const GARDEN_NOTES_MAX_LENGTH = 500;
 
-/** Tipo de un registro: siembra, trasplante, cosecha u otra actividad (nunca se deduce de la descripción). */
+/** Tipo de un registro: siembra, trasplante u otra actividad (nunca se deduce de la descripción). */
 const kindSchema = z.enum(GARDEN_ACTIVITY_KINDS, {
-  message: 'Elegí el tipo: siembra, trasplante, cosecha u otra actividad.',
+  message: 'Elegí el tipo: siembra, trasplante u otra actividad.',
 });
 
 /** Observaciones de una línea; vacías (o solo espacios) = sin observaciones (`null`). */

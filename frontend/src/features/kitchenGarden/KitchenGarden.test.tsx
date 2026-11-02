@@ -554,27 +554,26 @@ describe('🥬 Huerta — 📝 Registros', () => {
     expect(gardenApi.createGardenActivity).toHaveBeenCalledTimes(1);
   });
 
-  it('🧺 Cosecha: opción propia al crear y filtrar; el trasplante sigue siendo solo de la siembra', async () => {
+  it('tipos: Siembra, Trasplante y Otra actividad (sin Cosecha); el trasplante sigue siendo solo de la siembra', async () => {
     const user = userEvent.setup();
-    gardenApi.fetchGardenActivities.mockResolvedValue({
-      period: PERIOD,
-      viewer: { canWrite: true, canManage: true },
-      activities: [
-        OVERDUE,
-        { ...TODAY, kind: 'HARVEST', description: 'Cosechar zapallo sintético' },
-      ],
-    });
     renderGarden();
     await screen.findByRole('list', { name: 'Vencidas' });
-    await user.click(
-      within(screen.getByRole('group', { name: 'Filtrar por tipo' })).getByRole('button', {
-        name: '🧺 Cosecha',
-      }),
-    );
-    expect(allDescriptions()).toEqual(['Cosechar zapallo sintético']);
+    const types = within(screen.getByRole('group', { name: 'Filtrar por tipo' }));
+    expect(types.getAllByRole('button').map((button) => button.textContent)).toEqual([
+      'Todos',
+      '🌱 Siembra',
+      '🪴 Trasplante',
+      '🧺 Otra actividad',
+      'Sin clasificar',
+    ]);
     await user.click(screen.getByRole('button', { name: '+ Nuevo registro' }));
     const dialog = await screen.findByRole('dialog', { name: 'Nuevo registro' });
-    await user.selectOptions(within(dialog).getByLabelText('Tipo'), 'HARVEST');
+    const kindOptions = Array.from(
+      (within(dialog).getByLabelText('Tipo') as HTMLSelectElement).options,
+      (option) => option.value,
+    );
+    expect(kindOptions).toEqual(['', 'SOWING', 'TRANSPLANT', 'OTHER']);
+    await user.selectOptions(within(dialog).getByLabelText('Tipo'), 'OTHER');
     expect(
       within(dialog).queryByRole('checkbox', { name: /Programar también el trasplante/ }),
     ).not.toBeInTheDocument();
@@ -816,7 +815,7 @@ describe('🥬 Huerta — 📅 Historial cronológico', () => {
     expect(calls()).toHaveLength(2);
   });
 
-  it('filtros combinables en el backend (todo el historial, tipo Cosecha, persona) y rango propio', async () => {
+  it('filtros combinables en el backend (todo el historial, tipo, persona) y rango propio', async () => {
     const user = userEvent.setup();
     gardenApi.fetchGardenHistoryEntries.mockResolvedValue(page([entry('1')]));
     renderGarden('/kitchen-garden/history');
@@ -825,13 +824,18 @@ describe('🥬 Huerta — 📅 Historial cronológico', () => {
     await waitFor(() => expect(lastFilters()).toEqual({ all: true }));
     await user.click(
       within(screen.getByRole('group', { name: 'Filtrar por tipo' })).getByRole('button', {
-        name: '🧺 Cosecha',
+        name: '🪴 Trasplante',
       }),
     );
     await user.selectOptions(screen.getByLabelText('Persona que la realizó'), ADMIN_P.id);
     await waitFor(() =>
-      expect(lastFilters()).toEqual({ all: true, kind: 'HARVEST', participantId: ADMIN_P.id }),
+      expect(lastFilters()).toEqual({ all: true, kind: 'TRANSPLANT', participantId: ADMIN_P.id }),
     );
+    expect(
+      within(screen.getByRole('group', { name: 'Filtrar por tipo' })).queryByRole('button', {
+        name: /Cosecha/,
+      }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole('option', { name: `${ADMIN_P.displayName} (ya no participa)` }),
     ).toBeInTheDocument();
@@ -840,7 +844,7 @@ describe('🥬 Huerta — 📅 Historial cronológico', () => {
     await waitFor(() =>
       expect(lastFilters()).toEqual({
         from: '2026-06-01',
-        kind: 'HARVEST',
+        kind: 'TRANSPLANT',
         participantId: ADMIN_P.id,
       }),
     );

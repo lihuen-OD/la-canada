@@ -6,25 +6,18 @@ import { DESCRIPTION_MAX } from '../tasks/taskFormFields';
  * Solo presentación: el grupo de cada registro lo decide el backend.
  */
 
-export const KIND_ORDER: readonly GardenActivityKind[] = [
-  'SOWING',
-  'TRANSPLANT',
-  'HARVEST',
-  'OTHER',
-];
+export const KIND_ORDER: readonly GardenActivityKind[] = ['SOWING', 'TRANSPLANT', 'OTHER'];
 
 export const KIND_LABEL: Record<GardenActivityKind, string> = {
   SOWING: 'Siembra',
   TRANSPLANT: 'Trasplante',
-  HARVEST: 'Cosecha',
   OTHER: 'Otra actividad',
 };
 
 export const KIND_ICON: Record<GardenActivityKind, string> = {
   SOWING: '🌱',
   TRANSPLANT: '🪴',
-  HARVEST: '🧺',
-  OTHER: '🧤',
+  OTHER: '🧺',
 };
 
 /** Registros anteriores al tipo: se muestran así, sin error ni bloqueo. */

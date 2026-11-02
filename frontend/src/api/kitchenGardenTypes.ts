@@ -45,7 +45,7 @@ export interface GardenExecution {
 }
 
 /** Tipo de un registro de la Huerta; `null` = «Sin clasificar» (actividades anteriores). */
-export type GardenActivityKind = 'SOWING' | 'TRANSPLANT' | 'HARVEST' | 'OTHER';
+export type GardenActivityKind = 'SOWING' | 'TRANSPLANT' | 'OTHER';
 
 /**
  * Grupo de 📝 Registros que calcula el backend: «Una vez» vencida, para hoy,

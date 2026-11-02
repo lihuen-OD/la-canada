@@ -1555,7 +1555,9 @@ model KitchenGardenParticipant {
 enum KitchenGardenActivityKind {
   SOWING
   TRANSPLANT
-  /// Cosecha (2026-11-02, migración propia `ADD VALUE`).
+  /// SIN USO: «Cosecha» se agregó y se retiró de la aplicación el 2026-11-02.
+  /// El valor queda en la base (migración `..._kind_harvest` ya aplicada en
+  /// demo; PostgreSQL no quita valores de un enum) y el backend lo rechaza.
   HARVEST
   OTHER
 }
@@ -1581,7 +1583,7 @@ model KitchenGardenActivity {
   suggestedSecondHalfDay Int?                       @map("suggested_second_half_day") @db.SmallInt
   suggestedMonthDay      Int?                       @map("suggested_month_day") @db.SmallInt
   suggestedMonth         Int?                       @map("suggested_month") @db.SmallInt
-  /// Siembra, trasplante, cosecha u otra actividad; `null` = «Sin clasificar». No versiona.
+  /// Siembra, trasplante u otra actividad; `null` = «Sin clasificar». No versiona.
   kind                   KitchenGardenActivityKind?
   /// Observaciones opcionales (1–500 caracteres). No versionan.
   notes                  String?

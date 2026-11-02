@@ -105,8 +105,8 @@ describe('🥬 Huerta y el cambio de día', () => {
       const completed = {
         ...base.activities[0]!,
         id: '00000000-0000-4000-8000-0000000b0002',
-        description: 'Cosechar acelga (sintética)',
-        kind: 'HARVEST' as const,
+        description: 'Desmalezar canteros (sintética)',
+        kind: 'OTHER' as const,
         currentExecution: {
           id: '00000000-0000-4000-8000-0000000e0002',
           periodKey: 'ONE_TIME',
@@ -129,11 +129,11 @@ describe('🥬 Huerta y el cambio de día', () => {
       </StrictMode>,
       { route: '/kitchen-garden' },
     );
-    expect(await screen.findByText('Cosechar acelga (sintética)')).toBeInTheDocument();
+    expect(await screen.findByText('Desmalezar canteros (sintética)')).toBeInTheDocument();
     const before = gardenApi.fetchGardenActivities.mock.calls.length;
     deviceAt(ar('2026-11-02', '00:00:05'));
     await waitFor(() =>
-      expect(screen.queryByText('Cosechar acelga (sintética)')).not.toBeInTheDocument(),
+      expect(screen.queryByText('Desmalezar canteros (sintética)')).not.toBeInTheDocument(),
     );
     expect(gardenApi.fetchGardenActivities).toHaveBeenCalledTimes(before + 1);
     expect(tasksApi.fetchTasks).not.toHaveBeenCalled();

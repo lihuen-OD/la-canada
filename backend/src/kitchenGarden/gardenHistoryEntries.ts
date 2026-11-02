@@ -1,5 +1,4 @@
 import type { Prisma } from '../generated/prisma/client';
-import type { KitchenGardenActivityKind } from '../generated/prisma/enums';
 import { prisma } from '../lib/prisma';
 import { config } from '../config';
 import {
@@ -13,7 +12,7 @@ import {
   type LocalDate,
 } from '../lib/businessTime';
 import { ValidationError } from '../errors/AppError';
-import { canRevertExecution, personFrom } from './gardenActivitiesService';
+import { canRevertExecution, personFrom, type GardenActivityKind } from './gardenActivitiesService';
 import { loadParticipantDirectory, loadUserPeople, type GardenActor } from './gardenParticipants';
 
 /**
@@ -36,7 +35,7 @@ import { loadParticipantDirectory, loadUserPeople, type GardenActor } from './ga
 export const HISTORY_PAGE_SIZE = 20;
 export const HISTORY_RECENT_DAYS = 30;
 
-export type HistoryKindFilter = KitchenGardenActivityKind | 'UNCLASSIFIED';
+export type HistoryKindFilter = GardenActivityKind | 'UNCLASSIFIED';
 
 export interface GardenHistoryEntriesParams {
   from?: string;

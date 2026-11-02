@@ -53,7 +53,7 @@ import {
  * (períodos, «Una vez» con fecha, sugerencias, orden, una ejecución vigente
  * por período, reversión lógica, planificación histórica) sobre tablas
  * propias `kitchen_garden_*`: nada se lee ni se escribe en las de Tareas.
- * Cada una tiene además un tipo opcional (siembra, trasplante, cosecha u otra; las
+ * Cada una tiene además un tipo opcional (siembra, trasplante u otra; las
  * anteriores quedan «Sin clasificar») y observaciones, que no versionan.
  * Permisos: consultar, todos; crear y editar (también las de otro
  * responsable), ADMIN y participantes activos; activar/desactivar, solo
@@ -349,7 +349,8 @@ async function requireActiveResponsible(tx: Prisma.TransactionClient, participan
   if (!participant?.active) throw new ValidationError(RESPONSIBLE_INVALID);
 }
 
-export type GardenActivityKind = KitchenGardenActivityKind;
+/** Tipos que se pueden asignar (`HARVEST` queda en la base sin uso; ver `gardenSchemas.ts`). */
+export type GardenActivityKind = Exclude<KitchenGardenActivityKind, 'HARVEST'>;
 
 /** «Programar también el trasplante»: otra actividad «Una vez» de tipo trasplante. */
 export interface ScheduledTransplantInput {

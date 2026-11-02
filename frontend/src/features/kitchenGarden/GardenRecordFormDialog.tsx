@@ -139,7 +139,7 @@ export function GardenRecordFormDialog({
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     if (!isEdit && !kind) {
-      return setError('Elegí el tipo: siembra, trasplante, cosecha u otra actividad.');
+      return setError('Elegí el tipo: siembra, trasplante u otra actividad.');
     }
     const normalized = normalizeDescription(description);
     const problem = validateDescription(normalized);

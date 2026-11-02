@@ -12,7 +12,7 @@ const STATEMENTS = MIGRATION.split('\n')
   .join('\n');
 
 describe('migración kitchen_garden_activity_kind_notes (🥬 Huerta: 📝 Registros)', () => {
-  it('va después de la de cultivos y antes de la de cosecha (las tres ya aplicadas en demo, sin tocar)', () => {
+  it('va después de la de cultivos y antes de la del valor HARVEST (las tres ya aplicadas en demo, sin tocar)', () => {
     const migrations = readdirSync(resolve(ROOT, 'prisma/migrations'))
       .filter((entry) => /^\d{14}_/.test(entry))
       .sort();

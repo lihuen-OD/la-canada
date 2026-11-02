@@ -910,292 +910,296 @@ describe(
   },
 );
 
-describe(
-  'completadas durante su semana, 📅 Historial cronológico y 🧺 Cosecha',
-  { timeout: 300_000 },
-  () => {
-    const adminActor = () => actorOf(admin, 'ADMIN');
-    const empActor = () => actorOf(empA, 'EMPLOYEE');
-    const createAt = async (description: string, kind: string, frequency: string, at: Date) =>
-      (
-        await createGardenActivity(
-          adminActor(),
-          {
-            kind: kind as never,
-            description: `${TAG} ${description}`,
-            participantId: empA.participantId!,
-            frequency: frequency as never,
-          },
-          META,
-          at,
-        )
-      ).activity;
-    const shownAt = async (activityId: string, at: Date, status: 'active' | 'all' = 'active') =>
-      (
-        await listGardenActivities(
-          status === 'all' ? adminActor() : empActor(),
-          { participantId: empA.participantId, status },
-          at,
-        )
-      ).activities.find((item) => item.id === activityId);
-    const entries = (person: Person, query: Record<string, string>) =>
-      request(app).get(`${API}/history/entries`).query(query).set(as(person));
-
-    it('«Una vez» y urgente completadas: visibles su semana (domingo de Argentina aunque UTC sea lunes), fuera el lunes; deshacer y volver a completar', async () => {
-      // Semana del lunes 03/06/2002 (ventana sin datos reales).
-      const once = await createAt('cosecha única 2002', 'HARVEST', 'ONE_TIME', ar('2002-06-01'));
-      const urgent = await createAt('urgente 2002', 'OTHER', 'URGENT', ar('2002-06-01'));
-      for (const activity of [once, urgent]) {
-        await completeGardenActivity(
-          empActor(),
-          activity.id,
-          undefined,
-          META,
-          ar('2002-06-05', '10:00'),
-        );
-      }
-      for (const activity of [once, urgent]) {
-        // Domingo 09/06 22:30 en Argentina = lunes 10/06 01:30 UTC.
-        expect(await shownAt(activity.id, ar('2002-06-09', '22:30'))).toMatchObject({
-          currentExecution: { completedBy: { id: empA.participantId } },
-          canComplete: false,
-        });
-        expect(await shownAt(activity.id, ar('2002-06-10', '00:00'))).toBeUndefined();
-        // El ADMIN las sigue viendo con `status=all`; nada se desactivó ni renovó.
-        expect(await shownAt(activity.id, ar('2002-06-10', '00:00'), 'all')).toMatchObject({
-          active: true,
-          currentExecution: { completedBy: { id: empA.participantId } },
-        });
-      }
-      // Deshacer la oculta la devuelve pendiente; la nueva finalización cuenta desde su registro.
-      const execution = await prisma.kitchenGardenExecution.findFirstOrThrow({
-        where: { activityId: once.id, revertedAt: null },
-      });
-      await revertGardenCompletion(
+describe('completadas durante su semana y 📅 Historial cronológico', { timeout: 300_000 }, () => {
+  const adminActor = () => actorOf(admin, 'ADMIN');
+  const empActor = () => actorOf(empA, 'EMPLOYEE');
+  const createAt = async (description: string, kind: string, frequency: string, at: Date) =>
+    (
+      await createGardenActivity(
         adminActor(),
-        once.id,
-        { executionId: execution.id, reason: 'Prueba sintética' },
+        {
+          kind: kind as never,
+          description: `${TAG} ${description}`,
+          participantId: empA.participantId!,
+          frequency: frequency as never,
+        },
         META,
-        ar('2002-06-11', '09:00'),
-      );
-      expect(await shownAt(once.id, ar('2002-06-11', '09:30'))).toMatchObject({
-        currentExecution: null,
-        canComplete: true,
-      });
-      await completeGardenActivity(empActor(), once.id, undefined, META, ar('2002-06-11', '11:00'));
-      expect(await shownAt(once.id, ar('2002-06-16', '23:59'))).toMatchObject({
-        currentExecution: { completedAt: ar('2002-06-11', '11:00').toISOString() },
-      });
-      expect(await shownAt(once.id, ar('2002-06-17', '00:00'))).toBeUndefined();
-    });
+        at,
+      )
+    ).activity;
+  const shownAt = async (activityId: string, at: Date, status: 'active' | 'all' = 'active') =>
+    (
+      await listGardenActivities(
+        status === 'all' ? adminActor() : empActor(),
+        { participantId: empA.participantId, status },
+        at,
+      )
+    ).activities.find((item) => item.id === activityId);
+  const entries = (person: Person, query: Record<string, string>) =>
+    request(app).get(`${API}/history/entries`).query(query).set(as(person));
 
-    it('deshacer una completada de una actividad desactivada no la reactiva', async () => {
-      const once = await createAt('desactivada 2002', 'OTHER', 'ONE_TIME', ar('2002-06-01'));
-      await completeGardenActivity(empActor(), once.id, undefined, META, ar('2002-06-05', '10:00'));
-      expect(
-        (
-          await request(app)
-            .patch(`${API}/activities/${once.id}/status`)
-            .set(as(admin))
-            .send({ active: false })
-        ).status,
-      ).toBe(200);
-      const execution = await prisma.kitchenGardenExecution.findFirstOrThrow({
-        where: { activityId: once.id, revertedAt: null },
-      });
-      await revertGardenCompletion(
-        adminActor(),
-        once.id,
-        { executionId: execution.id, reason: 'Prueba sintética' },
-        META,
-        ar('2002-06-06', '10:00'),
-      );
-      expect(
-        await prisma.kitchenGardenActivity.findUniqueOrThrow({ where: { id: once.id } }),
-      ).toMatchObject({
-        active: false,
-      });
-      expect(await shownAt(once.id, ar('2002-06-06', '10:30'))).toBeUndefined();
-    });
-
-    it('Cosecha: se crea, edita y filtra; el trasplante sigue siendo solo de una siembra «Una vez»', async () => {
-      const harvestWithTransplant = await request(app)
-        .post(`${API}/activities`)
-        .set(as(empA))
-        .send({
-          kind: 'HARVEST',
-          description: `${TAG} Cosechar con trasplante`,
-          participantId: empA.participantId,
-          frequency: 'ONE_TIME',
-          transplant: { description: `${TAG} Trasplantar no`, participantId: empA.participantId },
-        });
-      expect(harvestWithTransplant.status).toBe(400);
-      const other = await createActivity('reclasificar a cosecha', empA, 'ONE_TIME');
-      const edited = await request(app)
-        .patch(`${API}/activities/${other.id}`)
-        .set(as(empA))
-        .send({ version: other.version, kind: 'HARVEST' });
-      expect(edited.status).toBe(200);
-      expect(edited.body.activity.kind).toBe('HARVEST');
-    });
-
-    it('buscar una siembra o un trasplante de meses anteriores sin saber la semana (texto, tipo, fechas, persona)', async () => {
-      // Texto único de la corrida: se busca solo lo sintético.
-      const crop = `LECHUGA ${RUN}`;
-      const sowing = await createAt(`Sembrar ${crop}`, 'SOWING', 'ONE_TIME', ar('2026-06-01'));
-      const transplant = await createAt(
-        `Trasplantar ${crop}`,
-        'TRANSPLANT',
-        'ONE_TIME',
-        ar('2026-06-01'),
-      );
+  it('«Una vez» y urgente completadas: visibles su semana (domingo de Argentina aunque UTC sea lunes), fuera el lunes; deshacer y volver a completar', async () => {
+    // Semana del lunes 03/06/2002 (ventana sin datos reales).
+    const once = await createAt('única 2002', 'OTHER', 'ONE_TIME', ar('2002-06-01'));
+    const urgent = await createAt('urgente 2002', 'OTHER', 'URGENT', ar('2002-06-01'));
+    for (const activity of [once, urgent]) {
       await completeGardenActivity(
         empActor(),
-        sowing.id,
+        activity.id,
         undefined,
         META,
-        ar('2026-06-15', '10:00'),
+        ar('2002-06-05', '10:00'),
       );
-      // Registrada por el ADMIN a nombre de la participante (quién la registró se ve aparte).
-      await completeGardenActivity(
-        adminActor(),
-        transplant.id,
-        empA.participantId,
-        META,
-        ar('2026-07-20', '09:00'),
+    }
+    for (const activity of [once, urgent]) {
+      // Domingo 09/06 22:30 en Argentina = lunes 10/06 01:30 UTC.
+      expect(await shownAt(activity.id, ar('2002-06-09', '22:30'))).toMatchObject({
+        currentExecution: { completedBy: { id: empA.participantId } },
+        canComplete: false,
+      });
+      expect(await shownAt(activity.id, ar('2002-06-10', '00:00'))).toBeUndefined();
+      // El ADMIN las sigue viendo con `status=all`; nada se desactivó ni renovó.
+      expect(await shownAt(activity.id, ar('2002-06-10', '00:00'), 'all')).toMatchObject({
+        active: true,
+        currentExecution: { completedBy: { id: empA.participantId } },
+      });
+    }
+    // Deshacer la oculta la devuelve pendiente; la nueva finalización cuenta desde su registro.
+    const execution = await prisma.kitchenGardenExecution.findFirstOrThrow({
+      where: { activityId: once.id, revertedAt: null },
+    });
+    await revertGardenCompletion(
+      adminActor(),
+      once.id,
+      { executionId: execution.id, reason: 'Prueba sintética' },
+      META,
+      ar('2002-06-11', '09:00'),
+    );
+    expect(await shownAt(once.id, ar('2002-06-11', '09:30'))).toMatchObject({
+      currentExecution: null,
+      canComplete: true,
+    });
+    await completeGardenActivity(empActor(), once.id, undefined, META, ar('2002-06-11', '11:00'));
+    expect(await shownAt(once.id, ar('2002-06-16', '23:59'))).toMatchObject({
+      currentExecution: { completedAt: ar('2002-06-11', '11:00').toISOString() },
+    });
+    expect(await shownAt(once.id, ar('2002-06-17', '00:00'))).toBeUndefined();
+  });
+
+  it('deshacer una completada de una actividad desactivada no la reactiva', async () => {
+    const once = await createAt('desactivada 2002', 'OTHER', 'ONE_TIME', ar('2002-06-01'));
+    await completeGardenActivity(empActor(), once.id, undefined, META, ar('2002-06-05', '10:00'));
+    expect(
+      (
+        await request(app)
+          .patch(`${API}/activities/${once.id}/status`)
+          .set(as(admin))
+          .send({ active: false })
+      ).status,
+    ).toBe(200);
+    const execution = await prisma.kitchenGardenExecution.findFirstOrThrow({
+      where: { activityId: once.id, revertedAt: null },
+    });
+    await revertGardenCompletion(
+      adminActor(),
+      once.id,
+      { executionId: execution.id, reason: 'Prueba sintética' },
+      META,
+      ar('2002-06-06', '10:00'),
+    );
+    expect(
+      await prisma.kitchenGardenActivity.findUniqueOrThrow({ where: { id: once.id } }),
+    ).toMatchObject({
+      active: false,
+    });
+    expect(await shownAt(once.id, ar('2002-06-06', '10:30'))).toBeUndefined();
+  });
+
+  it('«Cosecha» se retiró: no se acepta al crear, editar ni filtrar; el trasplante sigue siendo solo de una siembra «Una vez»', async () => {
+    const harvest = await request(app)
+      .post(`${API}/activities`)
+      .set(as(empA))
+      .send({
+        kind: 'HARVEST',
+        description: `${TAG} Cosechar no`,
+        participantId: empA.participantId,
+        frequency: 'ONE_TIME',
+      });
+    expect(harvest.status).toBe(400);
+    const other = await createActivity('no pasa a cosecha', empA, 'ONE_TIME');
+    const edited = await request(app)
+      .patch(`${API}/activities/${other.id}`)
+      .set(as(empA))
+      .send({ version: other.version, kind: 'HARVEST' });
+    expect(edited.status).toBe(400);
+    expect(
+      await prisma.kitchenGardenActivity.findUniqueOrThrow({ where: { id: other.id } }),
+    ).toMatchObject({ kind: 'OTHER', version: other.version });
+    expect((await entries(empA, { kind: 'HARVEST' })).status).toBe(400);
+    const otherWithTransplant = await request(app)
+      .post(`${API}/activities`)
+      .set(as(empA))
+      .send({
+        kind: 'OTHER',
+        description: `${TAG} Otra con trasplante`,
+        participantId: empA.participantId,
+        frequency: 'ONE_TIME',
+        transplant: { description: `${TAG} Trasplantar no`, participantId: empA.participantId },
+      });
+    expect(otherWithTransplant.status).toBe(400);
+    expect(
+      await prisma.kitchenGardenActivity.count({
+        where: { description: { in: [`${TAG} Cosechar no`, `${TAG} Otra con trasplante`] } },
+      }),
+    ).toBe(0);
+  });
+
+  it('buscar una siembra o un trasplante de meses anteriores sin saber la semana (texto, tipo, fechas, persona)', async () => {
+    // Texto único de la corrida: se busca solo lo sintético.
+    const crop = `LECHUGA ${RUN}`;
+    const sowing = await createAt(`Sembrar ${crop}`, 'SOWING', 'ONE_TIME', ar('2026-06-01'));
+    const transplant = await createAt(
+      `Trasplantar ${crop}`,
+      'TRANSPLANT',
+      'ONE_TIME',
+      ar('2026-06-01'),
+    );
+    await completeGardenActivity(empActor(), sowing.id, undefined, META, ar('2026-06-15', '10:00'));
+    // Registrada por el ADMIN a nombre de la participante (quién la registró se ve aparte).
+    await completeGardenActivity(
+      adminActor(),
+      transplant.id,
+      empA.participantId,
+      META,
+      ar('2026-07-20', '09:00'),
+    );
+    const harvest = await request(app)
+      .post(`${API}/activities`)
+      .set(as(empA))
+      .send({
+        kind: 'OTHER',
+        description: `${TAG} Regar ${crop}`,
+        participantId: empA.participantId,
+        frequency: 'ONE_TIME',
+      });
+    expect(harvest.status).toBe(201);
+    expect((await complete(empA, harvest.body.activity.id)).status).toBe(201);
+    const q = crop;
+    const descriptions = (response: request.Response) =>
+      (response.body.entries as { activity: { description: string } }[]).map((entry) =>
+        entry.activity.description.slice(TAG.length + 1),
       );
-      const harvest = await request(app)
-        .post(`${API}/activities`)
-        .set(as(empA))
-        .send({
-          kind: 'HARVEST',
-          description: `${TAG} Cosechar ${crop}`,
-          participantId: empA.participantId,
-          frequency: 'ONE_TIME',
-        });
-      expect(harvest.status).toBe(201);
-      expect((await complete(empA, harvest.body.activity.id)).status).toBe(201);
-      const q = crop;
-      const descriptions = (response: request.Response) =>
-        (response.body.entries as { activity: { description: string } }[]).map((entry) =>
-          entry.activity.description.slice(TAG.length + 1),
-        );
 
-      const recent = await entries(empA, { q });
-      expect(recent.status).toBe(200);
-      expect(recent.body.range.mode).toBe('recent');
-      expect(descriptions(recent)).toEqual([`Cosechar ${crop}`]);
+    const recent = await entries(empA, { q });
+    expect(recent.status).toBe(200);
+    expect(recent.body.range.mode).toBe('recent');
+    expect(descriptions(recent)).toEqual([`Regar ${crop}`]);
 
-      const all = await entries(outsider, { q, all: 'true' });
-      expect(descriptions(all)).toEqual([
-        `Cosechar ${crop}`,
-        `Trasplantar ${crop}`,
-        `Sembrar ${crop}`,
-      ]);
-      const [, transplantEntry, sowingEntry] = all.body.entries;
-      expect(sowingEntry).toMatchObject({
-        completedOn: '2026-06-15',
-        activity: { kind: 'SOWING' },
-        completedBy: { id: empA.participantId },
-        recordedBy: null,
-        canRevert: false,
-      });
-      expect(transplantEntry.recordedBy.displayName).toBe(`Admin sintético ${RUN}`);
-
-      expect(descriptions(await entries(empA, { q, all: 'true', kind: 'SOWING' }))).toEqual([
-        `Sembrar ${crop}`,
-      ]);
-      expect(descriptions(await entries(empA, { q, all: 'true', kind: 'HARVEST' }))).toEqual([
-        `Cosechar ${crop}`,
-      ]);
-      expect(
-        descriptions(await entries(empA, { q, from: '2026-06-01', to: '2026-06-30' })),
-      ).toEqual([`Sembrar ${crop}`]);
-      expect(
-        descriptions(await entries(empA, { q, all: 'true', participantId: empB.participantId! })),
-      ).toEqual([]);
-      // La propia «Una vez» se puede deshacer (regla de siempre); otra persona, no.
-      const own = await entries(empA, { q, all: 'true', kind: 'SOWING' });
-      expect(own.body.entries[0].canRevert).toBe(true);
-      expect((await entries(empA, { q: 'x' })).status).toBe(400);
-      expect((await entries(empA, { from: '2026-06-02', to: '2026-06-01' })).status).toBe(400);
+    const all = await entries(outsider, { q, all: 'true' });
+    expect(descriptions(all)).toEqual([`Regar ${crop}`, `Trasplantar ${crop}`, `Sembrar ${crop}`]);
+    const [, transplantEntry, sowingEntry] = all.body.entries;
+    expect(sowingEntry).toMatchObject({
+      completedOn: '2026-06-15',
+      activity: { kind: 'SOWING' },
+      completedBy: { id: empA.participantId },
+      recordedBy: null,
+      canRevert: false,
     });
+    expect(transplantEntry.recordedBy.displayName).toBe(`Admin sintético ${RUN}`);
 
-    it('el texto se busca literal (sin comodines) y «Sin clasificar» encuentra las actividades sin tipo', async () => {
-      const percent = await createActivity('riego al 50% del cantero', empA, 'ONE_TIME');
-      const hundred = await createActivity('riego de 500 plantines', empA, 'ONE_TIME');
-      const legacy = await prisma.kitchenGardenActivity.create({
-        data: {
-          description: `${TAG} riego anterior sin tipo`,
-          participantId: empA.participantId!,
-          frequency: 'ONE_TIME',
-        },
-        select: { id: true },
-      });
-      await prisma.kitchenGardenPlanningInterval.create({
-        data: {
-          activityId: legacy.id,
-          participantId: empA.participantId!,
-          frequency: 'ONE_TIME',
-          validFrom: new Date(),
-        },
-      });
-      for (const id of [percent.id, hundred.id, legacy.id]) {
-        expect((await complete(empA, id)).status).toBe(201);
-      }
-      const ids = (response: request.Response) =>
-        (response.body.entries as { activity: { id: string } }[]).map((entry) => entry.activity.id);
-      expect(ids(await entries(empA, { q: `${TAG} riego al 50%` }))).toEqual([percent.id]);
-      expect(ids(await entries(empA, { q: `${TAG} riego`, kind: 'UNCLASSIFIED' }))).toEqual([
-        legacy.id,
-      ]);
+    expect(descriptions(await entries(empA, { q, all: 'true', kind: 'SOWING' }))).toEqual([
+      `Sembrar ${crop}`,
+    ]);
+    expect(descriptions(await entries(empA, { q, all: 'true', kind: 'OTHER' }))).toEqual([
+      `Regar ${crop}`,
+    ]);
+    expect(descriptions(await entries(empA, { q, from: '2026-06-01', to: '2026-06-30' }))).toEqual([
+      `Sembrar ${crop}`,
+    ]);
+    expect(
+      descriptions(await entries(empA, { q, all: 'true', participantId: empB.participantId! })),
+    ).toEqual([]);
+    // La propia «Una vez» se puede deshacer (regla de siempre); otra persona, no.
+    const own = await entries(empA, { q, all: 'true', kind: 'SOWING' });
+    expect(own.body.entries[0].canRevert).toBe(true);
+    expect((await entries(empA, { q: 'x' })).status).toBe(400);
+    expect((await entries(empA, { from: '2026-06-02', to: '2026-06-01' })).status).toBe(400);
+  });
+
+  it('el texto se busca literal (sin comodines) y «Sin clasificar» encuentra las actividades sin tipo', async () => {
+    const percent = await createActivity('riego al 50% del cantero', empA, 'ONE_TIME');
+    const hundred = await createActivity('riego de 500 plantines', empA, 'ONE_TIME');
+    const legacy = await prisma.kitchenGardenActivity.create({
+      data: {
+        description: `${TAG} riego anterior sin tipo`,
+        participantId: empA.participantId!,
+        frequency: 'ONE_TIME',
+      },
+      select: { id: true },
     });
+    await prisma.kitchenGardenPlanningInterval.create({
+      data: {
+        activityId: legacy.id,
+        participantId: empA.participantId!,
+        frequency: 'ONE_TIME',
+        validFrom: new Date(),
+      },
+    });
+    for (const id of [percent.id, hundred.id, legacy.id]) {
+      expect((await complete(empA, id)).status).toBe(201);
+    }
+    const ids = (response: request.Response) =>
+      (response.body.entries as { activity: { id: string } }[]).map((entry) => entry.activity.id);
+    expect(ids(await entries(empA, { q: `${TAG} riego al 50%` }))).toEqual([percent.id]);
+    expect(ids(await entries(empA, { q: `${TAG} riego`, kind: 'UNCLASSIFIED' }))).toEqual([
+      legacy.id,
+    ]);
+  });
 
-    it('«Ver más»: páginas de 20 por fecha e id, sin duplicados aunque todas tengan el mismo instante; deshechas solo a pedido', async () => {
-      const at = ar('2002-07-03', '10:00');
-      const created: string[] = [];
-      for (let index = 0; index < 22; index += 1) {
-        const activity = await createAt(
-          `pág ${String(index).padStart(2, '0')}`,
-          'OTHER',
-          'ONE_TIME',
-          ar('2002-07-01'),
-        );
-        await completeGardenActivity(empActor(), activity.id, undefined, META, at);
-        created.push(activity.id);
-      }
-      const q = `${TAG} pág`;
-      const first = await entries(empA, { q, all: 'true' });
-      expect(first.body.entries).toHaveLength(20);
-      expect(first.body.nextCursor).toEqual(expect.any(String));
-      const second = await entries(empA, { q, all: 'true', cursor: first.body.nextCursor });
-      expect(second.body.entries).toHaveLength(2);
-      expect(second.body.nextCursor).toBeNull();
-      const seen = [...first.body.entries, ...second.body.entries].map(
-        (entry: { id: string }) => entry.id,
+  it('«Ver más»: páginas de 20 por fecha e id, sin duplicados aunque todas tengan el mismo instante; deshechas solo a pedido', async () => {
+    const at = ar('2002-07-03', '10:00');
+    const created: string[] = [];
+    for (let index = 0; index < 22; index += 1) {
+      const activity = await createAt(
+        `pág ${String(index).padStart(2, '0')}`,
+        'OTHER',
+        'ONE_TIME',
+        ar('2002-07-01'),
       );
-      expect(new Set(seen).size).toBe(22);
-      // Mismo instante: el desempate es el id, descendente.
-      expect(seen).toEqual([...seen].sort().reverse());
+      await completeGardenActivity(empActor(), activity.id, undefined, META, at);
+      created.push(activity.id);
+    }
+    const q = `${TAG} pág`;
+    const first = await entries(empA, { q, all: 'true' });
+    expect(first.body.entries).toHaveLength(20);
+    expect(first.body.nextCursor).toEqual(expect.any(String));
+    const second = await entries(empA, { q, all: 'true', cursor: first.body.nextCursor });
+    expect(second.body.entries).toHaveLength(2);
+    expect(second.body.nextCursor).toBeNull();
+    const seen = [...first.body.entries, ...second.body.entries].map(
+      (entry: { id: string }) => entry.id,
+    );
+    expect(new Set(seen).size).toBe(22);
+    // Mismo instante: el desempate es el id, descendente.
+    expect(seen).toEqual([...seen].sort().reverse());
 
-      const target = await prisma.kitchenGardenExecution.findFirstOrThrow({
-        where: { activityId: created[0], revertedAt: null },
-      });
-      const undone = await request(app)
-        .post(`${API}/activities/${created[0]}/revert`)
-        .set(as(admin))
-        .send({ executionId: target.id, reason: 'Prueba sintética' });
-      expect(undone.status).toBe(200);
-      expect(
-        (await entries(empA, { q, all: 'true' })).body.entries.map((e: { id: string }) => e.id),
-      ).not.toContain(target.id);
-      const withReverted = await entries(empA, { q, all: 'true', includeReverted: 'true' });
-      expect(
-        withReverted.body.entries.find((entry: { id: string }) => entry.id === target.id),
-      ).toMatchObject({ reverted: { reason: 'Prueba sintética' }, canRevert: false });
+    const target = await prisma.kitchenGardenExecution.findFirstOrThrow({
+      where: { activityId: created[0], revertedAt: null },
     });
-  },
-);
+    const undone = await request(app)
+      .post(`${API}/activities/${created[0]}/revert`)
+      .set(as(admin))
+      .send({ executionId: target.id, reason: 'Prueba sintética' });
+    expect(undone.status).toBe(200);
+    expect(
+      (await entries(empA, { q, all: 'true' })).body.entries.map((e: { id: string }) => e.id),
+    ).not.toContain(target.id);
+    const withReverted = await entries(empA, { q, all: 'true', includeReverted: 'true' });
+    expect(
+      withReverted.body.entries.find((entry: { id: string }) => entry.id === target.id),
+    ).toMatchObject({ reverted: { reason: 'Prueba sintética' }, canRevert: false });
+  });
+});
 
 describe('aislamiento de ✅ Tareas e Inicio (HTTP)', { timeout: 90_000 }, () => {
   it('ninguna lista, historial ni Desempeño de Tareas, ni Inicio, incluye la Huerta', async () => {

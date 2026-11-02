@@ -150,12 +150,12 @@ describe('filtros (en la base)', () => {
   it('texto literal (sin comodines), tipo, persona y deshechas a pedido', async () => {
     await listGardenHistoryEntries(
       PABLO,
-      { q: '50%_x', kind: 'HARVEST', participantId: Q, includeReverted: true, all: true },
+      { q: '50%_x', kind: 'TRANSPLANT', participantId: Q, includeReverted: true, all: true },
       NOW,
     );
     expect(whereOf()).toEqual({
       completedByParticipantId: Q,
-      activity: { description: { contains: '50\\%\\_x', mode: 'insensitive' }, kind: 'HARVEST' },
+      activity: { description: { contains: '50\\%\\_x', mode: 'insensitive' }, kind: 'TRANSPLANT' },
     });
   });
 
@@ -267,11 +267,13 @@ describe('validación de la consulta', () => {
     expect(gardenHistoryEntriesQuerySchema.parse({ q: '  le  chu ' }).q).toBe('le chu');
     expect(
       gardenHistoryEntriesQuerySchema.parse({
-        kind: 'HARVEST',
+        kind: 'SOWING',
         all: 'true',
         includeReverted: 'false',
       }),
-    ).toEqual({ kind: 'HARVEST', all: true, includeReverted: false });
+    ).toEqual({ kind: 'SOWING', all: true, includeReverted: false });
+    // «Cosecha» se retiró: tampoco es un filtro válido.
+    expect(gardenHistoryEntriesQuerySchema.safeParse({ kind: 'HARVEST' }).success).toBe(false);
     expect(gardenHistoryEntriesQuerySchema.safeParse({ kind: 'CROP' }).success).toBe(false);
     expect(gardenHistoryEntriesQuerySchema.safeParse({ pageSize: '500' }).success).toBe(false);
   });

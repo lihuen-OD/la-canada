@@ -9,7 +9,12 @@ const STATEMENTS = readFileSync(resolve(ROOT, `prisma/migrations/${NAME}/migrati
   .filter((line) => line.trim() && !line.trim().startsWith('--'))
   .join('\n');
 
-describe('migración kitchen_garden_activity_kind_harvest (🥬 Huerta: Cosecha)', () => {
+/**
+ * «Cosecha» se agregó y se retiró de la aplicación el 2026-11-02. La migración
+ * ya está aplicada en demo y no se modifica ni se borra: el valor queda en el
+ * enum de la base, sin uso (el backend lo rechaza; ver `gardenSchemas.ts`).
+ */
+describe('migración kitchen_garden_activity_kind_harvest (valor HARVEST, sin uso)', () => {
   it('es la última y solo agrega el valor HARVEST al tipo existente', () => {
     const migrations = readdirSync(resolve(ROOT, 'prisma/migrations'))
       .filter((entry) => /^\d{14}_/.test(entry))
