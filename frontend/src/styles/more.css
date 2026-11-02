@@ -1307,6 +1307,35 @@
 
 /* ── Jardín (5Y) ──────────────────────────────────────────────────────── */
 
+/* «Publicar nueva versión» y, junto a ella, «Crear plano» (Canva en otra
+   pestaña) con su ayuda. En móvil el enlace va a lo ancho y la ayuda
+   debajo; desde 600 px, enlace y ayuda en una fila. */
+.garden-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.garden-canva {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.garden-canva__hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+@media (min-width: 600px) {
+  .garden-canva {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-3);
+  }
+}
+
 .garden-current {
   margin-bottom: var(--space-5);
 }

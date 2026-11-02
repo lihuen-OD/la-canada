@@ -1333,7 +1333,31 @@ describe('🌳 Jardín', () => {
     expect(
       screen.queryByRole('button', { name: /Publicar nueva versión/ }),
     ).not.toBeInTheDocument();
+    // «Crear plano» acompaña a publicar: mismo permiso (solo ADMIN).
+    expect(screen.queryByRole('link', { name: /Crear plano/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Diseñá el plano en Canva/)).not.toBeInTheDocument();
     expect(api.fetchGardenPlanVersions).toHaveBeenCalledWith(1, 20);
+  });
+
+  it('ADMIN: «Crear plano» abre Canva en una pestaña nueva, junto a publicar', async () => {
+    asAdmin();
+    renderMore('/more/garden');
+    const current = await screen.findByRole('region', { name: 'Plano vigente' });
+    const link = screen.getByRole('link', {
+      name: 'Crear plano en Canva (se abre en una pestaña nueva)',
+    });
+    expect(link).toHaveAttribute('href', 'https://canva.link/aizpx47290iq6w5');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link).toHaveTextContent('Crear plano');
+    expect(link).toHaveAccessibleDescription('Diseñá el plano en Canva, descargalo y subilo acá.');
+    expect(screen.getByText('Se abre en una pestaña nueva.')).toBeInTheDocument();
+    // Junto a «Publicar nueva versión», que sigue igual; el plano vigente no cambia.
+    const publish = screen.getByRole('button', { name: /Publicar nueva versión/ });
+    expect(publish.closest('.garden-actions')).toContainElement(link);
+    expect(publish).toBeEnabled();
+    expect(within(current).getByText('Versión 2')).toBeInTheDocument();
+    expect(api.publishGardenPlanVersion).not.toHaveBeenCalled();
   });
 
   it('abre el visor de una versión con quién la publicó y cuándo', async () => {
@@ -1412,6 +1436,11 @@ describe('🌳 Jardín', () => {
     renderMore('/more/garden');
     expect(await screen.findByText(/falta configurar el almacenamiento/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Publicar nueva versión/ })).toBeDisabled();
+    // Diseñar en Canva no depende del almacenamiento de la app.
+    expect(screen.getByRole('link', { name: /Crear plano/ })).toHaveAttribute(
+      'href',
+      'https://canva.link/aizpx47290iq6w5',
+    );
   });
 });
 

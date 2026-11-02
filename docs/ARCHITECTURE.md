@@ -859,6 +859,8 @@ El mismo defecto y la misma solución están en `PhotoUploadDialog` (subir foto,
 
 **Presupuesto medido** (build de producción, mismo pipeline antes/después): bundle inicial JS 523,2 → 524,1 KB (gzip 149,1 → 149,2), es decir **+0,9 KBraw / +0,1 KB gzip** repartidos entre `index` y el chunk compartido; diferido nuevo `GardenScreen` **8,0 KB (gzip 3,1)**; CSS 85,8 → 87,9 KB (gzip 13,1 → 13,3). Sin dependencias nuevas y sin cambios en `docs/UI_CONTEXT.md` (misma paleta, tipografías, cards, chips y modales de Más).
 
+**«Crear plano» (2026-11-02)**: en `GardenScreen.tsx`, junto a «Publicar nueva versión» y con la misma condición (`isAdmin`; el backend exige `ADMIN` para publicar), un `<a target="_blank" rel="noopener noreferrer">` a `https://canva.link/aizpx47290iq6w5` con el estilo de botón secundario (`buttonClassName`), «🎨 Crear plano» + `ExternalLinkIcon` (nuevo ícono genérico, decorativo), nombre accesible «Crear plano en Canva (se abre en una pestaña nueva)» y descripción con la ayuda «Diseñá el plano en Canva, descargalo y subilo acá.» (visible, más «Se abre en una pestaña nueva.»). Móvil: enlace a lo ancho y ayuda debajo; desde 600 px, en una fila (`.garden-actions`, `.garden-canva`). Sin API de Canva, sin requests nuevas, sin cambios de backend, base, almacenamiento ni Drive; el plano vigente y el flujo de publicación no cambian.
+
 ## 31. Múltiples administradores (Etapa 5U)
 
 `POST /api/v1/admin/users/admins` (solo ADMIN, `requireAuth` + `requireRole('ADMIN')`). Body `.strict()` `{ displayName, pin }`: el rol, el estado, el username, el `pinHash` y cualquier id los decide el backend (un campo de más → 400 «La solicitud incluye datos que no se pueden modificar.»). `auth/adminAccounts.ts`:

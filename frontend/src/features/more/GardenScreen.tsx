@@ -7,6 +7,8 @@ import { STALE_TIME } from '../../api/queryClient';
 import { useSessionScope } from '../../api/useSessionScope';
 import { useAuth } from '../../auth/useAuth';
 import { Button } from '../../components/ui/Button';
+import { buttonClassName } from '../../components/ui/buttonStyles';
+import { ExternalLinkIcon } from '../../components/ui/icons';
 import { Modal } from '../../components/ui/Modal';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
@@ -19,11 +21,14 @@ import { GARDEN_PLAN_TYPES } from './moreLabels';
 import { useMoreCache } from './useMoreCache';
 
 const PAGE_SIZE = 20;
+/** «Crear plano»: diseño del plano en Canva (enlace provisto por el usuario, 2026-11-02). */
+const CANVA_PLAN_URL = 'https://canva.link/aizpx47290iq6w5';
 
 /**
  * 🌳 Jardín (`/more/garden`, Etapa 5Y): el plano vigente del jardín y su
  * historial de versiones. Ver el plano y el historial es de todos; publicar
- * una versión nueva es solo ADMIN. Las versiones son inmutables: no hay
+ * una versión nueva es solo ADMIN, y junto a esa acción tiene «Crear plano»
+ * (Canva en otra pestaña). Las versiones son inmutables: no hay
  * editar, restaurar ni eliminar, y publicar de nuevo conserva la anterior.
  *
  * Requests: UNA lista paginada al abrir (que ya trae la versión vigente) y,
@@ -76,19 +81,41 @@ export default function GardenScreen() {
       />
 
       {isAdmin ? (
-        <button
-          type="button"
-          className="upload-zone"
-          disabled={!storageReady}
-          onClick={() => inputRef.current?.click()}
-          aria-describedby={storageReady ? undefined : 'garden-storage-hint'}
-        >
-          <span className="upload-zone__icon" aria-hidden="true">
-            🗺️
-          </span>
-          <span className="upload-zone__title">Publicar nueva versión</span>
-          <span className="upload-zone__hint">Tocá para seleccionar el plano</span>
-        </button>
+        <div className="garden-actions">
+          <button
+            type="button"
+            className="upload-zone"
+            disabled={!storageReady}
+            onClick={() => inputRef.current?.click()}
+            aria-describedby={storageReady ? undefined : 'garden-storage-hint'}
+          >
+            <span className="upload-zone__icon" aria-hidden="true">
+              🗺️
+            </span>
+            <span className="upload-zone__title">Publicar nueva versión</span>
+            <span className="upload-zone__hint">Tocá para seleccionar el plano</span>
+          </button>
+          {/* Solo un enlace externo (sin API de Canva): el acceso y la edición
+              dependen de los permisos del enlace y de la cuenta de Canva. */}
+          <div className="garden-canva">
+            <a
+              href={CANVA_PLAN_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={buttonClassName({ variant: 'secondary' })}
+              aria-label="Crear plano en Canva (se abre en una pestaña nueva)"
+              aria-describedby="garden-canva-hint"
+            >
+              <span aria-hidden="true">🎨</span>
+              Crear plano
+              <ExternalLinkIcon size="sm" />
+            </a>
+            <p className="garden-canva__hint">
+              <span id="garden-canva-hint">Diseñá el plano en Canva, descargalo y subilo acá.</span>{' '}
+              <span aria-hidden="true">Se abre en una pestaña nueva.</span>
+            </p>
+          </div>
+        </div>
       ) : null}
       {list.data && !storageReady ? (
         <p id="garden-storage-hint" className="notice notice--warning">

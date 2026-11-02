@@ -127,3 +127,12 @@ export const SproutIcon = createIcon(
     <path d="M12 14.5C12 11 10 9 5.5 9c0 3.5 2 5.5 6.5 5.5Z" />
   </>,
 );
+
+/** Enlace que se abre fuera de la app (otra pestaña). */
+export const ExternalLinkIcon = createIcon(
+  <>
+    <path d="M15 3h6v6" />
+    <path d="M10 14 21 3" />
+    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+  </>,
+);
