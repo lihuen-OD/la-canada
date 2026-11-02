@@ -249,7 +249,10 @@ describe('deshacer desde el detalle: lo que autoriza el backend', () => {
     const once = await task('una vez', 'ONE_TIME', at(daysAgo(3)));
     const urgent = await task('urgente', 'URGENT', at(daysAgo(3)));
     for (const id of [once, urgent]) expect((await complete(employeeA, id)).status).toBe(201);
-    expect((await listed(employeeA)).some((row) => row.id === once)).toBe(false);
+    // Visible y tachada durante la semana de su finalización (después sale: §52).
+    expect(
+      (await listed(employeeA)).find((row) => row.id === once)?.currentExecution,
+    ).not.toBeNull();
 
     const rows = await detail(employeeA);
     for (const [id, key] of [

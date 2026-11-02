@@ -959,8 +959,27 @@ describe('TasksScreen — semana en curso registrada desde Desempeño (carga olv
   });
 });
 
-describe('TasksScreen — urgentes completadas fuera del listado operativo', () => {
-  it('al completarla desaparece (el backend la oculta, como a una «Una vez»); vacío y contador coherentes', async () => {
+describe('TasksScreen — «Una vez» y urgentes completadas: tachadas durante la semana', () => {
+  const ONE_TIME_DONE = makeTask({
+    id: '00000000-0000-4000-8000-0000000000t5',
+    description: 'Única sintética completada',
+    frequency: 'ONE_TIME',
+    periodKey: 'ONE_TIME',
+    scheduledDate: '2026-09-30',
+    currentExecution: makeExecution({
+      id: '00000000-0000-4000-8000-0000000000e5',
+      periodKey: 'ONE_TIME',
+      completedAt: '2026-09-22T13:00:00.000Z',
+    }),
+    canComplete: false,
+  });
+  const URGENT_DONE = {
+    ...URGENT_A,
+    currentExecution: makeExecution({ periodKey: 'URGENT' }),
+    canComplete: false,
+  };
+
+  it('al completarla sigue visible y tachada (el backend la conserva esta semana); el contador no la suma', async () => {
     asEmployee();
     await renderLoaded([DAILY_A, URGENT_A]);
     const user = userEvent.setup();
@@ -969,29 +988,63 @@ describe('TasksScreen — urgentes completadas fuera del listado operativo', () 
       within(people).getByRole('button', { name: 'Persona sintética A, 2 pendientes' }),
     ).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Urgentes' }));
-    api.completeTask.mockResolvedValue({ task: URGENT_A });
-    api.fetchTasks.mockResolvedValue(listResponse([DAILY_A]));
+    api.completeTask.mockResolvedValue({ task: URGENT_DONE });
+    api.fetchTasks.mockResolvedValue(listResponse([DAILY_A, URGENT_DONE]));
     await user.click(
       screen.getByRole('button', { name: `Marcar como completada: ${URGENT_A.description}` }),
     );
-    expect(await screen.findByText('No hay urgentes pendientes.')).toBeInTheDocument();
+    const item = (await screen.findByText(/Completada por/)).closest('li') as HTMLElement;
+    expect(item).toHaveClass('task-item--done');
+    expect(item).toHaveTextContent(URGENT_A.description);
     expect(
-      screen.getByText('Las urgentes completadas se consultan en el historial y en Desempeño.'),
+      within(item).getByRole('button', { name: `Deshacer finalización: ${URGENT_A.description}` }),
     ).toBeInTheDocument();
     expect(
       within(people).getByRole('button', { name: 'Persona sintética A, 1 pendientes' }),
+    ).toBeInTheDocument();
+  });
+
+  it('una «Una vez» completada antes de su fecha: tachada, con la fecha prevista y la de realización por separado', async () => {
+    asEmployee();
+    await renderLoaded([DAILY_A, ONE_TIME_DONE]);
+    const item = screen.getByText(ONE_TIME_DONE.description).closest('li') as HTMLElement;
+    expect(item).toHaveClass('task-item--done');
+    // Fecha prevista (📅) y finalización (✓), sin estado de vencimiento.
+    expect(within(item).getByText(/Fecha para realizar/).parentElement).toHaveTextContent(
+      'Miércoles 30/09/2026',
+    );
+    expect(item).toHaveTextContent('Completada por Persona sintética A · 22/09/2026 10:00');
+    expect(item).not.toHaveTextContent(/Vencida|Para hoy|Programada/);
+    // No suma pendientes ni aparece en «Hoy» / «Vencidas».
+    expect(
+      within(screen.getByRole('group', { name: 'Filtrar por persona' })).getByRole('button', {
+        name: 'Persona sintética A, 1 pendientes',
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('«Urgentes» sin pendientes ni completadas esta semana: vacío que remite al historial', async () => {
+    asEmployee();
+    await renderLoaded([DAILY_A]);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Urgentes' }));
+    expect(screen.getByText('No hay urgentes pendientes.')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Las urgentes completadas en semanas anteriores se consultan en el historial y en Desempeño.',
+      ),
     ).toBeInTheDocument();
     // Las demás frecuencias conservan su vacío de siempre.
     await user.click(screen.getByRole('button', { name: 'Mensuales' }));
     expect(screen.getByText('No hay tareas con estos filtros.')).toBeInTheDocument();
   });
 
-  it('ADMIN: el interruptor de gestión nombra a las urgentes completadas', async () => {
+  it('ADMIN: el interruptor de gestión nombra a las completadas de semanas anteriores', async () => {
     asAdmin();
     await renderLoaded();
     expect(
       screen.getByRole('checkbox', {
-        name: 'Incluir desactivadas y completadas («Una vez» y urgentes)',
+        name: 'Incluir desactivadas y completadas en semanas anteriores («Una vez» y urgentes)',
       }),
     ).toBeInTheDocument();
   });

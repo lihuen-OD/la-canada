@@ -189,9 +189,13 @@ describe('tareas — visibilidad y filtros', () => {
     for (const visible of [own, ofOther, pending]) {
       expect(byId.get(visible.id)).toMatchObject({ canComplete: true, currentExecution: null });
     }
-    // Una «Una vez» completada sale del listado operativo (regla vigente)...
-    expect(byId.has(done.id)).toBe(false);
-    // ...pero se conserva: un ADMIN la sigue viendo con `status=all`.
+    // Una «Una vez» completada sigue tachada durante la semana de su
+    // finalización (después sale del listado operativo: §52)...
+    expect(byId.get(done.id)).toMatchObject({
+      canComplete: false,
+      currentExecution: expect.objectContaining({ periodKey: 'ONE_TIME' }),
+    });
+    // ...y un ADMIN la sigue viendo con `status=all`.
     const adminAll = await request(app).get('/api/v1/tasks?status=all').set(as(admin));
     expect(
       (adminAll.body.tasks as { id: string }[]).find((task) => task.id === done.id),
@@ -434,7 +438,7 @@ describe('tareas — completar', () => {
     expect(row.currentExecution.assignedEmployee.id).toBe(empB);
   });
 
-  it('URGENT y ONE_TIME usan su clave estable; la única completada sale del operativo', async () => {
+  it('URGENT y ONE_TIME usan su clave estable; completadas, siguen tachadas esta semana', async () => {
     const urgent = await createTask('urgente', empA, 'URGENT');
     const oneTime = await createTask('única', empA, 'ONE_TIME');
     const urgentDone = await complete(employeeA, urgent.id);
@@ -442,10 +446,13 @@ describe('tareas — completar', () => {
     expect(urgentDone.body.task.currentExecution.periodKey).toBe('URGENT');
     expect(oneTimeDone.body.task.currentExecution.periodKey).toBe('ONE_TIME');
 
+    // Visibles (con su finalización) hasta el fin de la semana de negocio:
+    // `tasksCompletedOneOffVisibility.integration.test.ts` cubre el lunes siguiente.
     const operational = await request(app).get('/api/v1/tasks').set(as(employeeA));
-    const ids = operational.body.tasks.map((t: { id: string }) => t.id);
-    expect(ids).toContain(urgent.id);
-    expect(ids).not.toContain(oneTime.id);
+    const rows = operational.body.tasks as { id: string; currentExecution: unknown }[];
+    for (const id of [urgent.id, oneTime.id]) {
+      expect(rows.find((t) => t.id === id)?.currentExecution).not.toBeNull();
+    }
 
     const adminAll = await request(app).get('/api/v1/tasks?status=all').set(as(admin));
     expect(adminAll.body.tasks.map((t: { id: string }) => t.id)).toContain(oneTime.id);

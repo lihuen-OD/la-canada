@@ -131,9 +131,10 @@ describe('getDashboard', () => {
         },
       ],
     });
-    // El KPI cuenta las urgentes completadas (el listado de Tareas las oculta).
+    // El KPI conserva su fórmula (todas las urgentes completadas, ninguna «Una
+    // vez» completada): no usa la semana de visibilidad del listado de Tareas.
     expect(mocks.listTasks).toHaveBeenCalledWith(actor, { status: 'active' }, expect.any(Date), {
-      keepCompletedUrgent: true,
+      view: 'homeKpi',
     });
   });
 

@@ -38,7 +38,12 @@ import {
   scheduledDateValue,
 } from './taskSchedule';
 import { FREQUENCY_ORDER, compareOperationalOrder } from './taskOrder';
-import { canRevertExecution, executionFrequency, lateCompletionBounds } from './completionRules';
+import {
+  canRevertExecution,
+  executionFrequency,
+  isCompletedOneOffVisible,
+  lateCompletionBounds,
+} from './completionRules';
 import {
   EMPTY_SUGGESTION,
   SUGGESTION_FIELDS,
@@ -260,15 +265,20 @@ export interface ListTasksFilters {
 }
 
 /**
- * `keepCompletedUrgent`: solo para el KPI operativo de Inicio («Tareas
- * completadas»), que sigue contando las urgentes completadas como siempre;
- * el listado de Tareas las oculta.
+ * Qué «Una vez» y urgentes completadas devuelve `status=active` (las demás
+ * frecuencias y `status=all`/`inactive` no cambian):
+ *  - `operational` (Tareas): las completadas en la semana de negocio actual
+ *    (`isCompletedOneOffVisible`), tachadas; desde el lunes siguiente, fuera;
+ *  - `homeKpi` (solo el KPI «Tareas completadas» de Inicio, con su fórmula de
+ *    siempre): ninguna «Una vez» completada y todas las urgentes completadas.
  */
+export type CompletedOneOffView = 'operational' | 'homeKpi';
+
 export async function listTasks(
   actor: TaskActor,
   filters: ListTasksFilters,
   now = new Date(),
-  options: { keepCompletedUrgent?: boolean } = {},
+  options: { view?: CompletedOneOffView } = {},
 ) {
   if (filters.status !== 'active' && actor.role !== 'ADMIN') {
     throw new ForbiddenError('Solo un administrador puede ver tareas desactivadas.');
@@ -286,7 +296,20 @@ export async function listTasks(
 
   const executions = await loadCurrentExecutions(prisma, tasks, now);
   const today = toLocalDate(now, config.businessTimeZone);
+  const view = options.view ?? 'operational';
+  // Una «Una vez» o una urgente completada sale del listado operativo cuando
+  // termina la semana de su finalización (regla de consulta: no se borra ni
+  // se desactiva nada). Se conserva en base, en el historial y en Desempeño,
+  // un ADMIN la ve con `status=all` y, si se deshace su finalización, vuelve
+  // pendiente (si la tarea sigue activa).
+  const hidden = (task: TaskRow, execution: ExecutionRow | undefined) => {
+    if (filters.status !== 'active' || !execution) return false;
+    if (task.frequency !== 'ONE_TIME' && task.frequency !== 'URGENT') return false;
+    if (view === 'homeKpi') return task.frequency === 'ONE_TIME';
+    return !isCompletedOneOffVisible(execution.completedAt, today, config.businessTimeZone);
+  };
   const serialized = tasks
+    .filter((task) => !hidden(task, executions.get(task.id)))
     .map((task) =>
       serializeTask(
         task,
@@ -295,19 +318,6 @@ export async function listTasks(
         actor,
         today,
       ),
-    )
-    // Una «Una vez» (como en el prototipo) o una urgente ya completada sale
-    // del listado operativo: no se borra ni se desactiva, se conserva en base,
-    // en el historial y en Desempeño, un ADMIN la ve con `status=all` y, si se
-    // deshace su finalización, vuelve pendiente (si la tarea sigue activa).
-    .filter(
-      (task) =>
-        !(
-          filters.status === 'active' &&
-          task.currentExecution &&
-          (task.frequency === 'ONE_TIME' ||
-            (task.frequency === 'URGENT' && !options.keepCompletedUrgent))
-        ),
     )
     .sort(compareOperationalOrder);
 

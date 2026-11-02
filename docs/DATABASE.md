@@ -522,8 +522,8 @@ Migración `20260925200000_more_module` (offline con `prisma migrate diff`, revi
 - `CHECK (("deleted_at" IS NULL) = ("deleted_by_user_id" IS NULL))` en ambas tablas (mismo criterio que `events`) y `CHECK ("version" >= 1)`.
 - Solo `ADD COLUMN` / `ADD CONSTRAINT`: sin `UPDATE`, `DELETE`, `DROP` ni reescritura. Las filas existentes conservan texto, autor, fecha y relaciones, con versión 1 y sin marcas de edición ni eliminación; no se inventa autor para las 2 novedades del seed (`recorded_by_user_id` nulo).
 - El texto de un mensaje eliminado permanece en su fila (y en `audit_logs` / `idempotency_records`); la API nunca lo devuelve. Sin índices nuevos.
-- Generada offline con `prisma migrate diff` (schema de `7427f95` → schema nuevo) más los `CHECK` manuales; revisada antes de aplicar con `db:migrate:deploy` y `DATABASE_TARGET=demo`. Pendiente en `production`.
-- SQL generado offline con `prisma migrate diff` desde el schema de `517a5e5`, comparado exactamente con el archivo versionado; solo CREATE TABLE/INDEX y ALTER ADD FOREIGN KEY, sin `DROP`, `DELETE`, `UPDATE`, `TRUNCATE`, `CASCADE` ni backfill. Estado previo en `demo`: 22 migraciones conocidas, exactamente esta pendiente. Guarda de destino confirmó `DATABASE_TARGET=demo`; desplegada allí con `db:migrate:deploy`. Pendiente en `production`.
+- Generada offline con `prisma migrate diff` (schema de `7427f95` → schema nuevo) más los `CHECK` manuales; revisada antes de aplicar con `db:migrate:deploy` y `DATABASE_TARGET=demo`. Pendiente en `production` *(aplicada en `production` el 2026-11-02 según la salida compartida por el usuario; `migrate status`: 24 al día)*.
+- SQL generado offline con `prisma migrate diff` desde el schema de `517a5e5`, comparado exactamente con el archivo versionado; solo CREATE TABLE/INDEX y ALTER ADD FOREIGN KEY, sin `DROP`, `DELETE`, `UPDATE`, `TRUNCATE`, `CASCADE` ni backfill. Estado previo en `demo`: 22 migraciones conocidas, exactamente esta pendiente. Guarda de destino confirmó `DATABASE_TARGET=demo`; desplegada allí con `db:migrate:deploy`. Pendiente en `production` *(aplicada en `production` el 2026-11-02 según la salida compartida por el usuario; `migrate status`: 24 al día)*.
 
 ### Etapa 5Y — Jardín: versiones del plano (aplicada a `demo`)
 
@@ -608,7 +608,7 @@ Módulo propio, independiente de Tareas: cuatro tablas NUEVAS y vacías; ninguna
 - **FK**: las nueve son `ON DELETE RESTRICT`: nada se borra en cascada. **Sin datos iniciales**: ni participantes, ni actividades, ni historial.
 - **Verificación en `demo`** (2026-10-26, `db:migrate:deploy` con `DATABASE_TARGET=demo`): `migrate status` al día (20 de 20); las cuatro tablas vacías, 12 CHECK y los dos índices parciales presentes; huella de solo lectura de los datos reales (tareas, ejecuciones, mascotas, registros, archivos, usuarios, empleados) idéntica antes y después.
 
-### Carga olvidada: fecha real de realización (`20261030120000_task_execution_performed_on`, aplicada a `demo`; pendiente en `production`)
+### Carga olvidada: fecha real de realización (`20261030120000_task_execution_performed_on`, aplicada a `demo`; aplicada en `production` el 2026-11-02)
 
 - **Columna nueva** `task_executions.performed_on DATE NULL` (sin DEFAULT; metadato, sin reescribir la tabla): fecha REAL en que se hizo una obligación registrada desde Desempeño → Detalle («Marcar como realizada»). Es una fecha de calendario de `BUSINESS_TIME_ZONE` sin hora: de una carga olvidada solo se conoce el día y nunca se inventa una hora.
 - **Significados separados en la fila**: `period_key` (período), `assigned_employee_id` (responsable histórico: el de la planificación de ese período, no el actual), `completed_by_employee_id` (quién la realizó), `recorded_by_user_id` (quién la registró; además, auditoría `task.completed_late`), `performed_on` (fecha real) y `completed_at` (momento real del registro, sin cambios de significado). `performed_on` NULL = flujo normal: se realizó cuando se registró.
@@ -616,7 +616,7 @@ Módulo propio, independiente de Tareas: cuatro tablas NUEVAS y vacías; ninguna
 - **Sin índices nuevos**: la unicidad sigue siendo el índice parcial `(task_id, period_key) WHERE reverted_at IS NULL` (una ejecución vigente por tarea y período, también para la carga olvidada y ante solicitudes concurrentes).
 - **Sin backfill, UPDATE ni DELETE**; ninguna migración anterior se modificó. Verificado en `demo` antes y después en `READ ONLY` (2026-10-30, `db:migrate:deploy` con `DATABASE_TARGET=demo`, 21 de 21 al día): 25 tareas, 15 ejecuciones (todas con `performed_on` NULL), 25 intervalos, 38 auditorías `task.*`, 4 empleados y los datos de la Huerta con sumas de verificación idénticas de sus columnas anteriores.
 
-### 📸 Carpetas de Fotos (`20261030150000_photo_folders`, aplicada solo a `demo`; pendiente en `production`)
+### 📸 Carpetas de Fotos (`20261030150000_photo_folders`, aplicada a `demo`; aplicada en `production` el 2026-11-02)
 
 - **Tabla nueva `photo_folders`** (vacía, sin datos iniciales ni de ejemplo): `id` UUID, `name` (nombre visible ya normalizado), `name_key` (ese nombre en minúsculas: clave de unicidad), `created_by_user_id` (FK `users`, autor de la sesión), `version` (`DEFAULT 1`, concurrencia optimista), `created_at`, `updated_at`, `deleted_at` y `deleted_by_user_id` (FK `users`; eliminación lógica).
 - **Columna nueva `file_assets.folder_id UUID NULL`** (FK `photo_folders`): `NULL` = «Sin carpeta». Todas las filas existentes quedan en `NULL`: sin backfill, sin asignaciones inventadas y sin tocar ninguna otra columna de `file_assets`.

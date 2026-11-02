@@ -322,7 +322,7 @@ export function TasksScreen() {
               checked={showAll}
               onChange={(event) => setShowAll(event.target.checked)}
             />
-            Incluir desactivadas y completadas («Una vez» y urgentes)
+            Incluir desactivadas y completadas en semanas anteriores («Una vez» y urgentes)
           </label>
         ) : null}
       </div>
@@ -335,13 +335,14 @@ export function TasksScreen() {
             description={isAdmin ? 'Creá la primera con «Nueva tarea».' : undefined}
           />
         ) : visible.length === 0 ? (
-          // Las urgentes completadas salen del listado (como las «Una vez»):
-          // el vacío lo dice, en vez de sugerir que no existen.
+          // Las urgentes completadas siguen tachadas durante la semana de su
+          // finalización y después salen del listado (como las «Una vez»): el
+          // vacío lo dice, en vez de sugerir que no existen.
           frequency === 'URGENT' && !showAll ? (
             <EmptyState
               icon={<span aria-hidden="true">✅</span>}
               title="No hay urgentes pendientes."
-              description="Las urgentes completadas se consultan en el historial y en Desempeño."
+              description="Las urgentes completadas en semanas anteriores se consultan en el historial y en Desempeño."
             />
           ) : (
             <EmptyState
