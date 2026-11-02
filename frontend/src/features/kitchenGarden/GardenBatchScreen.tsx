@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../../api/httpClient';
 import {
   fetchGardenBatch,
@@ -8,7 +8,11 @@ import {
   fetchGardenParticipants,
   setGardenBatchArchived,
 } from '../../api/kitchenGardenApi';
-import type { GardenBatchDetail, GardenCropRecord } from '../../api/kitchenGardenTypes';
+import type {
+  GardenBatchDetail,
+  GardenBatchResponse,
+  GardenCropRecord,
+} from '../../api/kitchenGardenTypes';
 import { STALE_TIME } from '../../api/queryClient';
 import { queryKeys } from '../../api/queryKeys';
 import { useSessionScope } from '../../api/useSessionScope';
@@ -58,6 +62,7 @@ export function GardenBatchScreen() {
   const { logout } = useAuth();
   const { userId, enabled } = useSessionScope();
   const { afterCropChange } = useGardenCache();
+  const queryClient = useQueryClient();
   const [dialog, setDialog] = useState<Dialog>({ type: 'none' });
   const [notice, setNotice] = useState<string | null>(null);
   const endSession = useCallback(() => void logout(), [logout]);
@@ -119,7 +124,19 @@ export function GardenBatchScreen() {
   const writable = viewer.canRecord && !batch.archived && batch.sowing !== null;
   const plan = planLabel(batch.transplantPlan);
   const close = () => setDialog({ type: 'none' });
-  const saved = (text: string) => () => {
+  /**
+   * Tras guardar: la ficha muestra YA la tanda que confirmó el backend (su
+   * respuesta, no una suposición), mientras la invalidación la vuelve a pedir
+   * junto con el listado y Registros. Sin esto, con la latencia real, se
+   * leería «Trasplante registrado» sobre los datos anteriores.
+   */
+  const saved = (text: string) => (fresh?: GardenBatchDetail) => {
+    if (fresh) {
+      queryClient.setQueryData<GardenBatchResponse>(
+        queryKeys.kitchenGarden.batch(userId, batchId),
+        (current) => (current ? { ...current, batch: fresh } : current),
+      );
+    }
     close();
     setNotice(text);
   };
@@ -264,9 +281,27 @@ export function GardenBatchScreen() {
         <VoidRecordDialog
           record={dialog.record}
           onClose={close}
-          onVoided={saved(
-            dialog.record.type === 'SOWING' ? 'Siembra anulada.' : 'Trasplante anulado.',
-          )}
+          onVoided={() => {
+            // El backend confirmó la anulación: deja de verse ya, antes de la recarga.
+            const voidedId = dialog.record.id;
+            queryClient.setQueryData<GardenBatchResponse>(
+              queryKeys.kitchenGarden.batch(userId, batchId),
+              (current) =>
+                current
+                  ? {
+                      ...current,
+                      batch: {
+                        ...current.batch,
+                        sowing: current.batch.sowing?.id === voidedId ? null : current.batch.sowing,
+                        transplants: current.batch.transplants.filter(
+                          (transplant) => transplant.id !== voidedId,
+                        ),
+                      },
+                    }
+                  : current,
+            );
+            saved(dialog.record.type === 'SOWING' ? 'Siembra anulada.' : 'Trasplante anulado.')();
+          }}
           onSessionExpired={endSession}
         />
       ) : null}
@@ -274,9 +309,9 @@ export function GardenBatchScreen() {
         <ArchiveDialog
           batch={batch}
           onCancel={close}
-          onDone={(text) => {
+          onDone={(text, fresh) => {
             afterCropChange();
-            saved(text)();
+            saved(text)(fresh);
           }}
           onSessionExpired={endSession}
         />
@@ -352,7 +387,7 @@ function ArchiveDialog({
 }: {
   batch: GardenBatchDetail;
   onCancel: () => void;
-  onDone: (text: string) => void;
+  onDone: (text: string, fresh: GardenBatchDetail) => void;
   onSessionExpired: () => void;
 }) {
   const archiving = !batch.archived;
@@ -367,8 +402,9 @@ function ArchiveDialog({
       confirmLabel={archiving ? 'Archivar' : 'Reabrir'}
       onCancel={onCancel}
       onConfirm={async () => {
+        let fresh: GardenBatchDetail;
         try {
-          await setGardenBatchArchived(batch.id, archiving);
+          fresh = (await setGardenBatchArchived(batch.id, archiving)).batch;
         } catch (caught) {
           if (isSessionExpired(caught)) {
             onCancel();
@@ -377,7 +413,7 @@ function ArchiveDialog({
           }
           throw caught;
         }
-        onDone(archiving ? 'Tanda archivada.' : 'Tanda reabierta.');
+        onDone(archiving ? 'Tanda archivada.' : 'Tanda reabierta.', fresh);
       }}
     />
   );

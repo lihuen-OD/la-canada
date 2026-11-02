@@ -9,16 +9,17 @@ import { config } from '../../config';
 import { addDays, formatLocalDate, toLocalDate } from '../../lib/businessTime';
 
 /**
- * 🥬 Huerta — cultivos y registros contra una rama de Neon AISLADA (nunca
- * `demo` ni `production`: `npm run test:integration:isolated` con
- * `LA_CANADA_ENV_FILE`, y esta prueba exige `DATABASE_TARGET=isolated`), por
- * HTTP real: permisos, siembra directa y almácigo, fechas previstas,
+ * 🥬 Huerta — cultivos y registros contra Neon real por HTTP real: la rama
+ * `demo` (autorizada por el usuario el 2026-11-02, `npm run test:integration`)
+ * o una rama aislada (`test:integration:isolated` con `LA_CANADA_ENV_FILE`);
+ * nunca `production`: permisos, siembra directa y almácigo, fechas previstas,
  * trasplantes parciales y cierre explícito de pendientes, fechas inválidas,
  * correcciones (sin cambios, versión vieja, fechas contra la siembra),
  * anulación con motivo, archivo y reapertura, concurrencia, idempotencia,
  * Registros con filtros y paginación, y que Actividades y Desempeño de la
- * Huerta no cambian. La rama puede tener una copia de datos reales: todo lo
- * creado lleva `test-crops-<RUN>` y `afterAll` borra solo esos ids.
+ * Huerta no cambian. La base tiene datos reales: nunca se edita una fila
+ * existente, todo lo creado lleva `test-crops-<RUN>` y `afterAll` borra solo
+ * esos ids.
  */
 
 const RUN = `test-crops-${Date.now()}`;
@@ -181,8 +182,8 @@ async function gardenSnapshot() {
 let gardenBefore: Awaited<ReturnType<typeof gardenSnapshot>>;
 
 beforeAll(async () => {
-  // Nunca demo ni production: una rama de Neon dedicada (ver guardDbCommand --gate-isolated).
-  expect(process.env.DATABASE_TARGET).toBe('isolated');
+  // `demo` (autorizada) o una rama aislada; nunca production (las guardas lo impiden antes).
+  expect(['demo', 'isolated']).toContain(process.env.DATABASE_TARGET);
   app = createApp();
   admin = await actorFor('ADMIN', 'admin');
   ana = await actorFor('EMPLOYEE', 'ana');
@@ -191,7 +192,7 @@ beforeAll(async () => {
   retired = await actorFor('EMPLOYEE', 'retirado');
   participant.ana = await participate(ana);
   participant.beto = await participate(beto);
-  participant.retired = await participate(retired);
+  participant.retired = await participate(retired, false);
   gardenBefore = await gardenSnapshot();
 }, SLOW);
 
@@ -236,7 +237,7 @@ afterAll(async () => {
   expect(await prisma.employee.count({ where: { code: { startsWith: RUN } } })).toBe(0);
 }, SLOW);
 
-describe('🥬 cultivos y registros (rama aislada)', { timeout: SLOW }, () => {
+describe('🥬 cultivos y registros (Neon real)', { timeout: SLOW }, () => {
   it('permisos: sin sesión 401; quien no participa consulta pero no escribe; un participante sí', async () => {
     expect((await request(app).get(`${api}/batches`)).status).toBe(401);
     expect((await request(app).post(`${api}/batches`).send({})).status).toBe(401);

@@ -437,6 +437,40 @@ describe('ficha de la tanda', () => {
     });
   });
 
+  it('tras guardar o anular, la ficha muestra lo confirmado por el backend sin esperar la recarga', async () => {
+    const user = userEvent.setup();
+    const added = record({
+      id: '00000000-0000-4000-8000-0000000c0003',
+      type: 'TRANSPLANT',
+      performedOn: TODAY,
+      performedBy: { id: ANA.id, displayName: ANA.displayName, colorHex: null },
+      method: null,
+      location: 'Cantero nuevo',
+      quantity: null,
+      quantityUnit: null,
+    });
+    gardenApi.createGardenTransplant.mockResolvedValue({
+      batch: detail({ transplants: [...detail().transplants, added] }),
+    });
+    renderGarden(`/kitchen-garden/crops/${BATCH_ID}`);
+    await user.click(await screen.findByRole('button', { name: /Registrar trasplante/ }));
+    // Desde acá, la recarga de la ficha no termina nunca (latencia real).
+    gardenApi.fetchGardenBatch.mockImplementation(() => new Promise(() => undefined));
+    const dialog = await screen.findByRole('dialog', { name: 'Registrar trasplante' });
+    await user.type(within(dialog).getByLabelText('Lugar de destino'), 'Cantero nuevo');
+    await user.click(within(dialog).getByRole('button', { name: 'Registrar trasplante' }));
+    const timeline = await screen.findByRole('list', { name: 'Seguimiento de la tanda' });
+    await waitFor(() => expect(timeline).toHaveTextContent('Destino: Cantero nuevo'));
+
+    gardenApi.voidGardenCropRecord.mockResolvedValue({ record: { id: added.id } });
+    await user.click(screen.getAllByRole('button', { name: /^Anular trasplante/ }).at(-1)!);
+    const confirm = await screen.findByRole('dialog', { name: '¿Anular el trasplante?' });
+    await user.type(within(confirm).getByLabelText('Motivo'), 'Cargado por error');
+    await user.click(within(confirm).getByRole('button', { name: 'Anular' }));
+    await waitFor(() => expect(timeline).not.toHaveTextContent('Cantero nuevo'));
+    expect(screen.getByText('Trasplante anulado.')).toBeInTheDocument();
+  });
+
   it('el trasplante no puede ser anterior a la siembra; un conflicto se explica y conserva el borrador', async () => {
     const user = userEvent.setup();
     gardenApi.createGardenTransplant.mockRejectedValue(
