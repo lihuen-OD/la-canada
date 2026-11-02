@@ -289,9 +289,16 @@ model User {
 
   /// 🥬 Huerta — su participación (a lo sumo una) y las ejecuciones que
   /// registró o revirtió desde su sesión. Participar no cambia rol ni permisos.
-  kitchenGardenParticipant        KitchenGardenParticipant? @relation("KitchenGardenParticipantUser")
-  recordedKitchenGardenExecutions KitchenGardenExecution[]  @relation("KitchenGardenExecutionRecordedBy")
-  revertedKitchenGardenExecutions KitchenGardenExecution[]  @relation("KitchenGardenExecutionRevertedBy")
+  kitchenGardenParticipant         KitchenGardenParticipant? @relation("KitchenGardenParticipantUser")
+  recordedKitchenGardenExecutions  KitchenGardenExecution[]  @relation("KitchenGardenExecutionRecordedBy")
+  revertedKitchenGardenExecutions  KitchenGardenExecution[]  @relation("KitchenGardenExecutionRevertedBy")
+  /// 🥬 Huerta — cultivos: lo que registró, corrigió o cerró desde su sesión.
+  createdKitchenGardenCrops        KitchenGardenCrop[]       @relation("KitchenGardenCropCreatedBy")
+  createdKitchenGardenBatches      KitchenGardenBatch[]      @relation("KitchenGardenBatchCreatedBy")
+  archivedKitchenGardenBatches     KitchenGardenBatch[]      @relation("KitchenGardenBatchArchivedBy")
+  closedKitchenGardenTransplants   KitchenGardenBatch[]      @relation("KitchenGardenBatchTransplantsClosedBy")
+  recordedKitchenGardenCropRecords KitchenGardenCropRecord[] @relation("KitchenGardenCropRecordRecordedBy")
+  voidedKitchenGardenCropRecords   KitchenGardenCropRecord[] @relation("KitchenGardenCropRecordVoidedBy")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -1533,6 +1540,8 @@ model KitchenGardenParticipant {
   planningIntervals   KitchenGardenPlanningInterval[]
   assignedExecutions  KitchenGardenExecution[]        @relation("KitchenGardenExecutionAssignedTo")
   completedExecutions KitchenGardenExecution[]        @relation("KitchenGardenExecutionCompletedBy")
+  /// Siembras y trasplantes que REALIZÓ (la persona, no quien los registró).
+  cropRecords         KitchenGardenCropRecord[]       @relation("KitchenGardenCropRecordPerformedBy")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -1628,4 +1637,134 @@ model KitchenGardenExecution {
   @@index([completedByParticipantId])
   @@index([completedAt])
   @@map("kitchen_garden_executions")
+}
+
+/// 🥬 Huerta — cultivos (2026-11-02): modalidad de una siembra.
+enum KitchenGardenSowingMethod {
+  /// Directa en el lugar definitivo (no exige trasplante).
+  DIRECT
+  /// En almácigo: queda un trasplante pendiente hasta que alguien confirme
+  /// explícitamente «No quedan trasplantes pendientes».
+  SEEDBED
+}
+
+enum KitchenGardenCropRecordType {
+  SOWING
+  TRANSPLANT
+}
+
+/// Unidad explícita de una cantidad: nunca se mezclan semillas con plantines.
+enum KitchenGardenQuantityUnit {
+  /// Siembra: semillas.
+  SEEDS
+  /// Siembra: gramos de semilla.
+  GRAMS
+  /// Trasplante: plantines.
+  SEEDLINGS
+}
+
+/// Cultivo (p. ej. «Lechuga»): agrupa y filtra tandas. Lo crea la primera
+/// siembra con ese nombre (sin distinguir mayúsculas ni espacios, `name_key`
+/// único) y no se borra. La identidad de una siembra es su TANDA, nunca este
+/// nombre.
+model KitchenGardenCrop {
+  id              String @id @default(uuid()) @db.Uuid
+  name            String
+  /// Nombre normalizado (minúsculas, espacios colapsados): único.
+  nameKey         String @unique @map("name_key")
+  createdByUserId String @map("created_by_user_id") @db.Uuid
+  createdByUser   User   @relation("KitchenGardenCropCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  batches KitchenGardenBatch[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("kitchen_garden_crops")
+}
+
+/// Tanda: UNA siembra concreta de un cultivo, con su seguimiento (siembra y
+/// trasplantes). Dos tandas del mismo cultivo nunca se mezclan: cada una tiene
+/// su id. Se archiva y se reabre sin borrar registros; archivada se consulta,
+/// pero no admite hechos nuevos ni correcciones hasta reabrirla.
+model KitchenGardenBatch {
+  id      String            @id @default(uuid()) @db.Uuid
+  cropId  String            @map("crop_id") @db.Uuid
+  crop    KitchenGardenCrop @relation(fields: [cropId], references: [id], onDelete: Restrict)
+  name    String
+  variety String?
+  notes   String?
+
+  /// Quedan trasplantes pendientes (un almácigo, o previstos a mano). Una
+  /// fecha prevista nunca se convierte sola en un hecho realizado.
+  transplantPending         Boolean   @default(false) @map("transplant_pending")
+  /// «Fecha prevista de trasplante» (calendario de `BUSINESS_TIME_ZONE`); solo con pendientes.
+  expectedTransplantDate    DateTime? @map("expected_transplant_date") @db.Date
+  /// Quién confirmó «No quedan trasplantes pendientes» y cuándo.
+  transplantsClosedAt       DateTime? @map("transplants_closed_at")
+  transplantsClosedByUserId String?   @map("transplants_closed_by_user_id") @db.Uuid
+  transplantsClosedByUser   User?     @relation("KitchenGardenBatchTransplantsClosedBy", fields: [transplantsClosedByUserId], references: [id], onDelete: Restrict)
+
+  archivedAt       DateTime? @map("archived_at")
+  archivedByUserId String?   @map("archived_by_user_id") @db.Uuid
+  archivedByUser   User?     @relation("KitchenGardenBatchArchivedBy", fields: [archivedByUserId], references: [id], onDelete: Restrict)
+
+  /// Concurrencia optimista: cada cambio de la tanda la incrementa (409 si cambió).
+  version         Int    @default(1)
+  createdByUserId String @map("created_by_user_id") @db.Uuid
+  createdByUser   User   @relation("KitchenGardenBatchCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  records KitchenGardenCropRecord[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([cropId])
+  /// Cultivos: activas/archivadas y pendientes por fecha prevista.
+  @@index([archivedAt, expectedTransplantDate])
+  @@map("kitchen_garden_batches")
+}
+
+/// Hecho realizado de una tanda: su siembra (una vigente por tanda) o un
+/// trasplante (varios, parciales). Separa la persona que lo REALIZÓ
+/// (participante) del usuario que lo REGISTRÓ (la sesión). Se corrige con
+/// auditoría antes/después y se anula lógicamente con motivo: nunca se borra.
+model KitchenGardenCropRecord {
+  id      String                      @id @default(uuid()) @db.Uuid
+  batchId String                      @map("batch_id") @db.Uuid
+  batch   KitchenGardenBatch          @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  type    KitchenGardenCropRecordType
+
+  /// Fecha REAL del hecho (calendario de `BUSINESS_TIME_ZONE`, hoy o pasada).
+  performedOn              DateTime                 @map("performed_on") @db.Date
+  performedByParticipantId String                   @map("performed_by_participant_id") @db.Uuid
+  performedByParticipant   KitchenGardenParticipant @relation("KitchenGardenCropRecordPerformedBy", fields: [performedByParticipantId], references: [id], onDelete: Restrict)
+  recordedByUserId         String                   @map("recorded_by_user_id") @db.Uuid
+  recordedByUser           User                     @relation("KitchenGardenCropRecordRecordedBy", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+
+  /// Solo la siembra: directa o almácigo.
+  method       KitchenGardenSowingMethod?
+  /// Lugar de la siembra o de destino del trasplante.
+  location     String
+  quantity     Decimal?                   @db.Decimal(10, 2)
+  quantityUnit KitchenGardenQuantityUnit? @map("quantity_unit")
+  notes        String?
+
+  /// Concurrencia optimista de las correcciones (409 si cambió).
+  version Int @default(1)
+
+  voidedAt       DateTime? @map("voided_at")
+  voidedByUserId String?   @map("voided_by_user_id") @db.Uuid
+  voidedByUser   User?     @relation("KitchenGardenCropRecordVoidedBy", fields: [voidedByUserId], references: [id], onDelete: Restrict)
+  voidReason     String?   @map("void_reason")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  /// Una sola siembra VIGENTE por tanda (defensa final ante concurrencia).
+  @@unique([batchId], where: raw("type = 'SOWING' AND voided_at IS NULL"), map: "kitchen_garden_crop_records_active_sowing_key")
+  @@index([batchId, performedOn])
+  /// Registros: más recientes primero.
+  @@index([performedOn, createdAt])
+  @@index([performedByParticipantId, performedOn])
+  @@map("kitchen_garden_crop_records")
 }

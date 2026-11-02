@@ -9,6 +9,16 @@ import { defineConfig } from 'prisma/config';
 // explícitamente. Si el archivo no existe (build offline, CI recién
 // clonado), `dotenv` no lanza error y simplemente no setea nada — mismo
 // comportamiento documentado para el resto del proyecto.
+// Con `LA_CANADA_ENV_FILE` (p. ej. `.env.huerta-cultivos`, rama de Neon
+// aislada), ese archivo primero: dotenv no sobrescribe, así que sus
+// conexiones ganan (misma regla que `src/config/localEnvFiles.ts`).
+const alternativeEnvFile = process.env.LA_CANADA_ENV_FILE;
+if (alternativeEnvFile) {
+  if (!/^\.env\.[A-Za-z0-9_-]+$/.test(alternativeEnvFile)) {
+    throw new Error('LA_CANADA_ENV_FILE debe ser un archivo `.env.<nombre>` de la raíz del repo.');
+  }
+  loadDotenvFile({ path: resolve(process.cwd(), '..', alternativeEnvFile) });
+}
 loadDotenvFile({ path: resolve(process.cwd(), '../.env') });
 
 // Prisma 7 movió la configuración de conexión fuera de schema.prisma (ya no

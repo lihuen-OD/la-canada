@@ -642,3 +642,10 @@ Cambios de esta revisión:
 - **Migración**: ninguna; sin cambios de esquema ni backfill. Estado de `production`: las cuatro migraciones del 30/10 aplicadas el 2026-11-02 según la salida compartida por el usuario (`migrate status`: 24 al día); no se volvieron a ejecutar ni se accedió a esa base.
 - **Validación**: lint, typecheck, build y format:check; unitarias afectadas backend 424/424 y frontend 235/235; integración contra `demo` 87/87 (`tasksCompletedOneOffVisibility`, `dashboard`, `tasks`, `tasksScheduleAndCalendar`, `tasksOrderAndSuggestion`, `tasksDetailRevert`) con fixtures sintéticos y 0 residuos; revisión visual como EMPLOYEE y ADMIN en 360, 390, 768 y 1366 px.
 
+## 🥬 Huerta: cultivos y registros 🟡 implementado en `feat/huerta-cultivos` (2026-11-02)
+
+- **Alcance** (pedido explícito del usuario): 🥕 Cultivos (tandas con siembra directa o almácigo, trasplantes parciales, lo previsto con cierre explícito, archivo) y 📝 Registros (filtros y paginación), con permisos para ADMIN y participantes activos, trazabilidad persona/registrador, correcciones auditadas, anulación con motivo, concurrencia e idempotencia. Actividades, Historial, Desempeño y Participantes sin cambios. Ver `docs/BUSINESS_RULES.md` y `docs/ARCHITECTURE.md` §53.
+- **Migración**: `20261102120000_kitchen_garden_crops` (aditiva), **pendiente**: rama de Neon aislada (`db:migrate:deploy:isolated`), después `demo` y `production`, cada una con autorización propia.
+- **Base aislada**: `LA_CANADA_ENV_FILE` + `DATABASE_TARGET=isolated` + `--gate-isolated` (endpoint distinto del de `demo`, Drive y almacenamiento desactivados).
+- **Pendiente**: crear la rama de Neon aislada (no hay herramientas de Neon en la sesión), aplicar la migración allí, correr `kitchenGardenCrops.integration.test.ts` y revisar la app contra esa base.
+

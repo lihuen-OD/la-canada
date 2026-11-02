@@ -88,6 +88,17 @@ export const queryKeys = {
         participantId ?? 'all',
       ] as const,
     historyAll: (userId: string) => [...scope(userId), 'kitchenGarden', 'history'] as const,
+    /** 🥕 Cultivos: catálogo, tandas (listado paginado y ficha) y 📝 Registros. */
+    crops: (userId: string) => [...scope(userId), 'kitchenGarden', 'crops'] as const,
+    batchesAll: (userId: string) => [...scope(userId), 'kitchenGarden', 'batches'] as const,
+    batches: (userId: string, status: string, cropId: string | null) =>
+      [...scope(userId), 'kitchenGarden', 'batches', status, cropId ?? 'all'] as const,
+    batchAll: (userId: string) => [...scope(userId), 'kitchenGarden', 'batch'] as const,
+    batch: (userId: string, batchId: string) =>
+      [...scope(userId), 'kitchenGarden', 'batch', batchId] as const,
+    cropRecordsAll: (userId: string) => [...scope(userId), 'kitchenGarden', 'cropRecords'] as const,
+    cropRecords: (userId: string, filters: object) =>
+      [...scope(userId), 'kitchenGarden', 'cropRecords', filters] as const,
     performanceAll: (userId: string) => [...scope(userId), 'kitchenGarden', 'performance'] as const,
     performanceSummary: (userId: string, from: string, to: string) =>
       [...scope(userId), 'kitchenGarden', 'performance', 'summary', from, to] as const,

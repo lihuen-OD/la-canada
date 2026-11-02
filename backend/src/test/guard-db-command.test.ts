@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateGuard } from '../scripts/guardDbCommand';
+import { evaluateGuard, evaluateIsolation, neonEndpointOf } from '../scripts/guardDbCommand';
 
 /**
  * `evaluateGuard` es pura (no lee `process.env` por sí misma) — se testea
@@ -92,5 +92,64 @@ describe('evaluateGuard', () => {
     if (!result.ok) {
       expect(result.reason).toMatch(/DATABASE_URL no está definida/);
     }
+  });
+});
+
+describe('rama de Neon aislada (--gate-isolated)', () => {
+  // Conexiones SINTÉTICAS: solo importa la forma del host.
+  const url = (endpoint: string, pooled: boolean) =>
+    `postgresql://u:p@${endpoint}${pooled ? '-pooler' : ''}.sa-east-1.aws.neon.tech/neondb`;
+  const DEMO = {
+    DATABASE_TARGET: 'demo',
+    DATABASE_URL: url('ep-demo-111', true),
+    DIRECT_URL: url('ep-demo-111', false),
+  };
+  const ISOLATED = {
+    DATABASE_TARGET: 'isolated',
+    DATABASE_URL: url('ep-huerta-222', true),
+    DIRECT_URL: url('ep-huerta-222', false),
+    DRIVE_BACKUP_ENABLED: 'false',
+    OBJECT_STORAGE_ENDPOINT: '',
+  };
+  const options = { varName: 'DIRECT_URL' as const, shape: 'direct' as const, gateTarget: false };
+
+  it('el endpoint se lee del host, sin `-pooler` y sin exponer el resto', () => {
+    expect(neonEndpointOf(url('ep-huerta-222', true))).toBe('ep-huerta-222');
+    expect(neonEndpointOf(url('ep-huerta-222', false))).toBe('ep-huerta-222');
+    expect(neonEndpointOf('no-es-una-url')).toBeNull();
+    expect(neonEndpointOf(undefined)).toBeNull();
+  });
+
+  it('acepta una rama con endpoint propio, Drive y almacenamiento desactivados', () => {
+    expect(evaluateGuard(ISOLATED, { ...options, gateIsolated: true }, DEMO)).toEqual({ ok: true });
+  });
+
+  it('DATABASE_TARGET=demo no alcanza: con el endpoint de demo se rechaza aunque diga "isolated"', () => {
+    expect(evaluateIsolation({ ...DEMO }, DEMO).ok).toBe(false);
+    const disguised = { ...ISOLATED, DATABASE_URL: DEMO.DATABASE_URL, DIRECT_URL: DEMO.DIRECT_URL };
+    const result = evaluateIsolation(disguised, DEMO);
+    expect(result).toMatchObject({ ok: false });
+    expect(JSON.stringify(result)).not.toContain('ep-demo-111');
+  });
+
+  it('rechaza conexiones a endpoints distintos entre sí, producción por nombre y la falta de referencia', () => {
+    expect(evaluateIsolation({ ...ISOLATED, DIRECT_URL: url('ep-otra-333', false) }, DEMO).ok).toBe(
+      false,
+    );
+    expect(evaluateIsolation({ ...ISOLATED, DATABASE_TARGET: 'production' }, DEMO).ok).toBe(false);
+    expect(evaluateIsolation(ISOLATED, {}).ok).toBe(false);
+  });
+
+  it('exige la copia en Drive y el almacenamiento real desactivados', () => {
+    expect(evaluateIsolation({ ...ISOLATED, DRIVE_BACKUP_ENABLED: 'true' }, DEMO).ok).toBe(false);
+    expect(
+      evaluateIsolation({ ...ISOLATED, OBJECT_STORAGE_ENDPOINT: 'https://storage.example' }, DEMO)
+        .ok,
+    ).toBe(false);
+  });
+
+  it('--gate-target conserva su regla de siempre (solo demo)', () => {
+    expect(evaluateGuard(ISOLATED, { ...options, gateTarget: true }).ok).toBe(false);
+    expect(evaluateGuard(DEMO, { ...options, gateTarget: true }).ok).toBe(true);
   });
 });

@@ -8,9 +8,9 @@ const sql = readFileSync(resolve(migrationsDir, migrationName, 'migration.sql'),
 const schema = readFileSync(resolve(__dirname, '../../../prisma/schema.prisma'), 'utf-8');
 
 describe(`migración ${migrationName}`, () => {
-  it('es la última y la única que menciona carpetas de fotos', () => {
+  it('existe y es la única que menciona carpetas de fotos', () => {
     const names = readdirSync(migrationsDir).filter((name) => /^\d{14}_/.test(name));
-    expect(names.sort().at(-1)).toBe(migrationName);
+    expect(names).toContain(migrationName);
     for (const name of names.filter((other) => other !== migrationName)) {
       const previous = readFileSync(resolve(migrationsDir, name, 'migration.sql'), 'utf-8');
       expect(previous).not.toMatch(/photo_folders|"folder_id"/);

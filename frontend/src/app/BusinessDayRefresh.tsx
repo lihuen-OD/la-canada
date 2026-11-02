@@ -1,8 +1,10 @@
 import { useEffect } from 'react';
-import { useQueryClient, type QueryKey } from '@tanstack/react-query';
+import { useQueryClient, type InfiniteData, type QueryKey } from '@tanstack/react-query';
 import type { DashboardResponse } from '../api/dashboardTypes';
 import type {
   GardenActivitiesResponse,
+  GardenBatchResponse,
+  GardenBatchesResponse,
   GardenPerformanceResponse,
 } from '../api/kitchenGardenTypes';
 import type { PerformanceResponse } from '../api/performanceTypes';
@@ -58,6 +60,9 @@ export function BusinessDayRefresh(): null {
       // 🥬 Huerta: solo existen en caché si se entró al módulo.
       queryKeys.kitchenGarden.activitiesAll(userId),
       queryKeys.kitchenGarden.performanceAll(userId),
+      // 🥕 Cultivos: «Para hoy» y «Fecha prevista pasada» dependen del día.
+      queryKeys.kitchenGarden.batchesAll(userId),
+      queryKeys.kitchenGarden.batchAll(userId),
     ];
     const dayDependent = [
       ...reporting,
@@ -90,6 +95,16 @@ export function BusinessDayRefresh(): null {
         const { period } = (data ?? {}) as Partial<GardenActivitiesResponse>;
         day = period?.today;
         time = period?.generatedAt;
+      } else if (startsWith(key, queryKeys.kitchenGarden.batchesAll(userId))) {
+        // Listado paginado («Ver más»): el día lo trae la primera página.
+        const first = (data as Partial<InfiniteData<GardenBatchesResponse>> | undefined)
+          ?.pages?.[0];
+        day = first?.today;
+        time = first?.generatedAt;
+      } else if (startsWith(key, queryKeys.kitchenGarden.batchAll(userId))) {
+        const batch = (data ?? {}) as Partial<GardenBatchResponse>;
+        day = batch.today;
+        time = batch.generatedAt;
       } else if (startsWith(key, queryKeys.kitchenGarden.performanceAll(userId))) {
         // La pantalla guarda la respuesta ya adaptada, con el mismo `range`/`generatedAt`.
         const performance = (data ?? {}) as Partial<GardenPerformanceResponse>;

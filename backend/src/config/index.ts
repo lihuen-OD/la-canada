@@ -1,15 +1,16 @@
-import { config as loadDotenvFile } from 'dotenv';
 import { resolve } from 'node:path';
 import { loadEnv } from './env';
+import { loadLocalEnvFiles } from './localEnvFiles';
 
 /**
  * Carga variables desde el .env centralizado en la raíz del monorepo.
  * Solo tiene efecto en desarrollo local: dotenv nunca sobrescribe variables
  * que ya existan en process.env, así que en producción (donde la plataforma
  * de despliegue — Render — inyecta las variables directamente) este paso es
- * un no-op silencioso si no encuentra el archivo.
+ * un no-op silencioso si no encuentra el archivo. Con `LA_CANADA_ENV_FILE`,
+ * primero ese archivo (rama de base aislada; ver `localEnvFiles.ts`).
  */
-loadDotenvFile({ path: resolve(process.cwd(), '../.env') });
+loadLocalEnvFiles(resolve(process.cwd(), '..'));
 
 export const env = loadEnv(process.env);
 

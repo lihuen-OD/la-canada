@@ -3,11 +3,13 @@ import { Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '../../test/render';
 import { resetBusinessDayForTests } from '../../connectivity/businessDay';
-import type { GardenActivitiesResponse } from '../../api/kitchenGardenTypes';
+import type { GardenActivitiesResponse, GardenBatchesResponse } from '../../api/kitchenGardenTypes';
 
 const gardenApi = vi.hoisted(() => ({
   fetchGardenParticipants: vi.fn(),
   fetchGardenActivities: vi.fn(),
+  fetchGardenBatches: vi.fn(),
+  fetchGardenCrops: vi.fn(),
 }));
 const tasksApi = vi.hoisted(() => ({ fetchTasks: vi.fn(), fetchTaskHistory: vi.fn() }));
 const { useAuthMock } = vi.hoisted(() => ({ useAuthMock: vi.fn() }));
@@ -109,5 +111,70 @@ describe('🥬 Huerta y el cambio de día', () => {
     await waitFor(() => expect(gardenApi.fetchGardenActivities).toHaveBeenCalledTimes(before + 1));
     expect(tasksApi.fetchTasks).not.toHaveBeenCalled();
     expect(tasksApi.fetchTaskHistory).not.toHaveBeenCalled();
+  });
+});
+
+/** Una tanda de almácigo con trasplante previsto para el 27/10 (estado según el día del servidor). */
+function batchesResponse(): GardenBatchesResponse {
+  const today = serverDay();
+  return {
+    batches: [
+      {
+        id: '00000000-0000-4000-8000-0000000b0101',
+        crop: { id: 'crop-1', name: 'Lechuga sintética' },
+        name: 'Tanda sintética',
+        variety: null,
+        notes: null,
+        archived: false,
+        archivedAt: null,
+        version: 1,
+        transplantPlan: {
+          pending: true,
+          expectedDate: '2026-10-27',
+          status: today < '2026-10-27' ? 'DUE_TODAY' : 'PAST',
+          closedAt: null,
+        },
+        sowing: {
+          id: 's1',
+          performedOn: '2026-10-01',
+          method: 'SEEDBED',
+          location: 'Almácigo',
+          performedBy: { id: 'p1', displayName: 'Pablo sintético', colorHex: null },
+        },
+        transplantCount: 0,
+      },
+    ],
+    page: 1,
+    pageSize: 20,
+    total: 1,
+    totalPages: 1,
+    today,
+    generatedAt: new Date().toISOString(),
+    viewer: { canRecord: true, participantId: 'p1' },
+  };
+}
+
+describe('🥕 Cultivos y el cambio de día', () => {
+  it('«Para hoy» pasa a «Fecha prevista pasada» recién cuando el servidor confirma el día nuevo', async () => {
+    gardenApi.fetchGardenBatches.mockImplementation(async () => batchesResponse());
+    // Mientras tanto, la fecha prevista del 27 se ve como «Para hoy» el 26 (fixture).
+    vi.setSystemTime(ar('2026-10-26', '23:59:00'));
+    resetBusinessDayForTests();
+    render(
+      <StrictMode>
+        <BusinessDayRefresh />
+        <Routes>
+          <Route path="/kitchen-garden/*" element={<KitchenGardenModule />} />
+        </Routes>
+      </StrictMode>,
+      { route: '/kitchen-garden/crops' },
+    );
+    expect(await screen.findByText('Para hoy')).toBeInTheDocument();
+    const before = gardenApi.fetchGardenBatches.mock.calls.length;
+    deviceAt(ar('2026-10-27', '00:00:05'));
+    expect(await screen.findByText('Fecha prevista pasada (27/10/2026)')).toBeInTheDocument();
+    await waitFor(() => expect(gardenApi.fetchGardenBatches).toHaveBeenCalledTimes(before + 1));
+    expect(gardenApi.fetchGardenActivities).not.toHaveBeenCalled();
+    expect(tasksApi.fetchTasks).not.toHaveBeenCalled();
   });
 });

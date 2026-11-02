@@ -823,6 +823,77 @@ export class GardenParticipantAlreadyActiveError extends AppError {
   }
 }
 
+// ── 🥬 Huerta: cultivos y registros (2026-11-02) ──────────────────────────
+
+export class GardenBatchNotFoundError extends AppError {
+  constructor() {
+    super('La tanda no existe.', 404, { code: 'GARDEN_BATCH_NOT_FOUND' });
+  }
+}
+
+/** Archivada: se consulta, pero hay que reabrirla para registrar o corregir. */
+export class GardenBatchArchivedError extends AppError {
+  constructor() {
+    super('La tanda está archivada. Reabrila para registrar o corregir.', 409, {
+      code: 'GARDEN_BATCH_ARCHIVED',
+    });
+  }
+}
+
+/** Su siembra fue anulada: la tanda ya no admite hechos nuevos. */
+export class GardenBatchWithoutSowingError extends AppError {
+  constructor() {
+    super('La siembra de esta tanda fue anulada: no admite registros nuevos.', 409, {
+      code: 'GARDEN_BATCH_WITHOUT_SOWING',
+    });
+  }
+}
+
+/** La tanda ya no es la que vio quien la modifica (concurrencia optimista). */
+export class GardenBatchChangedError extends AppError {
+  constructor() {
+    super(
+      'Otra persona cambió esta tanda mientras la tenías abierta. Revisá los datos actuales y volvé a intentar.',
+      409,
+      { code: 'GARDEN_BATCH_CHANGED' },
+    );
+  }
+}
+
+export class GardenCropRecordNotFoundError extends AppError {
+  constructor() {
+    super('El registro no existe.', 404, { code: 'GARDEN_CROP_RECORD_NOT_FOUND' });
+  }
+}
+
+/** El registro ya no es el que vio quien lo corrige (concurrencia optimista). */
+export class GardenCropRecordChangedError extends AppError {
+  constructor() {
+    super(
+      'Otra persona corrigió este registro mientras lo tenías abierto. Revisá los datos actuales y volvé a intentar.',
+      409,
+      { code: 'GARDEN_CROP_RECORD_CHANGED' },
+    );
+  }
+}
+
+export class GardenCropRecordVoidedError extends AppError {
+  constructor() {
+    super('El registro ya fue anulado.', 409, { code: 'GARDEN_CROP_RECORD_VOIDED' });
+  }
+}
+
+/** La siembra no se anula mientras la tanda tenga trasplantes vigentes. */
+export class GardenSowingHasTransplantsError extends AppError {
+  constructor(count: number) {
+    super(
+      `No se puede anular la siembra: la tanda tiene ${count} ${count === 1 ? 'trasplante vigente' : 'trasplantes vigentes'}. Anulalos primero.`,
+      409,
+      { code: 'GARDEN_SOWING_HAS_TRANSPLANTS' },
+    );
+  }
+}
+
 /** Mismo código que la desactivación con productos activos: el motivo es el mismo (tiene productos). */
 export class StockCategoryHasItemsError extends AppError {
   constructor() {

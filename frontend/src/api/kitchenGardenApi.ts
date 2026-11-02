@@ -1,6 +1,17 @@
 import { apiRequest } from './httpClient';
 import type {
   CreateGardenActivityRequest,
+  CreateGardenSowingRequest,
+  CreateGardenTransplantRequest,
+  GardenBatchMutationResponse,
+  GardenBatchResponse,
+  GardenBatchStatusFilter,
+  GardenBatchesResponse,
+  GardenCrop,
+  GardenCropRecordFilters,
+  GardenCropRecordsResponse,
+  UpdateGardenBatchRequest,
+  UpdateGardenCropRecordRequest,
   GardenActivitiesResponse,
   GardenActivity,
   GardenCandidate,
@@ -123,6 +134,106 @@ export function fetchGardenParticipantPerformance(
   to: string,
 ): Promise<GardenPerformanceResponse> {
   return apiRequest(`${BASE}/performance/participants/${participantId}?${rangeQuery(from, to)}`, {
+    authenticated: true,
+  });
+}
+
+// ── 🥕 Cultivos y 📝 Registros ────────────────────────────────────────────
+
+const query = (params: Record<string, string | number | undefined>) => {
+  const search = new URLSearchParams();
+  for (const [name, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') search.set(name, String(value));
+  }
+  const text = search.toString();
+  return text ? `?${text}` : '';
+};
+
+export function fetchGardenCrops(): Promise<{ crops: GardenCrop[] }> {
+  return apiRequest(`${BASE}/crops`, { authenticated: true });
+}
+
+export function fetchGardenBatches(params: {
+  status: GardenBatchStatusFilter;
+  cropId?: string;
+  page: number;
+  pageSize: number;
+}): Promise<GardenBatchesResponse> {
+  return apiRequest(`${BASE}/batches${query(params)}`, { authenticated: true });
+}
+
+export function fetchGardenBatch(batchId: string): Promise<GardenBatchResponse> {
+  return apiRequest(`${BASE}/batches/${batchId}`, { authenticated: true });
+}
+
+/** Tanda + siembra en una operación; `Idempotency-Key` estable por intento. */
+export function createGardenSowing(
+  body: CreateGardenSowingRequest,
+  idempotencyKey: string,
+): Promise<GardenBatchMutationResponse> {
+  return apiRequest(`${BASE}/batches`, {
+    method: 'POST',
+    body,
+    authenticated: true,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+}
+
+export function createGardenTransplant(
+  batchId: string,
+  body: CreateGardenTransplantRequest,
+  idempotencyKey: string,
+): Promise<GardenBatchMutationResponse> {
+  return apiRequest(`${BASE}/batches/${batchId}/transplants`, {
+    method: 'POST',
+    body,
+    authenticated: true,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+}
+
+export function updateGardenBatch(
+  batchId: string,
+  body: UpdateGardenBatchRequest,
+): Promise<GardenBatchMutationResponse> {
+  return apiRequest(`${BASE}/batches/${batchId}`, { method: 'PATCH', body, authenticated: true });
+}
+
+export function setGardenBatchArchived(
+  batchId: string,
+  archived: boolean,
+): Promise<GardenBatchMutationResponse> {
+  return apiRequest(`${BASE}/batches/${batchId}/${archived ? 'archive' : 'reopen'}`, {
+    method: 'POST',
+    body: {},
+    authenticated: true,
+  });
+}
+
+export function fetchGardenCropRecords(
+  filters: GardenCropRecordFilters & { page: number; pageSize: number },
+): Promise<GardenCropRecordsResponse> {
+  return apiRequest(`${BASE}/crop-records${query({ ...filters })}`, { authenticated: true });
+}
+
+export function updateGardenCropRecord(
+  recordId: string,
+  body: UpdateGardenCropRecordRequest,
+): Promise<GardenBatchMutationResponse> {
+  return apiRequest(`${BASE}/crop-records/${recordId}`, {
+    method: 'PATCH',
+    body,
+    authenticated: true,
+  });
+}
+
+export function voidGardenCropRecord(
+  recordId: string,
+  reason: string,
+): Promise<{ record: { id: string; batchId: string; voidedAt: string } }> {
+  return apiRequest(`${BASE}/crop-records/${recordId}/void`, {
+    method: 'POST',
+    body: { reason },
     authenticated: true,
   });
 }

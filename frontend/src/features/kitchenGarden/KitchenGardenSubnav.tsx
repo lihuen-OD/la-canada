@@ -2,7 +2,8 @@ import { NavLink } from 'react-router-dom';
 
 /**
  * Pestañas de 🥬 Huerta (mismo patrón `pill-nav` que Mascotas y Stock):
- * actividades, historial, Desempeño propio y participantes. `NavLink`:
+ * actividades, cultivos, registros, historial, Desempeño propio y
+ * participantes. `NavLink`:
  * navegación del router, nunca `<a href>`.
  */
 export function KitchenGardenSubnav() {
@@ -10,6 +11,12 @@ export function KitchenGardenSubnav() {
     <nav className="garden-subnav pill-nav" aria-label="Secciones de la Huerta">
       <NavLink to="/kitchen-garden" end>
         <span aria-hidden="true">🌱 </span>Actividades
+      </NavLink>
+      <NavLink to="/kitchen-garden/crops">
+        <span aria-hidden="true">🥕 </span>Cultivos
+      </NavLink>
+      <NavLink to="/kitchen-garden/records">
+        <span aria-hidden="true">📝 </span>Registros
       </NavLink>
       <NavLink to="/kitchen-garden/history">
         <span aria-hidden="true">📅 </span>Historial
