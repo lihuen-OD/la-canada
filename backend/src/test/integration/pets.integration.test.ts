@@ -412,7 +412,7 @@ describe('mascotas y registros clínicos', () => {
     ).toBe(1);
   });
 
-  it('historial filtrable y paginado, más reciente primero; solo ADMIN anula y el registro se conserva', async () => {
+  it('historial filtrable y paginado, más reciente primero; anular conserva el registro', async () => {
     const weights = await request(app)
       .get(`${api}/${petId}/records?type=WEIGHT&pageSize=1`)
       .set(as(employee));
@@ -422,7 +422,8 @@ describe('mascotas y registros clínicos', () => {
     const all = await request(app).get(`${api}/${petId}/records`).set(as(employee));
     const target = all.body.records.find((record: { type: string }) => record.type === 'VACCINE');
     const path = `${api}/${petId}/records/${target.id}/void`;
-    expect((await request(app).post(path).set(as(employee)).send({})).status).toBe(403);
+    // Doble clic del mismo ADMIN: una sola anulación (EMPLOYEE también anula:
+    // `petRecordActions.integration.test.ts`).
     const [a, b] = await Promise.all([
       request(app).post(path).set(as(admin)).send({}),
       request(app).post(path).set(as(admin)).send({}),

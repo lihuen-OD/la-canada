@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   completeTaskBodySchema,
   createTaskBodySchema,
+  lateCompletionBodySchema,
   listTasksQuerySchema,
   revertTaskBodySchema,
   taskHistoryQuerySchema,
@@ -102,5 +103,60 @@ describe('taskSchemas', () => {
     expect(listTasksQuerySchema.parse({}).status).toBe('active');
     expect(listTasksQuerySchema.safeParse({ status: 'deleted' }).success).toBe(false);
     expect(taskHistoryQuerySchema.safeParse({ week: '2026/09/21' }).success).toBe(false);
+  });
+
+  describe('lateCompletionBodySchema (carga olvidada)', () => {
+    it.each(['2026-10-29', '2026-10-26', '2026-10-Q1', '2026-10-Q2', '2026-B5', '2026-A'])(
+      'acepta el período %s con su fecha real',
+      (periodKey) => {
+        expect(
+          lateCompletionBodySchema.safeParse({ periodKey, performedOn: '2026-10-29' }).success,
+        ).toBe(true);
+      },
+    );
+
+    it.each(['URGENT', 'ONE_TIME', '2026-10', '2026-10-Q3', '2026-B7', '29/10/2026', ''])(
+      'rechaza el período %s',
+      (periodKey) => {
+        expect(
+          lateCompletionBodySchema.safeParse({ periodKey, performedOn: '2026-10-29' }).success,
+        ).toBe(false);
+      },
+    );
+
+    it.each(['2026-02-30', '29/10/2026', '2026-10-29T10:00', ''])(
+      'rechaza la fecha %s (sin hora y real)',
+      (performedOn) => {
+        expect(
+          lateCompletionBodySchema.safeParse({ periodKey: '2026-10-29', performedOn }).success,
+        ).toBe(false);
+      },
+    );
+
+    it.each([
+      ['assignedEmployeeId', EMPLOYEE_ID],
+      ['frequency', 'DAILY'],
+      ['status', 'pending'],
+      ['completedAt', '2026-10-29T10:00:00Z'],
+      ['completedByEmployeeId', EMPLOYEE_ID],
+    ])('no acepta %s del cliente (strict)', (field, value) => {
+      expect(
+        lateCompletionBodySchema.safeParse({
+          periodKey: '2026-10-29',
+          performedOn: '2026-10-29',
+          [field]: value,
+        }).success,
+      ).toBe(false);
+    });
+
+    it('employeeId solo como UUID', () => {
+      expect(
+        lateCompletionBodySchema.safeParse({
+          periodKey: '2026-10-29',
+          performedOn: '2026-10-29',
+          employeeId: 'coke',
+        }).success,
+      ).toBe(false);
+    });
   });
 });

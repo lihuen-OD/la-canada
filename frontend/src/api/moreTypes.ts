@@ -21,14 +21,69 @@ interface Page {
 }
 
 // 📝 Novedades
-export interface NewsItem {
+/** Acciones que el BACKEND autoriza a quien mira (nunca se deducen en el cliente). */
+export interface NewsMessagePermissions {
+  canEdit: boolean;
+  canDelete: boolean;
+}
+export interface NewsLastReply {
+  createdAt: string;
+  author: { displayName: string };
+}
+/** Contador y última respuesta vigentes de una novedad. */
+export interface NewsConversationStats {
+  /** Solo respuestas NO eliminadas. */
+  replyCount: number;
+  /** Hay al menos una respuesta, aunque estén todas eliminadas. */
+  hasConversation: boolean;
+  lastReply: NewsLastReply | null;
+}
+export interface NewsItem extends NewsConversationStats {
   id: string;
-  text: string;
+  /** `null` = eliminada: la API nunca devuelve su texto. */
+  text: string | null;
   createdAt: string;
   employee: PersonRef;
+  version: number;
+  deleted: boolean;
+  editedAt: string | null;
+  permissions: NewsMessagePermissions & { canReply: boolean };
 }
 export interface NewsListResponse extends Page {
   news: NewsItem[];
+}
+export interface NewsReplyQuote {
+  id: string;
+  /** `null` = el mensaje citado fue eliminado. */
+  text: string | null;
+  author: { displayName: string };
+  deleted: boolean;
+  editedAt: string | null;
+}
+export interface NewsReply {
+  id: string;
+  /** `null` = eliminada (queda «Mensaje eliminado» en su lugar). */
+  text: string | null;
+  createdAt: string;
+  author: { displayName: string };
+  version: number;
+  deleted: boolean;
+  editedAt: string | null;
+  quote: NewsReplyQuote | null;
+  permissions: NewsMessagePermissions;
+}
+export interface NewsReplyCursor {
+  createdAt: string;
+  id: string;
+}
+export interface NewsRepliesPage {
+  replies: NewsReply[];
+  hasOlder: boolean;
+  nextCursor: NewsReplyCursor | null;
+}
+export interface CreateNewsReplyRequest {
+  text: string;
+  quotedReplyId?: string;
 }
 
 // 📅 Eventos
@@ -103,10 +158,33 @@ export interface GalleryPhoto {
   title: string;
   category: GalleryCategory;
   createdAt: string;
+  /** Carpeta de la foto; `null` = «Sin carpeta». El nombre sale del listado de carpetas. */
+  folderId: string | null;
   employee: PersonRef | null;
 }
 export interface PhotosListResponse extends Page {
   photos: GalleryPhoto[];
+  photoStorage: 'configured' | 'unconfigured';
+}
+/**
+ * Qué parte de la galería se mira: `all` (Todas las fotos), `none` (Sin
+ * carpeta) o el id de una carpeta. Va en la clave de caché y en la ruta.
+ */
+export type PhotoScope = 'all' | 'none' | (string & {});
+/** Carpeta de Fotos con las acciones que el backend autoriza a la sesión. */
+export interface PhotoFolder {
+  id: string;
+  name: string;
+  /** Versión vista: renombrar o eliminar con otra responde 409 sin pisar. */
+  version: number;
+  createdAt: string;
+  photoCount: number;
+  permissions: { canRename: boolean; canDelete: boolean };
+}
+export interface PhotoFoldersResponse {
+  folders: PhotoFolder[];
+  unfiled: { photoCount: number };
+  all: { photoCount: number };
   photoStorage: 'configured' | 'unconfigured';
 }
 

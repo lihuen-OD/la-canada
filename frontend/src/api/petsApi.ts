@@ -69,17 +69,25 @@ export async function fetchPetDue(
   return apiRequest<PetDueResponse>(`/pets/due?${search.toString()}`, { authenticated: true });
 }
 
-/** Completar o corregir la próxima fecha de un registro (solo ADMIN). */
+/**
+ * Completar o corregir la próxima fecha de un registro (ADMIN y EMPLOYEE).
+ * `expectedNextDueDate`: la fecha que mostraba la pantalla (`null` = sin
+ * fecha). Si otra persona la cambió, el backend responde 409 sin pisarla.
+ */
 export async function updatePetRecordNextDue(
   petId: string,
   recordId: string,
   nextDueDate: string,
-): Promise<{ record: PetRecord }> {
-  return apiRequest<{ record: PetRecord }>(`/pets/${petId}/records/${recordId}/next-due`, {
-    method: 'PATCH',
-    body: { nextDueDate },
-    authenticated: true,
-  });
+  expectedNextDueDate: string | null,
+): Promise<{ record: PetRecord; changed: boolean }> {
+  return apiRequest<{ record: PetRecord; changed: boolean }>(
+    `/pets/${petId}/records/${recordId}/next-due`,
+    {
+      method: 'PATCH',
+      body: { nextDueDate, expectedNextDueDate },
+      authenticated: true,
+    },
+  );
 }
 
 /** Imagen servida por el backend (proxy autenticado): nunca una URL del bucket. */

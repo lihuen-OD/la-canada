@@ -5,10 +5,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { fetchPerformance, fetchEmployeePerformance, useAuth } = vi.hoisted(() => ({
   fetchPerformance: vi.fn(),
+  // El detalle de Tareas pide páginas (`fetchEmployeePerformancePage`); estas
+  // pruebas lo simulan con una sola página, sin `occurrencesPage`.
   fetchEmployeePerformance: vi.fn(),
   useAuth: vi.fn(),
 }));
-vi.mock('../../api/performanceApi', () => ({ fetchPerformance, fetchEmployeePerformance }));
+vi.mock('../../api/performanceApi', () => ({
+  fetchPerformance,
+  fetchEmployeePerformance: vi.fn(),
+  fetchEmployeePerformancePage: fetchEmployeePerformance,
+}));
 vi.mock('../../auth/useAuth', () => ({ useAuth }));
 import { PerformanceScreen } from './PerformanceScreen';
 
@@ -202,7 +208,8 @@ describe('PerformanceScreen', () => {
     await user.click(screen.getByRole('button', { name: /Persona sintética/ }));
     expect(await screen.findAllByText('✅ Propia')).toHaveLength(2);
     expect(screen.getByText('🤝 Le cubrieron')).toBeInTheDocument();
-    expect(screen.getAllByText('Sin completar')).toHaveLength(2);
+    // Filas del detalle (el chip de filtro «Sin completar» no cuenta).
+    expect(screen.getAllByText('Sin completar', { selector: 'li span' })).toHaveLength(2);
     expect(screen.getByText('🤝 Cubrió a otros')).toBeInTheDocument();
     const detail = screen
       .getByRole('heading', { name: 'Detalle' })

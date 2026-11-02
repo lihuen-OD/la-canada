@@ -83,7 +83,9 @@ export async function getDashboard(actor: TaskActor, now = new Date()) {
 
   const [taskResult, performance, stockRows, eggAggregate, events, newsRows, petDue] =
     await Promise.all([
-      listTasks(actor, { status: 'active' }, now),
+      // El KPI «Tareas completadas» sigue contando las urgentes completadas
+      // (que el listado de Tareas oculta): la métrica no cambia.
+      listTasks(actor, { status: 'active' }, now, { keepCompletedUrgent: true }),
       dashboardPerformance(actor, now),
       prisma.stockItem.findMany({
         where: { active: true },
@@ -95,7 +97,10 @@ export async function getDashboard(actor: TaskActor, now = new Date()) {
         _sum: { goodEggsCount: true },
       }),
       listUpcomingEvents(actor, 3, now),
+      // Novedades eliminadas fuera ANTES del límite: nunca dejan huecos ni
+      // exponen su texto. Las respuestas no generan tarjetas.
       prisma.newsReport.findMany({
+        where: { deletedAt: null },
         select: newsSelect,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: 3,

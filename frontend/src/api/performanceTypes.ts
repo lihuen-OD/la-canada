@@ -36,6 +36,45 @@ export interface PerformanceOccurrence {
   completedAt: string | null;
   /** Solo una «Una vez» con fecha: la de la planificación que usó el cálculo. */
   scheduledDate?: string;
+  /**
+   * Día con el que se ordena y agrupa (✅ Tareas): la fecha de una diaria, el
+   * primer día del período de una recurrente más larga (solo para ubicarla:
+   * se muestra el período completo), la fecha para realizar de una «Una vez»
+   * o `null` sin fecha (al final).
+   */
+  groupDate?: string | null;
+  /** Período completo de una recurrente (`YYYY-MM-DD`); `null` en «Una vez» y urgentes. */
+  period?: { start: string; end: string } | null;
+  /**
+   * Solo ✅ Tareas, decidido por el backend: la obligación pendiente se puede
+   * marcar ahora como realizada (carga olvidada), con las fechas admitidas
+   * (`YYYY-MM-DD`). Ausente: no se ofrece la acción.
+   */
+  lateCompletion?: LateCompletionBounds;
+  /** «Una vez» o urgente pendiente y activa: se completa con su flujo normal, en Tareas. */
+  completeInTasks?: true;
+  /**
+   * Realizada o cubierta: su ejecución vigente y si quien mira la puede
+   * deshacer (la misma regla que aplica el backend al revertir). Ausente en un
+   * backend anterior: solo se ofrece deshacer una carga olvidada.
+   */
+  execution?: { id: string; canRevert: boolean };
+  /** La ejecución fue una carga olvidada: fecha real, momento del registro y si se puede deshacer. */
+  lateRegistration?: {
+    executionId: string;
+    performedOn: string;
+    recordedAt: string;
+    canRevert: boolean;
+  };
+}
+
+export interface LateCompletionBounds {
+  periodStart: string;
+  periodEnd: string;
+  /** Primer día admitido (inicio del período o desde que la tarea tuvo esa frecuencia). */
+  earliest: string;
+  /** Último día admitido (fin del período u hoy: nunca futuro). */
+  latest: string;
 }
 
 export interface PerformanceResponse {
@@ -60,4 +99,16 @@ export interface PerformanceResponse {
     percentage: number | null;
   }[];
   occurrences?: PerformanceOccurrence[];
+  /** Solo con filtros o página: total que pasa los filtros y cursor de la siguiente página. */
+  occurrencesPage?: { total: number; limit: number; nextCursor: string | null };
+}
+
+/** Estado del detalle visto desde la persona: el backend valida y filtra. */
+export type DetailStatusFilter = 'pending' | 'personal' | 'covered' | 'coverageGiven';
+
+/** Filtros del detalle (✅ Tareas → Desempeño → Detalle); ausente = todas. */
+export interface PerformanceDetailFilters {
+  date?: string;
+  frequency?: TaskFrequency;
+  status?: DetailStatusFilter;
 }

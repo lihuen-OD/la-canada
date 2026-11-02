@@ -17,9 +17,11 @@ interface NextDueDialogProps {
 }
 
 /**
- * Completar o corregir la próxima fecha (solo ADMIN): acción acotada y
- * auditada que no toca el resto del registro. El backend valida que sea
- * posterior a la atención.
+ * Completar o corregir la próxima fecha (ADMIN y EMPLOYEE, sobre registros de
+ * cualquier autor): acción acotada y auditada que no toca el resto del
+ * registro. El backend valida que sea posterior a la atención y, con la fecha
+ * que se mostró (`current`), que nadie la haya cambiado mientras tanto (409).
+ * Guardar la misma fecha no envía nada.
  */
 export function NextDueDialog({
   petId,
@@ -58,14 +60,21 @@ export function NextDueDialog({
       onCancel={onClose}
       onConfirm={async () => {
         if (!value) throw new ApiError(400, 'Elegí la fecha.', 'VALIDATION_ERROR');
+        if (value === current) {
+          onClose();
+          return;
+        }
         try {
-          await updatePetRecordNextDue(petId, record.id, value);
+          await updatePetRecordNextDue(petId, record.id, value, current);
         } catch (caught) {
           if (isSessionExpired(caught)) {
             onClose();
             onSessionExpired();
             return;
           }
+          // Otra persona la corrigió, la anuló o registró la atención: se
+          // actualiza lo que se ve detrás del diálogo, sin reenviar nada.
+          if (caught instanceof ApiError && caught.status === 409) afterRecordChange(petId);
           throw humanError(caught);
         }
         afterRecordChange(petId);

@@ -359,17 +359,10 @@ describe('cumplimiento explícito, idempotencia y concurrencia', () => {
       where: { fulfillsRecordId: rabies, voidedAt: null },
       select: { id: true },
     });
-    expect(
-      (
-        await request(app)
-          .post(`/api/v1/pets/${petB}/records/${fulfiller.id}/void`)
-          .set(as(employee))
-          .send({})
-      ).status,
-    ).toBe(403);
+    // ADMIN y EMPLOYEE anulan (ampliación del 2026-11-02).
     const voided = await request(app)
       .post(`/api/v1/pets/${petB}/records/${fulfiller.id}/void`)
-      .set(as(admin))
+      .set(as(employee))
       .send({});
     expect(voided.status).toBe(200);
     const reopened = await due(admin, { petId: petB, status: 'OVERDUE' });
@@ -396,30 +389,31 @@ describe('cumplimiento explícito, idempotencia y concurrencia', () => {
 });
 
 describe('corrección de fecha, mascotas inactivas y permisos', () => {
-  it('ADMIN completa la fecha de un registro anterior (auditado); EMPLOYEE no puede', async () => {
+  it('completar la fecha de un registro anterior (ADMIN y EMPLOYEE, auditado)', async () => {
     const legacy = await record(petA, 'completar-despues', day(-20));
-    const denied = await request(app)
-      .patch(`/api/v1/pets/${petA}/records/${legacy.id}/next-due`)
-      .set(as(employee))
-      .send({ nextDueDate: day(3) });
-    expect(denied.status).toBe(403);
+    const path = `/api/v1/pets/${petA}/records/${legacy.id}/next-due`;
     const ok = await request(app)
-      .patch(`/api/v1/pets/${petA}/records/${legacy.id}/next-due`)
-      .set(as(admin))
-      .send({ nextDueDate: day(3) });
+      .patch(path)
+      .set(as(employee))
+      .send({ nextDueDate: day(3), expectedNextDueDate: null });
     expect(ok.status).toBe(200);
     expect(ok.body.record.nextDue).toMatchObject({ status: 'UPCOMING', daysUntil: 3 });
     const audit = await prisma.auditLog.findFirstOrThrow({
       where: { entityId: legacy.id, action: 'pet.record_next_due_updated' },
     });
-    expect(audit.actorUserId).toBe(admin.userId);
+    expect(audit.actorUserId).toBe(employee.userId);
     expect(audit.newState).toEqual({ nextDueDate: day(3) });
     const before = await prisma.animalMedicalRecord.findUniqueOrThrow({ where: { id: legacy.id } });
     expect(before.description).toBe(`${RUN} completar-despues`);
-    const invalid = await request(app)
-      .patch(`/api/v1/pets/${petA}/records/${legacy.id}/next-due`)
+    const corrected = await request(app)
+      .patch(path)
       .set(as(admin))
-      .send({ nextDueDate: day(-20) });
+      .send({ nextDueDate: day(5), expectedNextDueDate: day(3) });
+    expect(corrected.status).toBe(200);
+    const invalid = await request(app)
+      .patch(path)
+      .set(as(admin))
+      .send({ nextDueDate: day(-20), expectedNextDueDate: day(5) });
     expect(invalid.status).toBe(400);
   });
 

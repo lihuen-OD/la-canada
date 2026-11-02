@@ -16,12 +16,27 @@ import {
   compareLocalDates,
   formatLocalDate,
   isBimesterStart,
+  computePeriodKey,
   parseLocalDate,
   semiMonthlyPeriodKey,
   startOfLocalDay,
   toLocalDate,
   type LocalDate,
 } from '../lib/businessTime';
+import {
+  canRevertExecution,
+  lateCompletionBounds,
+  type LateCompletionBounds,
+} from '../tasks/completionRules';
+import {
+  DETAIL_PAGE_SIZE,
+  decodeCursor,
+  detailPlacement,
+  detailStatusOf,
+  matchesFilters,
+  pageOf,
+  type DetailFilters,
+} from './performanceDetail';
 import { scheduledDateText } from '../tasks/taskSchedule';
 import type { TaskActor } from '../tasks/tasksService';
 import {
@@ -30,6 +45,7 @@ import {
   computeMetrics,
   occurrenceStatus,
   percentage,
+  type Occurrence,
 } from './performanceCalculator';
 
 /** Únicos rangos públicos de Desempeño (chips "7 días", "14 días", "30 días"). */
@@ -87,41 +103,36 @@ export function calendarKeysInRange(from: LocalDate, to: LocalDate): string[] {
 
 const employeeSelect = { id: true, displayName: true, role: true, colorHex: true } as const;
 
-export async function getPerformance(
-  actor: TaskActor,
-  query: { from: string; to: string },
-  requestedEmployeeId?: string,
-  now = new Date(),
+/**
+ * Ventana de «Marcar como realizada» (carga olvidada): el rango público más
+ * largo de Desempeño (30 días) hasta hoy, en `BUSINESS_TIME_ZONE`. Es lo que
+ * el detalle puede mostrar; no amplía los rangos.
+ */
+export function lateCompletionWindow(now: Date) {
+  const today = toLocalDate(now, config.businessTimeZone);
+  return { from: addDays(today, -(MAX_RANGE_DAYS - 1)), to: today, today };
+}
+
+/**
+ * ÚNICA lectura de las obligaciones de Tareas: la planificación que se
+ * superpone con el rango y las ejecuciones vigentes de sus períodos. La usan
+ * Desempeño (todas las tareas) y la carga olvidada (una tarea, `taskId`), así
+ * que las dos validan exactamente las mismas obligaciones.
+ */
+export async function loadObligationInputs(
+  range: { from: LocalDate; to: LocalDate; rangeStart: Date; rangeEnd: Date },
+  taskId?: string,
 ) {
-  if (actor.role === 'EMPLOYEE' && !actor.employeeId) throw new EmployeeLinkRequiredError();
-  if (actor.role === 'EMPLOYEE' && requestedEmployeeId && requestedEmployeeId !== actor.employeeId)
-    throw new ForbiddenError();
-  const scopedEmployeeId = actor.role === 'EMPLOYEE' ? actor.employeeId! : requestedEmployeeId;
-  const { from, to, today } = rangeOrThrow(query.from, query.to, now);
   const timeZone = config.businessTimeZone;
-  const rangeStart = startOfLocalDay(from, timeZone);
-  const rangeEnd = startOfLocalDay(addDays(to, 1), timeZone);
-
-  if (scopedEmployeeId) {
-    const exists = await prisma.employee.findUnique({
-      where: { id: scopedEmployeeId },
-      select: { id: true },
-    });
-    if (!exists) throw new NotFoundError('Empleado no encontrado.');
-  }
-
+  const { from, to, rangeStart, rangeEnd } = range;
+  const ofTask = taskId ? { taskId } : {};
   const planOverlapsRange = {
     validFrom: { lt: rangeEnd },
     OR: [{ validTo: null }, { validTo: { gte: rangeStart } }],
   };
-  const [employees, plans, executions, urgentPending] = await Promise.all([
-    prisma.employee.findMany({
-      where: {},
-      select: employeeSelect,
-      orderBy: { displayName: 'asc' },
-    }),
+  const [plans, executions] = await Promise.all([
     prisma.taskPlanningInterval.findMany({
-      where: planOverlapsRange,
+      where: { ...planOverlapsRange, ...ofTask },
       select: {
         id: true,
         taskId: true,
@@ -141,6 +152,7 @@ export async function getPerformance(
     prisma.taskExecution.findMany({
       where: {
         revertedAt: null,
+        ...ofTask,
         OR: [
           { periodKey: { gte: formatLocalDate(from), lte: formatLocalDate(to) } },
           {
@@ -161,14 +173,8 @@ export async function getPerformance(
         assignedEmployeeId: true,
         completedByEmployeeId: true,
         completedAt: true,
-      },
-    }),
-    prisma.task.count({
-      where: {
-        active: true,
-        frequency: 'URGENT',
-        ...(scopedEmployeeId ? { employeeId: scopedEmployeeId } : {}),
-        executions: { none: { revertedAt: null } },
+        performedOn: true,
+        recordedByUserId: true,
       },
     }),
   ]);
@@ -191,10 +197,146 @@ export async function getPerformance(
     ): execution is typeof execution & { completedAt: Date; completedByEmployeeId: string } =>
       execution.completedAt !== null && execution.completedByEmployeeId !== null,
   );
+  return { planRows, executions: completedExecutions };
+}
+
+type ObligationInputs = Awaited<ReturnType<typeof loadObligationInputs>>;
+
+/**
+ * Datos de acción del detalle de Tareas → Desempeño, calculados acá (el
+ * frontend no decide nada): `lateCompletion` = la obligación pendiente se
+ * puede registrar ahora como realizada, con sus fechas admitidas;
+ * `completeInTasks` = una «Una vez» o urgente pendiente se completa con su
+ * flujo normal, en Tareas; `execution` = la ejecución vigente de una
+ * realizada o cubierta y si quien mira la puede deshacer (misma regla que la
+ * reversión); `lateRegistration` = además, fue una carga olvidada (fecha
+ * real y momento del registro).
+ */
+interface DetailActions {
+  lateCompletion?: LateCompletionBounds;
+  completeInTasks?: true;
+  execution?: { id: string; canRevert: boolean };
+  lateRegistration?: {
+    executionId: string;
+    performedOn: string;
+    recordedAt: string;
+    canRevert: boolean;
+  };
+}
+
+function detailActions(inputs: ObligationInputs, actor: TaskActor, now: Date) {
+  const timeZone = config.businessTimeZone;
+  const { from: windowFrom, today } = lateCompletionWindow(now);
+  const executionByKey = new Map(
+    inputs.executions.map((row) => [`${row.taskId}:${row.periodKey}`, row]),
+  );
+  return (item: Occurrence): DetailActions => {
+    const execution = executionByKey.get(`${item.taskId}:${item.periodKey}`);
+    const plans = inputs.planRows.filter((plan) => plan.taskId === item.taskId);
+    if (item.completed) {
+      if (!execution) return {};
+      // La misma regla que aplica `revertTaskCompletion`, con la frecuencia
+      // actual de la tarea (su última versión de planificación).
+      const currentFrequency = plans.at(-1)?.frequency ?? item.frequency;
+      const canRevert = canRevertExecution(
+        actor,
+        { ...execution, completedByEmployee: { id: execution.completedByEmployeeId } },
+        computePeriodKey(currentFrequency, now, timeZone),
+        today,
+        timeZone,
+      );
+      return {
+        execution: { id: execution.id, canRevert },
+        ...(execution.performedOn
+          ? {
+              lateRegistration: {
+                executionId: execution.id,
+                performedOn: scheduledDateText(execution.performedOn)!,
+                recordedAt: execution.completedAt.toISOString(),
+                canRevert,
+              },
+            }
+          : {}),
+      };
+    }
+    if (item.frequency === 'URGENT' || item.frequency === 'ONE_TIME') {
+      const active = plans.some((plan) => plan.validTo === null);
+      const canComplete = actor.role === 'ADMIN' || actor.employeeId !== null;
+      return active && !execution && canComplete ? { completeInTasks: true } : {};
+    }
+    const mayRegister = actor.role === 'ADMIN' || item.assignedEmployeeId === actor.employeeId;
+    const bounds = mayRegister
+      ? lateCompletionBounds({ occurrence: item, plans, windowFrom, today, now, timeZone })
+      : null;
+    return bounds ? { lateCompletion: bounds } : {};
+  };
+}
+
+/**
+ * Filtros y página del detalle de una persona (Tareas → Desempeño →
+ * Detalle). Opcional: sin ellos la respuesta es la de siempre (todas las
+ * obligaciones, en el orden del cálculo), así que los clientes anteriores,
+ * Inicio y 🥬 Huerta (que tiene su propio servicio) no cambian.
+ */
+export interface PerformanceDetailQuery extends DetailFilters {
+  cursor?: string;
+  limit?: number;
+}
+
+export async function getPerformance(
+  actor: TaskActor,
+  query: { from: string; to: string },
+  requestedEmployeeId?: string,
+  now = new Date(),
+  detail?: PerformanceDetailQuery,
+) {
+  if (actor.role === 'EMPLOYEE' && !actor.employeeId) throw new EmployeeLinkRequiredError();
+  if (actor.role === 'EMPLOYEE' && requestedEmployeeId && requestedEmployeeId !== actor.employeeId)
+    throw new ForbiddenError();
+  const scopedEmployeeId = actor.role === 'EMPLOYEE' ? actor.employeeId! : requestedEmployeeId;
+  const { from, to, today } = rangeOrThrow(query.from, query.to, now);
+  // Se valida antes de leer la base: un día fuera del rango o un cursor
+  // ajeno nunca generan obligaciones ni páginas.
+  if (detail?.date && (detail.date < formatLocalDate(from) || detail.date > formatLocalDate(to))) {
+    throw new ValidationError('El día elegido está fuera del período.');
+  }
+  const cursor = detail?.cursor ? decodeCursor(detail.cursor) : null;
+  if (detail?.cursor && !cursor) {
+    throw new ValidationError('No pudimos continuar la lista. Actualizá el detalle.');
+  }
+  const timeZone = config.businessTimeZone;
+  const rangeStart = startOfLocalDay(from, timeZone);
+  const rangeEnd = startOfLocalDay(addDays(to, 1), timeZone);
+
+  if (scopedEmployeeId) {
+    const exists = await prisma.employee.findUnique({
+      where: { id: scopedEmployeeId },
+      select: { id: true },
+    });
+    if (!exists) throw new NotFoundError('Empleado no encontrado.');
+  }
+
+  const [employees, inputs, urgentPending] = await Promise.all([
+    prisma.employee.findMany({
+      where: {},
+      select: employeeSelect,
+      orderBy: { displayName: 'asc' },
+    }),
+    loadObligationInputs({ from, to, rangeStart, rangeEnd }),
+    prisma.task.count({
+      where: {
+        active: true,
+        frequency: 'URGENT',
+        ...(scopedEmployeeId ? { employeeId: scopedEmployeeId } : {}),
+        executions: { none: { revertedAt: null } },
+      },
+    }),
+  ]);
+
   const occurrences = [
     ...buildRecurringOccurrences({
-      plans: planRows,
-      executions: completedExecutions,
+      plans: inputs.planRows,
+      executions: inputs.executions,
       from,
       to,
       today,
@@ -202,8 +344,8 @@ export async function getPerformance(
       timeZone,
     }),
     ...buildSingleOccurrences({
-      plans: planRows,
-      executions: completedExecutions,
+      plans: inputs.planRows,
+      executions: inputs.executions,
       rangeStart,
       rangeEnd,
       now,
@@ -258,6 +400,49 @@ export async function getPerformance(
       };
     });
 
+  const actionsOf = detailActions(inputs, actor, now);
+  const rowOf = (item: Occurrence) => ({
+    ...item,
+    status: occurrenceStatus(item),
+    assignedEmployee:
+      actor.role === 'ADMIN' || item.assignedEmployeeId === scopedEmployeeId
+        ? (employees.find((employee) => employee.id === item.assignedEmployeeId) ?? null)
+        : null,
+    completedByEmployee:
+      actor.role === 'ADMIN' || item.completedByEmployeeId === scopedEmployeeId
+        ? (employees.find((employee) => employee.id === item.completedByEmployeeId) ?? null)
+        : null,
+    completedAt: item.completedAt?.toISOString() ?? null,
+    ...detailPlacement(item),
+    ...actionsOf(item),
+  });
+  /**
+   * Obligaciones del detalle. Sin filtros ni página: todas, en el orden del
+   * cálculo (contrato de siempre). Con ellos: las de la persona que pasan los
+   * filtros, más recientes primero, y solo la página pedida; las métricas de
+   * arriba siguen siendo las de TODO el rango.
+   */
+  const occurrencesOf = () => {
+    if (!(requestedEmployeeId || actor.role === 'EMPLOYEE')) return { occurrences: undefined };
+    if (!detail || !scopedEmployeeId) return { occurrences: visibleOccurrences.map(rowOf) };
+    const rows = visibleOccurrences
+      .map((item) => ({
+        item,
+        description: item.description,
+        taskId: item.taskId,
+        periodKey: item.periodKey,
+        frequency: item.frequency,
+        status: detailStatusOf(item, scopedEmployeeId),
+        ...detailPlacement(item),
+      }))
+      .filter((row) => matchesFilters(row, detail));
+    const limit = detail.limit ?? DETAIL_PAGE_SIZE;
+    const page = pageOf(rows, cursor, limit);
+    return {
+      occurrences: page.items.map((row) => rowOf(row.item)),
+      occurrencesPage: { total: page.total, limit, nextCursor: page.nextCursor },
+    };
+  };
   return {
     // `today` y `generatedAt`: fecha de negocio y hora del servidor, para que
     // el reloj del día del frontend no dé por empezado un día que el backend
@@ -275,21 +460,6 @@ export async function getPerformance(
     special,
     employees: employeeMetrics,
     trend,
-    occurrences:
-      requestedEmployeeId || actor.role === 'EMPLOYEE'
-        ? visibleOccurrences.map((item) => ({
-            ...item,
-            status: occurrenceStatus(item),
-            assignedEmployee:
-              actor.role === 'ADMIN' || item.assignedEmployeeId === scopedEmployeeId
-                ? (employees.find((employee) => employee.id === item.assignedEmployeeId) ?? null)
-                : null,
-            completedByEmployee:
-              actor.role === 'ADMIN' || item.completedByEmployeeId === scopedEmployeeId
-                ? (employees.find((employee) => employee.id === item.completedByEmployeeId) ?? null)
-                : null,
-            completedAt: item.completedAt?.toISOString() ?? null,
-          }))
-        : undefined,
+    ...occurrencesOf(),
   };
 }

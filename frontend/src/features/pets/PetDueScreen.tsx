@@ -30,8 +30,7 @@ const PET_OPTIONS_PAGE_SIZE = 50;
  * `BUSINESS_TIME_ZONE`; al cambiar el día se revalida solo (sin sondeo).
  */
 export function PetDueScreen() {
-  const { user, logout } = useAuth();
-  const isAdmin = user?.role === 'ADMIN';
+  const { logout } = useAuth();
   const navigate = useNavigate();
   const { userId, enabled } = useSessionScope();
   const petFieldId = useId();
@@ -191,7 +190,7 @@ export function PetDueScreen() {
                       : () => navigate(`/pets/${item.pet.id}?cumplir=${item.record.id}`)
                   }
                   onEditDate={
-                    isAdmin && item.nextDue.status !== 'FULFILLED'
+                    item.nextDue.status !== 'FULFILLED'
                       ? () =>
                           setEditing({
                             petId: item.pet.id,

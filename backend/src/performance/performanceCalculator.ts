@@ -11,6 +11,7 @@ import {
   isBimesterStart,
   nextBimesterStart,
   nextSemiMonthStart,
+  parseLocalDate,
   semiMonthlyPeriodKey,
   startOfLocalDay,
   startOfWeek,
@@ -122,6 +123,71 @@ function periodKeyAt(frequency: RecurringFrequency, day: LocalDate): string {
   return formatLocalDate(day);
 }
 
+/** Primer día del período de `periodKey`, sin validar que realmente empiece un período ese día. */
+function periodKeyStart(frequency: RecurringFrequency, periodKey: string): LocalDate | null {
+  const number = (value: string | undefined) => Number(value);
+  if (frequency === 'SEMI_MONTHLY') {
+    const match = /^(\d{4})-(\d{2})-Q([12])$/.exec(periodKey);
+    if (!match) return null;
+    const day = match[3] === '1' ? 1 : SECOND_HALF_FIRST_DAY;
+    return parseLocalDate(`${match[1]}-${match[2]}-${String(day).padStart(2, '0')}`);
+  }
+  if (frequency === 'BIMONTHLY') {
+    const match = /^(\d{4})-B([1-6])$/.exec(periodKey);
+    return match ? { year: number(match[1]), month: number(match[2]) * 2 - 1, day: 1 } : null;
+  }
+  if (frequency === 'ANNUAL') {
+    const match = /^(\d{4})-A$/.exec(periodKey);
+    return match ? { year: number(match[1]), month: 1, day: 1 } : null;
+  }
+  return parseLocalDate(periodKey);
+}
+
+/**
+ * Primer y último día del período `periodKey` de una recurrente: las mismas
+ * claves que genera `buildRecurringOccurrences` (una semanal que no empieza en
+ * lunes, una mensual que no empieza el 1, etc. no son claves válidas → `null`).
+ * URGENT y ONE_TIME no tienen período → `null`.
+ */
+export function periodBounds(
+  frequency: TaskFrequency,
+  periodKey: string,
+): { start: LocalDate; end: LocalDate } | null {
+  if (!recurring(frequency)) return null;
+  const start = periodKeyStart(frequency, periodKey);
+  if (!start || !startsPeriod(frequency, start) || periodKeyAt(frequency, start) !== periodKey) {
+    return null;
+  }
+  return { start, end: addDays(nextPeriodStart(frequency, start), -1) };
+}
+
+/**
+ * Último instante que decide la planificación de un período (el mismo corte
+ * que `buildRecurringOccurrences`): `now` si el período está en curso, o el
+ * primer instante del período siguiente si ya cerró.
+ */
+export function periodCutoff(
+  frequency: TaskFrequency,
+  start: LocalDate,
+  today: LocalDate,
+  now: Date,
+  timeZone: string,
+): Date | null {
+  return recurring(frequency) ? cutoffOf(frequency, start, today, now, timeZone) : null;
+}
+
+function cutoffOf(
+  frequency: RecurringFrequency,
+  start: LocalDate,
+  today: LocalDate,
+  now: Date,
+  timeZone: string,
+): Date {
+  const next = nextPeriodStart(frequency, start);
+  const current = compareLocalDates(start, today) <= 0 && compareLocalDates(today, next) < 0;
+  return current ? now : startOfLocalDay(next, timeZone);
+}
+
 function periodStarts(from: LocalDate, to: LocalDate): LocalDate[] {
   const dates: LocalDate[] = [];
   for (let day = from; compareLocalDates(day, to) <= 0; day = addDays(day, 1)) dates.push(day);
@@ -170,10 +236,7 @@ export function buildRecurringOccurrences(input: {
       for (const frequency of RECURRING_FREQUENCIES) {
         if (!startsPeriod(frequency, day)) continue;
 
-        const next = nextPeriodStart(frequency, day);
-        const current =
-          compareLocalDates(day, input.today) <= 0 && compareLocalDates(input.today, next) < 0;
-        const cutoff = current ? input.now : startOfLocalDay(next, input.timeZone);
+        const cutoff = cutoffOf(frequency, day, input.today, input.now, input.timeZone);
         if (cutoff.getTime() > input.now.getTime()) continue;
 
         const candidates = rows.filter(

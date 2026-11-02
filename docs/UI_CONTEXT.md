@@ -259,6 +259,9 @@ Desempeño se integra mediante navegación secundaria en chips `📋 Tareas | �
 - Casilla cuadrada del prototipo (`.tck`, 22 px visibles dentro de 44 px táctiles); ✏️/✕ del ADMIN como botones de icono a la derecha.
 - Frecuencia y responsable como metadatos secundarios.
 - Historial semanal separado de la operación actual.
+- Urgentes y «Una vez» completadas salen del listado (se consultan en el historial y en Desempeño); con «Urgentes» y ninguna pendiente, el vacío «No hay urgentes pendientes.».
+- Desempeño → Detalle (solo Tareas): cada fila conserva su rótulo de estado a la derecha y, debajo, su acción si el backend la habilita — «Marcar realizada» (botón secundario chico), «Completar en Tareas» (enlace fantasma) o «Deshacer» (fantasma; para el ADMIN abre la corrección con motivo). En pantallas angostas la acción baja a su línea sin desbordar. El diálogo «✅ Marcar como realizada» usa el modal de siempre (hoja inferior en móvil): diaria = una pregunta de confirmación; períodos largos = «Período» como rango y «Fecha en que la realizaste» vacía con el día de la semana debajo; ADMIN = lista de personas como en «Registrar tarea completada». Una carga olvidada se lee «Realizada el 29/10 · Registrada el 30/10» como metadato secundario.
+- Desempeño → Detalle (solo Tareas): arriba, «Fecha» (calendario nativo limitado al rango, con la fecha en formato de la app debajo y «Todas las fechas» para quitarla), chips desplazables de frecuencia y de estado (Todas, Sin completar, Realizadas, Cubiertas, Cubrió a otros) y «Limpiar filtros» (fantasma) cuando hay alguno; debajo, grupos por día con un encabezado chico en texto atenuado y línea divisoria, «Sin fecha» al final; al pie, «Mostrando X de Y registros» y «Ver más» (secundario, a lo ancho). Las acciones de las filas son compactas («Marcar realizada» secundario chico, «Deshacer» fantasma; 44 px táctiles) y van en la misma línea que el estado.
 - Acciones administrativas claras y no disponibles para empleados sin permiso.
 
 ### Stock
@@ -275,6 +278,34 @@ Desempeño se integra mediante navegación secundaria en chips `📋 Tareas | �
 - Avatar, autor, tiempo relativo y contenido.
 - Separadores suaves.
 - Lectura rápida y cronología clara.
+
+#### Conversaciones — ajuste visual en `demo` (2026-10-30)
+
+- Historial en una sola columna, sin alturas rígidas ni scroll interno. La novedad conserva avatar, autor, fecha y texto; su barra reúne «Responder», abrir/cerrar con contador y última respuesta. (Distribución actualizada el 2026-10-30, ver «Distribución adaptable».)
+- Comentarios sobre blanco, separados por una línea suave; avatar compartido pequeño con el color neutro existente (el contrato de respuestas solo ofrece nombre), nombre destacado y fecha junto al nombre. Texto de 15 px con saltos de línea y corte de palabras largas; sangría solo en escritorio.
+- Orden de lectura: encabezado del autor → cita → texto nuevo → «Responder». La cita usa fondo suave y borde verde; la vista previa se limita a dos líneas con CSS, conservando todo el texto en el DOM.
+- Compositor separado por una línea: «Tu respuesta», textarea de tres filas ampliable, botón «Enviar» compacto a la derecha, cita con cancelación accesible y errores asociados al campo. Controles de al menos 44 × 44 px y foco visible.
+- La primera apertura sigue montando y cargando el hilo en diferido. Después se oculta sin desmontar el formulario para conservar borrador, cita, error e intento idempotente; la consulta queda deshabilitada mientras está cerrado. Sin storage, nuevas claves, cambios de permisos ni cambios del envío. Al anteponer respuestas se conserva la coordenada de la primera fila existente en el scroll de la página.
+- Archivos de implementación: `frontend/src/features/more/NewsScreen.tsx`, `frontend/src/styles/more.css`; regresiones en `frontend/src/features/more/MoreModule.test.tsx`. Inicio, alta de novedades, contratos, backend, migraciones y datos sin cambios.
+- Validación local: Chrome headless con API interceptada y datos identificados como sintéticos, sin backend ni base de datos. Revisadas capturas en 360, 390, 768 y 1366 px: vacío, varias respuestas, nombres/textos largos y sin espacios, citas, compositor normal/citando, error y envío. Sin overflow horizontal ni scroll interno; controles ≥ 44 px, previews ≤ 2 líneas. Carga anterior: desplazamiento de la fila de lectura de 0 px en los cuatro tamaños. Borrador/cita conservados al cerrar; cancelación conserva texto; doble clic durante envío produce un solo POST. Navegación Más → Novedades sin nuevo refresh ni `/auth/me`.
+- Validaciones de frontend: typecheck, lint, build y las 68 pruebas de `MoreModule.test.tsx` + `navigationPerformance.test.tsx` en verde. El test de reintento comprueba que cerrar/abrir conserva la clave; el de citas comprueba texto completo de más de 180 caracteres, borrador y cancelación. No se ejecutaron pruebas de backend ni integraciones.
+- Rendimiento: 0 requests adicionales, caché operativa de 30 s y actualización tras envío sin cambios, sin dependencias nuevas ni impacto en consultas/índices de Render/Neon. Bundle principal: 513,40 kB (139,81 kB gzip); sigue el aviso preexistente de Vite por superar 500 kB. Sin PR, merge ni deploy en este alcance; no quedan pendientes de implementación visual.
+
+#### Distribución adaptable (2026-10-30)
+
+- Encabezado, formulario «Registrar novedad» e historial comparten un contenedor (`.news-page`) con el mismo ancho y borde izquierdo. Máximo en escritorio: el del layout (`--content-max-width`, 1200 px); en móvil, todo el ancho con el margen habitual de la página. Antes el historial quedaba centrado y más angosto que el formulario.
+- El ancho de lectura (72 `ch`, `--news-reading-width`) se acota solo en los textos dentro de las tarjetas: texto de la novedad, de cada respuesta y de las citas. Encabezados, barras de acciones y campos ocupan el ancho de la tarjeta.
+- Sin columnas nuevas, alturas fijas, scrolls internos ni dependencias; solo reglas con prefijo `news-` en `more.css` (ningún estilo global).
+- Revisión con API interceptada y datos sintéticos en 360, 390, 768 y 1366 px: encabezado, formulario e historial con el mismo borde y ancho en los cuatro tamaños, sin desborde horizontal.
+
+#### Acciones sobre mensajes (2026-10-30)
+
+- Menú «⋯» (botón fantasma de 44 × 44 px, alineado a la derecha del encabezado de la novedad o de la respuesta; margen vertical negativo para no agrandar la fila). Despliega «Editar» y/o «Eliminar» (este en rojo) según los permisos del backend; sin permisos no hay botón. Panel blanco con borde suave y sombra elevada, anclado a la derecha (no desborda en 360 px).
+- Edición en el lugar del texto: textarea de tres filas (ancho de lectura), «Cancelar» y «Guardar cambios» a la derecha. Si el mensaje cambió en otra pantalla: aviso ámbar con la versión actual y «Usar la versión actual» / «Conservar mi texto»; si se eliminó: aviso ámbar y solo «Cancelar».
+- «Editado · dd/mm/aaaa HH:mm» en texto pequeño y apagado debajo del texto. En citas, «(editado)».
+- Marcadores en cursiva apagada: «Novedad eliminada» (conserva avatar, persona y fecha; con conversación sigue mostrando «Responder» y «Ver respuestas»; sin ella, ningún botón) y «Mensaje eliminado» (autor y fecha, sin cita ni botones). La cita de un eliminado muestra «Mensaje eliminado».
+- Confirmación con la hoja/diálogo existente (`ConfirmDialog`, tono peligro). Cita eliminada mientras se redacta: el bloque de cita del compositor pasa a ámbar con «El mensaje que citabas fue eliminado.» y «Quitar cita»; «Enviar» queda deshabilitado hasta resolverlo; el borrador no se toca.
+- Revisión con API interceptada y datos sintéticos en 360, 390, 768 y 1366 px (EMPLOYEE y ADMIN): menú abierto con mouse y con teclado (foco visible), edición, confirmación, conflicto de versión, conflicto de cita, marcadores y nombres/textos largos. Sin desborde horizontal; todos los botones visibles ≥ 44 px.
 
 ### Eventos
 
@@ -303,6 +334,7 @@ Desempeño se integra mediante navegación secundaria en chips `📋 Tareas | �
 - Tarjetas o listas por animal con tipo, datos principales y acceso al detalle.
 - Historial clínico claramente separado de la ficha general.
 - Foto opcional proveniente del sistema de archivos seguro.
+- Desde el 2026-11-02, «✕» (anular), «Programar / Corregir fecha próxima» y «Corregir fecha» (Próximas atenciones y 📅 Vencimientos) se muestran también al EMPLOYEE, con los mismos componentes, ubicación y textos que ya veía el ADMIN; ✏️, «Desactivar», «Eliminar» mascota y la gestión de tipos siguen siendo solo del ADMIN.
 
 ### Gallinero
 

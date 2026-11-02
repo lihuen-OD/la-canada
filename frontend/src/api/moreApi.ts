@@ -8,18 +8,25 @@ import type {
   EventsResponse,
   FamilyMember,
   FamilyMemberRequest,
-  GalleryCategory,
   GalleryPhoto,
   GardenPlanVersion,
   GardenVersionsResponse,
   ManagedEmployee,
   MoreSummary,
   MyProfileResponse,
+  NewsConversationStats,
   NewsItem,
   NewsListResponse,
+  NewsRepliesPage,
+  NewsReplyCursor,
+  CreateNewsReplyRequest,
+  NewsReply,
   OwnBirthday,
   PersonalProfile,
   PersonalProfileResponse,
+  PhotoFolder,
+  PhotoFoldersResponse,
+  PhotoScope,
   PhotosListResponse,
   TeamFilter,
   TeamMember,
@@ -31,6 +38,8 @@ import type {
 const auth = { authenticated: true } as const;
 const post = <T>(path: string, body: unknown, headers?: Record<string, string>) =>
   apiRequest<T>(path, { method: 'POST', body, headers, ...auth });
+const patch = <T>(path: string, body: unknown) =>
+  apiRequest<T>(path, { method: 'PATCH', body, ...auth });
 
 export const fetchMoreSummary = () => apiRequest<MoreSummary>('/more/summary', auth);
 
@@ -39,6 +48,38 @@ export const fetchNews = (page: number, pageSize: number) =>
   apiRequest<NewsListResponse>(`/news?page=${page}&pageSize=${pageSize}`, auth);
 export const createNews = (body: { text: string; employeeId?: string }, idempotencyKey: string) =>
   post<{ news: NewsItem }>('/news', body, { 'Idempotency-Key': idempotencyKey });
+export const fetchNewsReplies = (newsId: string, cursor: NewsReplyCursor | null) => {
+  const search = new URLSearchParams();
+  if (cursor) {
+    search.set('beforeCreatedAt', cursor.createdAt);
+    search.set('beforeId', cursor.id);
+  }
+  const suffix = search.size ? `?${search.toString()}` : '';
+  return apiRequest<NewsRepliesPage>(`/news/${newsId}/replies${suffix}`, auth);
+};
+export const createNewsReply = (
+  newsId: string,
+  body: CreateNewsReplyRequest,
+  idempotencyKey: string,
+) =>
+  post<{ reply: NewsReply }>(`/news/${newsId}/replies`, body, {
+    'Idempotency-Key': idempotencyKey,
+  });
+/** Edición y eliminación: `version` = la que se vio al abrir (409 si cambió). */
+export const updateNews = (newsId: string, body: { text: string; version: number }) =>
+  patch<{ news: NewsItem }>(`/news/${newsId}`, body);
+export const deleteNews = (newsId: string, version: number) =>
+  post<{ news: NewsItem }>(`/news/${newsId}/delete`, { version });
+export const updateNewsReply = (
+  newsId: string,
+  replyId: string,
+  body: { text: string; version: number },
+) => patch<{ reply: NewsReply }>(`/news/${newsId}/replies/${replyId}`, body);
+export const deleteNewsReply = (newsId: string, replyId: string, version: number) =>
+  post<{ reply: NewsReply; conversation: NewsConversationStats }>(
+    `/news/${newsId}/replies/${replyId}/delete`,
+    { version },
+  );
 
 // 📅 Eventos
 export function fetchEvents(params: { type?: EventType; pastPage: number; pastPageSize: number }) {
@@ -59,7 +100,8 @@ export const fetchWeather = () => apiRequest<WeatherReport>('/weather', auth);
 
 // 📸 Fotos
 export function fetchPhotos(params: {
-  category?: GalleryCategory;
+  /** Sin valor (o `all`) = todas; `none` = por organizar (sin carpeta); o el id de una carpeta. */
+  scope?: PhotoScope;
   page: number;
   pageSize: number;
 }) {
@@ -67,18 +109,22 @@ export function fetchPhotos(params: {
     page: String(params.page),
     pageSize: String(params.pageSize),
   });
-  if (params.category) search.set('category', params.category);
+  if (params.scope && params.scope !== 'all') search.set('folder', params.scope);
   return apiRequest<PhotosListResponse>(`/photos?${search.toString()}`, auth);
 }
 /** Imagen servida por el backend (proxy autenticado): nunca una URL del bucket. */
 export const fetchPhotoContent = (photoId: string) =>
   apiRequest<Blob>(`/photos/${photoId}/content`, { ...auth, responseType: 'blob' });
+/**
+ * Subir una foto a una carpeta (obligatoria). La categoría ya no se envía:
+ * el backend usa la general de la galería.
+ */
 export function uploadPhoto(
   file: File,
-  metadata: { title: string; category: GalleryCategory; employeeId: string | null },
+  metadata: { title: string; employeeId: string | null; folderId: string },
   idempotencyKey: string,
 ) {
-  const search = new URLSearchParams({ category: metadata.category, title: metadata.title });
+  const search = new URLSearchParams({ title: metadata.title, folderId: metadata.folderId });
   if (metadata.employeeId) search.set('employeeId', metadata.employeeId);
   return apiRequest<{ photo: GalleryPhoto }>(`/photos?${search.toString()}`, {
     method: 'POST',
@@ -89,6 +135,20 @@ export function uploadPhoto(
   });
 }
 export const deletePhoto = (photoId: string) => post<unknown>(`/photos/${photoId}/delete`, {});
+/** Mover a una carpeta: destino y carpeta en la que se VIO la foto (409 si otra persona la movió). */
+export const movePhoto = (
+  photoId: string,
+  body: { folderId: string; fromFolderId: string | null },
+) => post<{ photo: GalleryPhoto; moved: boolean }>(`/photos/${photoId}/move`, body);
+export const fetchPhotoFolders = () => apiRequest<PhotoFoldersResponse>('/photos/folders', auth);
+export const createPhotoFolder = (name: string, idempotencyKey: string) =>
+  post<{ folder: PhotoFolder }>('/photos/folders', { name }, { 'Idempotency-Key': idempotencyKey });
+export const renamePhotoFolder = (folderId: string, body: { name: string; version: number }) =>
+  patch<{ folder: PhotoFolder }>(`/photos/folders/${folderId}`, body);
+export const deletePhotoFolder = (folderId: string, version: number) =>
+  post<{ folder: { id: string; deleted: true } }>(`/photos/folders/${folderId}/delete`, {
+    version,
+  });
 
 // 🌳 Jardín
 export function fetchGardenPlanVersions(page: number, pageSize: number) {

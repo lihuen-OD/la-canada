@@ -12,7 +12,9 @@ import {
   getMoreSummaryHandler,
   getMyProfileHandler,
   getNewsHandler,
+  getNewsRepliesHandler,
   getPhotoContentHandler,
+  getPhotoFoldersHandler,
   getPhotosHandler,
   getTeamProfilesHandler,
   getWeatherHandler,
@@ -23,14 +25,23 @@ import {
   patchEventHandler,
   patchMyFamilyHandler,
   patchMyFamilyStatusHandler,
+  patchNewsHandler,
+  patchNewsReplyHandler,
+  patchPhotoFolderHandler,
   postDeleteEventHandler,
+  postDeleteNewsHandler,
+  postDeleteNewsReplyHandler,
+  postDeletePhotoFolderHandler,
   postDeletePhotoHandler,
   postEmployeeHandler,
   postEventHandler,
   postGardenVersionHandler,
   postMyChildHandler,
+  postMovePhotoHandler,
   postMyFamilyHandler,
   postNewsHandler,
+  postNewsReplyHandler,
+  postPhotoFolderHandler,
   postPhotoHandler,
   postRemoveMyChildHandler,
   putMyProfileHandler,
@@ -40,6 +51,8 @@ import {
  * ☰ Más (Etapa 5X). Ningún endpoint es público. Sin `DELETE`: los eventos se
  * anulan, las fotos se dan de baja lógica antes del borrado físico y las
  * personas se desactivan; solo un hijo del propio perfil se elimina de verdad.
+ * Los mensajes de Novedades se eliminan lógicamente (`POST …/delete`); los
+ * permisos por autor/rol se deciden en el servicio, nunca con `requireRole`.
  */
 
 export const moreRouter = Router();
@@ -50,6 +63,12 @@ export const newsRouter = Router();
 newsRouter.use(requireAuth);
 newsRouter.get('/', getNewsHandler);
 newsRouter.post('/', requireJsonContentType, postNewsHandler);
+newsRouter.patch('/:id', requireJsonContentType, patchNewsHandler);
+newsRouter.post('/:id/delete', requireJsonContentType, postDeleteNewsHandler);
+newsRouter.get('/:id/replies', getNewsRepliesHandler);
+newsRouter.post('/:id/replies', requireJsonContentType, postNewsReplyHandler);
+newsRouter.patch('/:id/replies/:replyId', requireJsonContentType, patchNewsReplyHandler);
+newsRouter.post('/:id/replies/:replyId/delete', requireJsonContentType, postDeleteNewsReplyHandler);
 
 export const eventsRouter = Router();
 eventsRouter.use(requireAuth);
@@ -62,12 +81,22 @@ export const weatherRouter = Router();
 weatherRouter.use(requireAuth);
 weatherRouter.get('/', getWeatherHandler);
 
+/**
+ * 📸 Fotos y sus carpetas: ver, subir, crear carpetas y mover fotos es de
+ * todos; renombrar o eliminar una carpeta, de su creador o un ADMIN, y
+ * eliminar una foto, solo ADMIN — lo decide cada servicio, nunca `requireRole`.
+ */
 export const photosRouter = Router();
 photosRouter.use(requireAuth);
 photosRouter.get('/', getPhotosHandler);
 photosRouter.post('/', parseGalleryPhotoBody, postPhotoHandler);
+photosRouter.get('/folders', getPhotoFoldersHandler);
+photosRouter.post('/folders', requireJsonContentType, postPhotoFolderHandler);
+photosRouter.patch('/folders/:id', requireJsonContentType, patchPhotoFolderHandler);
+photosRouter.post('/folders/:id/delete', requireJsonContentType, postDeletePhotoFolderHandler);
 photosRouter.get('/:id/content', getPhotoContentHandler);
 photosRouter.post('/:id/delete', requireJsonContentType, postDeletePhotoHandler);
+photosRouter.post('/:id/move', requireJsonContentType, postMovePhotoHandler);
 
 /**
  * 🌳 Jardín: ver el plano y el historial es de todos (paridad con Fotos);

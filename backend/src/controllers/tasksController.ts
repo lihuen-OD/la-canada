@@ -4,6 +4,7 @@ import { AuthenticationRequiredError, ValidationError } from '../errors/AppError
 import {
   completeTaskBodySchema,
   createTaskBodySchema,
+  lateCompletionBodySchema,
   listTasksQuerySchema,
   revertTaskBodySchema,
   taskCalendarQuerySchema,
@@ -19,6 +20,7 @@ import {
   getWeeklyHistory,
   listTaskEmployees,
   listTasks,
+  registerLateCompletion,
   resolveActor,
   revertTaskCompletion,
   setTaskActive,
@@ -119,6 +121,14 @@ export async function postTaskCompletion(req: Request, res: Response): Promise<v
   const taskId = taskIdFrom(req);
   const { employeeId } = parseOrThrow(completeTaskBodySchema, req.body ?? {}, 'Datos inválidos.');
   send(res, 201, await completeTask(actor, taskId, employeeId, requestMeta(req)));
+}
+
+/** `POST /tasks/:id/late-completion` — carga olvidada desde Desempeño → Detalle. */
+export async function postTaskLateCompletion(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const taskId = taskIdFrom(req);
+  const input = parseOrThrow(lateCompletionBodySchema, req.body, 'Datos inválidos.');
+  send(res, 201, await registerLateCompletion(actor, taskId, input, requestMeta(req)));
 }
 
 export async function postTaskRevert(req: Request, res: Response): Promise<void> {

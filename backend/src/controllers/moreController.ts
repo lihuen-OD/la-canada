@@ -13,21 +13,36 @@ import {
   createEventBodySchema,
   createFamilyMemberBodySchema,
   createNewsBodySchema,
+  createNewsReplyBodySchema,
+  createPhotoFolderBodySchema,
+  deleteNewsMessageBodySchema,
+  deletePhotoFolderBodySchema,
   employeeStatusBodySchema,
   familyStatusBodySchema,
   idParamSchema,
   listEventsQuerySchema,
   listNewsQuerySchema,
+  listNewsRepliesQuerySchema,
   listPhotosQuerySchema,
+  movePhotoBodySchema,
+  renamePhotoFolderBodySchema,
   teamProfilesQuerySchema,
   updateEmployeeBodySchema,
   updateEventBodySchema,
+  updateNewsBodySchema,
+  updateNewsReplyBodySchema,
   updateFamilyMemberBodySchema,
   updatePersonalProfileBodySchema,
   updateProfileBodySchema,
   uploadPhotoQuerySchema,
 } from '../more/moreSchemas';
-import { createNews, listNews } from '../more/newsService';
+import { createNews, deleteNews, listNews, updateNews } from '../more/newsService';
+import {
+  createNewsReply,
+  deleteNewsReply,
+  listNewsReplies,
+  updateNewsReply,
+} from '../more/newsRepliesService';
 import { createEvent, deleteEvent, listEvents, updateEvent } from '../more/eventsService';
 import { getWeather } from '../more/weatherService';
 import {
@@ -46,6 +61,13 @@ import {
   readPhotoObject,
   uploadPhoto,
 } from '../more/photosService';
+import {
+  createPhotoFolder,
+  deletePhotoFolder,
+  listPhotoFolders,
+  movePhoto,
+  renamePhotoFolder,
+} from '../more/photoFoldersService';
 import {
   createEmployee,
   listEmployees,
@@ -105,11 +127,11 @@ export async function getMoreSummaryHandler(req: Request, res: Response): Promis
 // ── 📝 Novedades ──
 
 export async function getNewsHandler(req: Request, res: Response): Promise<void> {
-  await actorFrom(req);
+  const actor = await actorFrom(req);
   send(
     res,
     200,
-    await listNews(parseOrThrow(listNewsQuerySchema, req.query, 'Filtros inválidos.')),
+    await listNews(actor, parseOrThrow(listNewsQuerySchema, req.query, 'Filtros inválidos.')),
   );
 }
 
@@ -118,6 +140,70 @@ export async function postNewsHandler(req: Request, res: Response): Promise<void
   const input = parseOrThrow(createNewsBodySchema, req.body, 'Datos de la novedad inválidos.');
   const result = await createNews(actor, input, requestMeta(req), idempotencyKeyOf(req));
   send(res, result.kind === 'replay' ? result.status : 201, result.body);
+}
+
+/** Edición y eliminación de mensajes: el autor sale siempre de la sesión (`newsMessages.ts`). */
+export async function patchNewsHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const newsId = idFrom(req.params.id, 'novedad').toLowerCase();
+  const input = parseOrThrow(updateNewsBodySchema, req.body, 'Datos de la novedad inválidos.');
+  send(res, 200, await updateNews(actor, newsId, input, requestMeta(req)));
+}
+
+export async function postDeleteNewsHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const newsId = idFrom(req.params.id, 'novedad').toLowerCase();
+  const input = parseOrThrow(deleteNewsMessageBodySchema, req.body, 'Datos inválidos.');
+  send(res, 200, await deleteNews(actor, newsId, input, requestMeta(req)));
+}
+
+export async function getNewsRepliesHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const newsId = idFrom(req.params.id, 'novedad');
+  const query = parseOrThrow(
+    listNewsRepliesQuerySchema,
+    req.query,
+    'Filtros de respuestas inválidos.',
+  );
+  send(res, 200, await listNewsReplies(actor, newsId, query));
+}
+
+export async function postNewsReplyHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const newsId = idFrom(req.params.id, 'novedad');
+  const input = parseOrThrow(
+    createNewsReplyBodySchema,
+    req.body,
+    'Datos de la respuesta inválidos.',
+  );
+  const result = await createNewsReply(
+    actor,
+    newsId,
+    input,
+    requestMeta(req),
+    idempotencyKeyOf(req),
+  );
+  send(res, result.kind === 'replay' ? result.status : 201, result.body);
+}
+
+export async function patchNewsReplyHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const newsId = idFrom(req.params.id, 'novedad').toLowerCase();
+  const replyId = idFrom(req.params.replyId, 'respuesta').toLowerCase();
+  const input = parseOrThrow(
+    updateNewsReplyBodySchema,
+    req.body,
+    'Datos de la respuesta inválidos.',
+  );
+  send(res, 200, await updateNewsReply(actor, newsId, replyId, input, requestMeta(req)));
+}
+
+export async function postDeleteNewsReplyHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const newsId = idFrom(req.params.id, 'novedad').toLowerCase();
+  const replyId = idFrom(req.params.replyId, 'respuesta').toLowerCase();
+  const input = parseOrThrow(deleteNewsMessageBodySchema, req.body, 'Datos inválidos.');
+  send(res, 200, await deleteNewsReply(actor, newsId, replyId, input, requestMeta(req)));
 }
 
 // ── 📅 Eventos ──
@@ -203,6 +289,42 @@ export async function postPhotoHandler(req: Request, res: Response): Promise<voi
 export async function postDeletePhotoHandler(req: Request, res: Response): Promise<void> {
   const actor = await actorFrom(req);
   send(res, 200, await deletePhoto(actor, idFrom(req.params.id, 'foto'), requestMeta(req)));
+}
+
+/** «Mover a carpeta»: cualquier usuario activo; el servicio compara la carpeta vista. */
+export async function postMovePhotoHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const photoId = idFrom(req.params.id, 'foto');
+  const input = parseOrThrow(movePhotoBodySchema, req.body, 'Datos inválidos.');
+  send(res, 200, await movePhoto(actor, photoId, input, requestMeta(req)));
+}
+
+// ── 📸 Carpetas de Fotos ──
+
+export async function getPhotoFoldersHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  send(res, 200, await listPhotoFolders(actor));
+}
+
+export async function postPhotoFolderHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const input = parseOrThrow(createPhotoFolderBodySchema, req.body, 'Datos inválidos.');
+  const result = await createPhotoFolder(actor, input, requestMeta(req), idempotencyKeyOf(req));
+  send(res, result.kind === 'replay' ? result.status : 201, result.body);
+}
+
+export async function patchPhotoFolderHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const folderId = idFrom(req.params.id, 'carpeta');
+  const input = parseOrThrow(renamePhotoFolderBodySchema, req.body, 'Datos inválidos.');
+  send(res, 200, await renamePhotoFolder(actor, folderId.toLowerCase(), input, requestMeta(req)));
+}
+
+export async function postDeletePhotoFolderHandler(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const folderId = idFrom(req.params.id, 'carpeta');
+  const input = parseOrThrow(deletePhotoFolderBodySchema, req.body, 'Datos inválidos.');
+  send(res, 200, await deletePhotoFolder(actor, folderId.toLowerCase(), input, requestMeta(req)));
 }
 
 /**

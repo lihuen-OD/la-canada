@@ -17,7 +17,7 @@ interface PetDueRowProps {
   showPet?: boolean;
   /** Solo si la mascota admite registros nuevos y el pendiente sigue abierto. */
   onRegister?: () => void;
-  /** Solo ADMIN: completar o corregir la fecha programada. */
+  /** Corregir la fecha programada (ADMIN y EMPLOYEE), si el pendiente sigue abierto. */
   onEditDate?: () => void;
 }
 

@@ -163,6 +163,42 @@
   font-size: var(--font-size-xs);
 }
 
+/* ✅ Tareas: estado y acción a la derecha («Marcar como realizada», «Completar
+   en Tareas», «Deshacer»); en pantallas angostas la acción baja a su propia
+   línea sin desbordar. */
+.performance-detail--actions li {
+  flex-wrap: wrap;
+}
+
+.performance-detail--actions li > span:first-child {
+  flex: 1 1 12rem;
+}
+
+.performance-detail__side {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1) var(--space-2);
+  margin-left: auto;
+  text-align: right;
+}
+
+/* Acción compacta y discreta («Marcar realizada», «Deshacer»…): texto chico
+   y poco relleno, sin perder el alto táctil de 44px de `.button`. */
+.performance-detail__action {
+  padding-inline: var(--space-3);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.late-completion__period {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+}
+
 @media (min-width: 768px) {
   .performance__summary {
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -181,4 +217,70 @@
 .performance-person__score--neutral strong {
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
+}
+
+/* ✅ Tareas → Desempeño → Detalle: filtros (fecha, frecuencia, estado) y
+   obligaciones agrupadas por día, más recientes primero, con «Ver más». */
+.performance-detail-filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-bottom: var(--space-3);
+}
+
+.performance-detail-filters__clear {
+  align-self: flex-start;
+}
+
+/* Filtro de fecha: calendario nativo (días del rango) y «Todas las fechas». */
+.performance-detail-filters__date {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.performance-detail-filters__date .field__input {
+  flex: 1 1 10rem;
+  min-width: 0;
+  max-width: 16rem;
+}
+
+.performance-detail-filters .field__hint {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.performance-detail-filters .field__hint--error {
+  color: var(--color-danger);
+}
+
+.performance-detail-group + .performance-detail-group {
+  margin-top: var(--space-3);
+}
+
+.performance-detail-group__title {
+  margin: 0;
+  padding-bottom: var(--space-1);
+  border-bottom: var(--border-width) solid var(--color-surface-muted);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+}
+
+.performance-detail-group .performance-detail {
+  margin: 0;
+}
+
+.performance-detail__footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.performance-detail__footer .stock__count {
+  margin: 0;
 }

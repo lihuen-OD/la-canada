@@ -50,6 +50,8 @@ import { setObjectStorageForTests, type ObjectStorageClient } from '../../lib/ob
 import {
   createPet,
   createPetRecord,
+  deletePet,
+  deletePetType,
   updatePetRecordNextDue,
   createPetType,
   listPetRecords,
@@ -107,9 +109,11 @@ describe('permisos ADMIN (admin-only del prototipo)', () => {
   it.each([
     ['agregar mascota', () => createPet(EMPLOYEE, { name: 'X', animalTypeId: TYPE_ID }, META)],
     ['editar mascota', () => updatePet(EMPLOYEE, PET_ID, { name: 'X' }, META)],
+    ['desactivar mascota', () => setPetActive(EMPLOYEE, PET_ID, false, META)],
+    ['eliminar mascota', () => deletePet(EMPLOYEE, PET_ID, META)],
     ['agregar tipo', () => createPetType(EMPLOYEE, { name: 'Ternero', icon: '🐂' }, META)],
     ['desactivar tipo', () => setPetTypeActive(EMPLOYEE, TYPE_ID, false, META)],
-    ['eliminar registro', () => voidPetRecord(EMPLOYEE, PET_ID, PET_ID, META)],
+    ['eliminar tipo', () => deletePetType(EMPLOYEE, TYPE_ID, META)],
     [
       'cambiar foto',
       () =>
@@ -327,6 +331,66 @@ describe('registros clínicos', () => {
       where: { id: 'rec-1', voidedAt: null },
       data: { voidedAt: NOW, voidedByUserId: 'user-a' },
     });
+    // Ya anulado: una sola auditoría (la del intento que anuló).
+    expect(db.auditLog.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('EMPLOYEE anula un registro de otro autor: solo marca la anulación (quién y cuándo) y audita', async () => {
+    db.animalMedicalRecord.findUnique.mockResolvedValue({
+      animalId: PET_ID,
+      type: 'VACCINE',
+      recordDate: new Date('2026-09-20T00:00:00.000Z'),
+      value: null,
+      nextDueDate: null,
+      fulfillsRecordId: 'rec-original',
+    });
+    db.animalMedicalRecord.updateMany.mockResolvedValue({ count: 1 });
+    const result = await voidPetRecord(EMPLOYEE, PET_ID, 'rec-admin', META, NOW);
+    expect(result).toEqual({ record: { id: 'rec-admin', voidedAt: NOW.toISOString() } });
+    // Autor, persona, vínculo y fechas no se tocan: solo la anulación.
+    expect(db.animalMedicalRecord.updateMany).toHaveBeenCalledWith({
+      where: { id: 'rec-admin', voidedAt: null },
+      data: { voidedAt: NOW, voidedByUserId: 'user-e' },
+    });
+    expect(db.auditLog.create.mock.calls[0]?.[0].data).toMatchObject({
+      actorUserId: 'user-e',
+      action: 'pet.record_voided',
+      entityId: 'rec-admin',
+      previousState: { fulfillsRecordId: 'rec-original', voided: false },
+      newState: { voided: true },
+    });
+  });
+
+  it('historial: el antecedente cumplido indica si su registro original sigue vigente', async () => {
+    db.animal.findUnique.mockResolvedValue({ id: PET_ID });
+    db.animalMedicalRecord.count.mockResolvedValue(2);
+    const fulfiller = (id: string, voidedAt: Date | null) => ({
+      id,
+      type: 'VACCINE',
+      recordDate: new Date('2026-09-20T00:00:00.000Z'),
+      description: null,
+      value: null,
+      createdAt: NOW,
+      employee: null,
+      recordedBy: null,
+      nextDueDate: null,
+      fulfills: {
+        id: `${id}-original`,
+        type: 'VACCINE',
+        recordDate: new Date('2025-09-20T00:00:00.000Z'),
+        voidedAt,
+      },
+      fulfillments: [],
+    });
+    db.animalMedicalRecord.findMany.mockResolvedValue([
+      fulfiller('vigente', null),
+      fulfiller('anulado', NOW),
+    ]);
+    const { records } = await listPetRecords(ADMIN, PET_ID, { page: 1, pageSize: 20 });
+    expect(records.map((record) => record.fulfills)).toEqual([
+      { id: 'vigente-original', type: 'VACCINE', recordDate: '2025-09-20', voided: false },
+      { id: 'anulado-original', type: 'VACCINE', recordDate: '2025-09-20', voided: true },
+    ]);
   });
 });
 
@@ -745,53 +809,153 @@ describe('próxima aplicación o control', () => {
     ).rejects.toMatchObject({ statusCode: 409, code: 'PET_DUE_ALREADY_FULFILLED' });
   });
 
-  it('corregir la próxima fecha es solo de ADMIN, acotado y auditado', async () => {
-    await expect(
-      updatePetRecordNextDue(EMPLOYEE, PET_ID, RECORD_ID, { nextDueDate: '2026-12-01' }, META, NOW),
-    ).rejects.toMatchObject({ statusCode: 403 });
-    db.animalMedicalRecord.findUnique.mockResolvedValue({
+  describe('completar o corregir la próxima fecha (ADMIN y EMPLOYEE)', () => {
+    const D = (text: string) => new Date(`${text}T00:00:00.000Z`);
+    /** Registro de otro autor (un ADMIN sin persona), con su fecha programada. */
+    const stored = (overrides: Record<string, unknown> = {}) => ({
       animalId: PET_ID,
       type: 'VACCINE',
-      recordDate: new Date('2026-09-01T00:00:00.000Z'),
-      nextDueDate: null,
+      recordDate: D('2026-09-01'),
+      nextDueDate: D('2026-11-01'),
       voidedAt: null,
-    });
-    db.animalMedicalRecord.updateMany.mockResolvedValue({ count: 1 });
-    db.animalMedicalRecord.findUniqueOrThrow.mockResolvedValue({
-      id: RECORD_ID,
-      type: 'VACCINE',
-      recordDate: new Date('2026-09-01T00:00:00.000Z'),
-      description: null,
-      value: null,
-      createdAt: NOW,
-      employee: null,
-      recordedBy: null,
-      nextDueDate: new Date('2026-12-01T00:00:00.000Z'),
-      fulfills: null,
       fulfillments: [],
+      ...overrides,
     });
-    const { record } = await updatePetRecordNextDue(
-      ADMIN,
-      PET_ID,
-      RECORD_ID,
-      { nextDueDate: '2026-12-01' },
-      META,
-      NOW,
+    const correct = (
+      actor: PetActor,
+      nextDueDate: string,
+      expectedNextDueDate: string | null = '2026-11-01',
+    ) =>
+      updatePetRecordNextDue(
+        actor,
+        PET_ID,
+        RECORD_ID,
+        { nextDueDate, expectedNextDueDate },
+        META,
+        NOW,
+      );
+
+    beforeEach(() => {
+      db.$queryRaw.mockResolvedValue([{ id: RECORD_ID }]);
+      db.animalMedicalRecord.findUnique.mockResolvedValue(stored());
+      db.animalMedicalRecord.updateMany.mockResolvedValue({ count: 1 });
+      db.animalMedicalRecord.findUniqueOrThrow.mockImplementation(async () => ({
+        id: RECORD_ID,
+        type: 'VACCINE',
+        recordDate: D('2026-09-01'),
+        description: 'Descripción sintética',
+        value: null,
+        createdAt: NOW,
+        employee: null,
+        recordedBy: { employee: null, personalProfile: { displayName: 'Admin sintética' } },
+        nextDueDate: D(
+          db.animalMedicalRecord.updateMany.mock.calls.length ? '2026-12-01' : '2026-11-01',
+        ),
+        fulfills: null,
+        fulfillments: [],
+      }));
+    });
+
+    it.each([
+      ['EMPLOYEE', EMPLOYEE, 'user-e'],
+      ['ADMIN', ADMIN, 'user-a'],
+    ])(
+      '%s corrige la fecha de un registro de otro autor: solo `next_due_date`, auditado en la transacción',
+      async (_label, actor, userId) => {
+        let inTransaction = false;
+        const audited: boolean[] = [];
+        db.$transaction.mockImplementation(async (run: (tx: typeof db) => unknown) => {
+          inTransaction = true;
+          try {
+            return await run(db);
+          } finally {
+            inTransaction = false;
+          }
+        });
+        db.auditLog.create.mockImplementation(async () => {
+          audited.push(inTransaction);
+          return {};
+        });
+        const { record, changed } = await correct(actor, '2026-12-01');
+        expect(changed).toBe(true);
+        // Primero se bloquea la fila; recién después se lee su estado.
+        const lock = db.$queryRaw.mock.calls[0]?.[0] as { strings: string[] };
+        expect(lock.strings.join('?')).toMatch(/FROM "animal_medical_records".*FOR UPDATE/);
+        expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+          db.animalMedicalRecord.findUnique.mock.invocationCallOrder[0]!,
+        );
+        // Solo la próxima fecha: autor, persona, atención y descripción no se tocan.
+        expect(db.animalMedicalRecord.updateMany).toHaveBeenCalledWith({
+          where: { id: RECORD_ID, voidedAt: null },
+          data: { nextDueDate: D('2026-12-01') },
+        });
+        expect(db.auditLog.create.mock.calls[0]?.[0].data).toMatchObject({
+          actorUserId: userId,
+          action: 'pet.record_next_due_updated',
+          entityId: RECORD_ID,
+          previousState: { nextDueDate: '2026-11-01' },
+          newState: { nextDueDate: '2026-12-01' },
+        });
+        expect(audited).toEqual([true]);
+        expect(record.recordedBy).toEqual({ displayName: 'Admin sintética' });
+        expect(record.nextDue).toMatchObject({ date: '2026-12-01', status: 'SCHEDULED' });
+      },
     );
-    // Solo cambia la próxima fecha.
-    expect(db.animalMedicalRecord.updateMany.mock.calls[0]?.[0]).toEqual({
-      where: { id: RECORD_ID, voidedAt: null },
-      data: { nextDueDate: new Date('2026-12-01T00:00:00.000Z') },
+
+    it('completa la fecha de un registro anterior que no la tenía (lo que vio: sin fecha)', async () => {
+      db.animalMedicalRecord.findUnique.mockResolvedValue(stored({ nextDueDate: null }));
+      await correct(EMPLOYEE, '2026-12-01', null);
+      expect(db.auditLog.create.mock.calls[0]?.[0].data).toMatchObject({
+        previousState: { nextDueDate: null },
+        newState: { nextDueDate: '2026-12-01' },
+      });
     });
-    expect(db.auditLog.create.mock.calls[0]?.[0].data).toMatchObject({
-      action: 'pet.record_next_due_updated',
-      previousState: { nextDueDate: null },
-      newState: { nextDueDate: '2026-12-01' },
+
+    it('guardar la misma fecha no escribe ni audita', async () => {
+      const { changed, record } = await correct(EMPLOYEE, '2026-11-01');
+      expect(changed).toBe(false);
+      expect(record.nextDue?.date).toBe('2026-11-01');
+      expect(db.animalMedicalRecord.updateMany).not.toHaveBeenCalled();
+      expect(db.auditLog.create).not.toHaveBeenCalled();
     });
-    expect(record.nextDue).toMatchObject({ status: 'SCHEDULED' });
-    // Anterior a la atención → 400.
-    await expect(
-      updatePetRecordNextDue(ADMIN, PET_ID, RECORD_ID, { nextDueDate: '2026-09-01' }, META, NOW),
-    ).rejects.toMatchObject({ statusCode: 400 });
+
+    it('si otra persona ya la cambió (no es la que vio), 409 sin escribir ni auditar', async () => {
+      db.animalMedicalRecord.findUnique.mockResolvedValue(stored({ nextDueDate: D('2026-11-15') }));
+      await expect(correct(EMPLOYEE, '2026-12-01', '2026-11-01')).rejects.toMatchObject({
+        statusCode: 409,
+        code: 'PET_NEXT_DUE_CHANGED',
+      });
+      // Lo vio sin fecha, pero alguien ya la completó.
+      await expect(correct(ADMIN, '2026-12-01', null)).rejects.toMatchObject({
+        code: 'PET_NEXT_DUE_CHANGED',
+      });
+      expect(db.animalMedicalRecord.updateMany).not.toHaveBeenCalled();
+      expect(db.auditLog.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['inexistente', null, 'PET_RECORD_NOT_FOUND'],
+      ['de otra mascota', stored({ animalId: 'otra' }), 'PET_RECORD_NOT_FOUND'],
+      ['anulado', stored({ voidedAt: NOW }), 'PET_RECORD_ALREADY_VOIDED'],
+      ['de ⚖️ Peso', stored({ type: 'WEIGHT', nextDueDate: null }), 'VALIDATION_ERROR'],
+      [
+        'ya cumplido',
+        stored({ fulfillments: [{ id: 'x', recordDate: D('2026-10-30') }] }),
+        'PET_DUE_ALREADY_FULFILLED',
+      ],
+    ])('no corrige un registro %s y no escribe', async (_label, row, code) => {
+      db.animalMedicalRecord.findUnique.mockResolvedValue(row);
+      await expect(correct(EMPLOYEE, '2026-12-01')).rejects.toMatchObject({ code });
+      expect(db.animalMedicalRecord.updateMany).not.toHaveBeenCalled();
+      expect(db.auditLog.create).not.toHaveBeenCalled();
+    });
+
+    it.each(['2026-09-01', '2026-08-31'])(
+      'la fecha debe ser posterior a la atención (rechaza %s)',
+      async (nextDueDate) => {
+        await expect(correct(EMPLOYEE, nextDueDate)).rejects.toMatchObject({ statusCode: 400 });
+        expect(db.animalMedicalRecord.updateMany).not.toHaveBeenCalled();
+      },
+    );
   });
 });

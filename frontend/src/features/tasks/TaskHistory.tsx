@@ -15,6 +15,7 @@ import {
   FREQUENCY_TONE,
   TASK_NOUN,
   formatCompletedAt,
+  formatLateRegistration,
   formatLocalDay,
   type ItemNoun,
 } from './taskLabels';
@@ -64,6 +65,26 @@ interface TaskHistoryProps {
 interface CompletionLine {
   task: HistoryTask;
   execution: TaskExecution;
+}
+
+/**
+ * Orden cronológico de realización (`YYYY-MM-DD HH:mm:ss` en la zona de
+ * negocio): la fecha real de una carga olvidada va al final de ese día (solo
+ * se conoce el día); el resto, el momento en que se registró.
+ */
+function realizationOrder(execution: TaskExecution, timeZone: string): string {
+  if (execution.performedOn) return `${execution.performedOn} 24:00:00`;
+  if (!execution.completedAt) return '';
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date(execution.completedAt));
 }
 
 /**
@@ -130,7 +151,11 @@ export function TaskHistory({
         ),
       ),
       ...data.others,
-    ].sort((a, b) => (a.execution.completedAt ?? '').localeCompare(b.execution.completedAt ?? ''));
+    ].sort((a, b) =>
+      realizationOrder(a.execution, timeZone).localeCompare(
+        realizationOrder(b.execution, timeZone),
+      ),
+    );
 
     content =
       recurring.length === 0 && lines.length === 0 ? (
@@ -143,7 +168,8 @@ export function TaskHistory({
           {recurring.length > 0 ? (
             <ul className="history-grid" role="list" aria-label="Diarias y semanales de la semana">
               {recurring.map((row) => (
-                <li key={row.task.id} className="history-grid__row">
+                // Una tarea que cambió de frecuencia puede tener dos filas (una por frecuencia).
+                <li key={`${row.task.id}-${row.task.frequency}`} className="history-grid__row">
                   <div className="history-grid__task">
                     <span className="history-grid__description">{row.task.description}</span>
                     <span className="history-grid__meta">
@@ -220,9 +246,11 @@ export function TaskHistory({
                               ? `Asignada a ${execution.assignedEmployee.displayName} · `
                               : ''}
                             Completada por {execution.completedByEmployee?.displayName ?? '—'}
-                            {execution.completedAt
-                              ? ` · ${formatCompletedAt(execution.completedAt, timeZone, today)}`
-                              : ''}
+                            {execution.performedOn && execution.completedAt
+                              ? ` · ${formatLateRegistration(execution.performedOn, execution.completedAt, timeZone)}`
+                              : execution.completedAt
+                                ? ` · ${formatCompletedAt(execution.completedAt, timeZone, today)}`
+                                : ''}
                           </span>
                         </span>
                       </div>

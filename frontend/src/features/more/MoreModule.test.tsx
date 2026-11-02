@@ -10,7 +10,12 @@ import {
   gardenResponse,
   gardenVersion,
   personalProfileResponse,
+  newsItem,
+  newsReply,
   newsResponse,
+  quoteOf,
+  photoFolder,
+  photoFoldersResponse,
   photosResponse,
   profileResponse,
   summaryResponse,
@@ -19,11 +24,18 @@ import {
 } from '../../test/fixtures/more';
 import type { TaskItem } from '../../api/taskTypes';
 import { ApiError } from '../../api/httpClient';
+import { OfflineError } from '../../api/transportErrors';
 
 const api = vi.hoisted(() => ({
   fetchMoreSummary: vi.fn(),
   fetchNews: vi.fn(),
   createNews: vi.fn(),
+  fetchNewsReplies: vi.fn(),
+  createNewsReply: vi.fn(),
+  updateNews: vi.fn(),
+  deleteNews: vi.fn(),
+  updateNewsReply: vi.fn(),
+  deleteNewsReply: vi.fn(),
   fetchEvents: vi.fn(),
   createEvent: vi.fn(),
   updateEvent: vi.fn(),
@@ -33,6 +45,11 @@ const api = vi.hoisted(() => ({
   fetchPhotoContent: vi.fn(),
   uploadPhoto: vi.fn(),
   deletePhoto: vi.fn(),
+  movePhoto: vi.fn(),
+  fetchPhotoFolders: vi.fn(),
+  createPhotoFolder: vi.fn(),
+  renamePhotoFolder: vi.fn(),
+  deletePhotoFolder: vi.fn(),
   fetchGardenPlanVersions: vi.fn(),
   fetchGardenPlanContent: vi.fn(),
   publishGardenPlanVersion: vi.fn(),
@@ -126,6 +143,7 @@ beforeEach(() => {
   api.fetchEvents.mockResolvedValue(eventsResponse());
   api.fetchWeather.mockResolvedValue(weatherResponse());
   api.fetchPhotos.mockResolvedValue(photosResponse());
+  api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse());
   api.fetchPhotoContent.mockResolvedValue(new Blob(['x'], { type: 'image/jpeg' }));
   api.fetchGardenPlanVersions.mockResolvedValue(gardenResponse());
   api.fetchGardenPlanContent.mockResolvedValue(new Blob(['x'], { type: 'image/jpeg' }));
@@ -224,6 +242,490 @@ describe('📝 Novedades', () => {
     api.fetchNews.mockResolvedValue(newsResponse(0));
     renderMore('/more/news');
     expect(await screen.findByText('Sin novedades aún')).toBeInTheDocument();
+  });
+
+  it('carga solo al abrir, enfoca Responder y envía saltos de línea con una clave estable', async () => {
+    const user = userEvent.setup();
+    const reply = newsReply({ text: 'Mañana viene el técnico\nA primera hora.' });
+    api.fetchNewsReplies.mockResolvedValue({
+      replies: [reply],
+      hasOlder: false,
+      nextCursor: null,
+    });
+    api.createNewsReply.mockResolvedValue({ reply });
+    renderMore('/more/news');
+    await screen.findByText('Aviso sintético 0');
+    expect(api.fetchNewsReplies).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Responder' }));
+    const composer = await screen.findByRole('textbox', { name: 'Tu respuesta' });
+    await waitFor(() => expect(composer).toHaveFocus());
+    expect(api.fetchNewsReplies).toHaveBeenCalledWith('news-0', null);
+
+    await user.type(composer, 'Mañana viene el técnico{enter}A primera hora.');
+    expect(api.createNewsReply).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Enviar' }));
+    await waitFor(() => expect(api.createNewsReply).toHaveBeenCalledTimes(1));
+    const [newsId, body, firstKey] = api.createNewsReply.mock.calls[0] as [
+      string,
+      { text: string },
+      string,
+    ];
+    expect(newsId).toBe('news-0');
+    expect(body).toEqual({ text: reply.text });
+    expect(firstKey).toMatch(/^[0-9a-f]{32}$/);
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: 'Respuestas' }).textContent).toContain(reply.text),
+    );
+  });
+
+  it('conserva el texto y reutiliza la clave al reintentar un envío fallido', async () => {
+    const user = userEvent.setup();
+    api.fetchNewsReplies.mockResolvedValue({ replies: [], hasOlder: false, nextCursor: null });
+    api.createNewsReply
+      .mockRejectedValueOnce(new Error('La red no respondió.'))
+      .mockResolvedValueOnce({
+        reply: newsReply({
+          id: 'reply-retry',
+          text: 'Texto que queda',
+          author: { displayName: 'Persona sintética' },
+        }),
+      });
+    renderMore('/more/news');
+    await screen.findByText('Aviso sintético 0');
+    await user.click(screen.getByRole('button', { name: 'Responder' }));
+    const composer = await screen.findByRole('textbox', { name: 'Tu respuesta' });
+    await user.type(composer, 'Texto que queda');
+    await user.click(screen.getByRole('button', { name: 'Enviar' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('No pudimos comunicarnos');
+    expect(composer).toHaveValue('Texto que queda');
+    await user.click(screen.getByRole('button', { name: 'Ocultar respuestas · 0' }));
+    expect(screen.queryByRole('textbox', { name: 'Tu respuesta' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Ver respuestas · 0' }));
+    expect(screen.getByRole('textbox', { name: 'Tu respuesta' })).toHaveValue('Texto que queda');
+    expect(api.fetchNewsReplies).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: 'Enviar' }));
+    await waitFor(() => expect(api.createNewsReply).toHaveBeenCalledTimes(2));
+    expect(api.createNewsReply.mock.calls[0]?.[2]).toBe(api.createNewsReply.mock.calls[1]?.[2]);
+    await waitFor(() => expect(composer).toHaveValue(''));
+  });
+
+  it('muestra la cita devuelta por el servidor y envía solo el ID de la respuesta citada', async () => {
+    const user = userEvent.setup();
+    const oldText = 'Texto original fuera de la página cargada. '.repeat(8).trim();
+    const oldReply = newsReply({
+      id: 'reply-old',
+      text: oldText,
+      createdAt: new Date(Date.now() - 60_000).toISOString(),
+      author: { displayName: 'Viki' },
+    });
+    const newReply = newsReply({ id: 'reply-new', text: 'Mi respuesta', quote: quoteOf(oldReply) });
+    api.fetchNewsReplies.mockResolvedValue({
+      replies: [newReply],
+      hasOlder: false,
+      nextCursor: null,
+    });
+    api.createNewsReply.mockResolvedValue({
+      reply: newsReply({
+        id: 'reply-quoted',
+        text: 'Lo reviso.',
+        author: { displayName: 'Persona sintética' },
+        quote: quoteOf(newReply),
+      }),
+    });
+    renderMore('/more/news');
+    await screen.findByText('Aviso sintético 0');
+    await user.click(screen.getByRole('button', { name: 'Ver respuestas · 0' }));
+    expect(await screen.findByText(oldText)).toBeInTheDocument();
+
+    const response = screen.getByText('Mi respuesta').closest('li');
+    expect(response).not.toBeNull();
+    await user.click(within(response as HTMLElement).getByRole('button', { name: 'Responder' }));
+    expect(await screen.findByText('Respondiendo a Administrador')).toBeInTheDocument();
+    expect(
+      within(response as HTMLElement).getByText('Mi respuesta', { selector: 'p' }),
+    ).toBeInTheDocument();
+    await user.type(screen.getByRole('textbox', { name: 'Tu respuesta' }), 'Lo reviso.');
+    await user.click(screen.getByRole('button', { name: 'Ocultar respuestas · 0' }));
+    await user.click(screen.getByRole('button', { name: 'Ver respuestas · 0' }));
+    expect(screen.getByText('Respondiendo a Administrador')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Tu respuesta' })).toHaveValue('Lo reviso.');
+    await user.click(screen.getByRole('button', { name: 'Cancelar respuesta' }));
+    expect(screen.queryByText('Respondiendo a Administrador')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Tu respuesta' })).toHaveValue('Lo reviso.');
+    await user.click(within(response as HTMLElement).getByRole('button', { name: 'Responder' }));
+    await user.click(screen.getByRole('button', { name: 'Enviar' }));
+    await waitFor(() =>
+      expect(api.createNewsReply.mock.calls[0]?.[1]).toEqual({
+        text: 'Lo reviso.',
+        quotedReplyId: 'reply-new',
+      }),
+    );
+  });
+});
+
+describe('✏️ Novedades — editar y eliminar mensajes', () => {
+  const listOf = (...news: ReturnType<typeof newsItem>[]) => ({
+    ...newsResponse(0),
+    news,
+    total: news.length,
+  });
+  const repliesOf = (...replies: ReturnType<typeof newsReply>[]) => ({
+    replies,
+    hasOlder: false,
+    nextCursor: null,
+  });
+  const cardOf = (text: string) => screen.getByText(text).closest('li') as HTMLElement;
+
+  it('el menú «⋯» muestra solo las acciones que autoriza el backend', async () => {
+    const user = userEvent.setup();
+    api.fetchNews.mockResolvedValue(
+      listOf(
+        newsItem({ id: 'own', text: 'Propia sintética' }),
+        newsItem({
+          id: 'moderable',
+          text: 'Ajena moderable',
+          employee: { ...PERSON, id: 'emp-2', displayName: 'Otra sintética' },
+          permissions: { canEdit: false, canDelete: true, canReply: true },
+        }),
+        newsItem({
+          id: 'foreign',
+          text: 'Ajena sin acciones',
+          employee: { ...PERSON, id: 'emp-3', displayName: 'Tercera sintética' },
+          permissions: { canEdit: false, canDelete: false, canReply: true },
+        }),
+      ),
+    );
+    renderMore('/more/news');
+    await screen.findByText('Propia sintética');
+
+    await user.click(
+      within(cardOf('Propia sintética')).getByRole('button', {
+        name: 'Acciones de la novedad de Persona sintética',
+      }),
+    );
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      'Editar',
+      'Eliminar',
+    ]);
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+    await user.click(
+      within(cardOf('Ajena moderable')).getByRole('button', {
+        name: 'Acciones de la novedad de Otra sintética',
+      }),
+    );
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Eliminar']);
+    expect(
+      within(cardOf('Ajena sin acciones')).queryByRole('button', { name: /Acciones/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('teclado: flechas recorren el menú y Escape lo cierra devolviendo el foco al «⋯»', async () => {
+    const user = userEvent.setup();
+    renderMore('/more/news');
+    const trigger = await screen.findByRole('button', {
+      name: 'Acciones de la novedad de Persona sintética',
+    });
+    trigger.focus();
+    await user.keyboard('{Enter}');
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('menuitem', { name: 'Editar' })).toHaveFocus();
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('menuitem', { name: 'Eliminar' })).toHaveFocus();
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('menuitem', { name: 'Editar' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('editar la novedad: precarga, Cancelar no envía, sin cambios no envía y guardar usa la versión vista', async () => {
+    const user = userEvent.setup();
+    api.updateNews.mockResolvedValue({
+      news: newsItem({
+        text: 'Aviso corregido',
+        version: 2,
+        editedAt: '2026-10-30T15:32:00.000Z',
+      }),
+    });
+    renderMore('/more/news');
+    await screen.findByText('Aviso sintético 0');
+    const openEditor = async () => {
+      await user.click(
+        screen.getByRole('button', { name: 'Acciones de la novedad de Persona sintética' }),
+      );
+      await user.click(screen.getByRole('menuitem', { name: 'Editar' }));
+      return screen.getByRole('textbox', { name: 'Editar novedad' });
+    };
+
+    let editor = await openEditor();
+    expect(editor).toHaveValue('Aviso sintético 0');
+    await waitFor(() => expect(editor).toHaveFocus());
+    await user.type(editor, ' descartado');
+    await user.click(screen.getByRole('button', { name: 'Cancelar' }));
+    expect(screen.getByText('Aviso sintético 0')).toBeInTheDocument();
+
+    editor = await openEditor();
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    expect(api.updateNews).not.toHaveBeenCalled();
+    expect(screen.queryByRole('textbox', { name: 'Editar novedad' })).not.toBeInTheDocument();
+
+    editor = await openEditor();
+    await user.clear(editor);
+    await user.type(editor, '  Aviso   corregido ');
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() =>
+      expect(api.updateNews).toHaveBeenCalledWith('news-0', {
+        text: 'Aviso corregido',
+        version: 1,
+      }),
+    );
+    expect(await screen.findByText('Aviso corregido')).toBeInTheDocument();
+    expect(screen.getByText(/Editado ·/)).toHaveTextContent('Editado · 30/10/2026 12:32');
+    expect(api.fetchNews).toHaveBeenCalledTimes(1);
+  });
+
+  it('versión vieja: conserva el borrador, muestra la actual y no guarda hasta elegir', async () => {
+    const user = userEvent.setup();
+    api.fetchNews.mockResolvedValueOnce(newsResponse()).mockResolvedValue(
+      listOf(
+        newsItem({
+          text: 'Cambio de otra pantalla',
+          version: 2,
+          editedAt: new Date().toISOString(),
+        }),
+      ),
+    );
+    api.updateNews
+      .mockRejectedValueOnce(
+        new ApiError(
+          409,
+          'Este mensaje cambió desde que lo abriste. Revisá la versión actual y volvé a intentar.',
+          'NEWS_MESSAGE_VERSION_CONFLICT',
+        ),
+      )
+      .mockResolvedValueOnce({ news: newsItem({ text: 'Mi versión', version: 3 }) });
+    renderMore('/more/news');
+    await screen.findByText('Aviso sintético 0');
+    await user.click(
+      screen.getByRole('button', { name: 'Acciones de la novedad de Persona sintética' }),
+    );
+    await user.click(screen.getByRole('menuitem', { name: 'Editar' }));
+    const editor = screen.getByRole('textbox', { name: 'Editar novedad' });
+    await user.clear(editor);
+    await user.type(editor, 'Mi versión');
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+
+    expect(await screen.findByText(/cambió en otra pantalla/)).toBeInTheDocument();
+    expect(screen.getByText('Cambio de otra pantalla')).toBeInTheDocument();
+    expect(editor).toHaveValue('Mi versión');
+    expect(screen.getByRole('button', { name: 'Guardar cambios' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Conservar mi texto' }));
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(api.updateNews).toHaveBeenCalledTimes(2));
+    expect(api.updateNews.mock.calls[1]).toEqual(['news-0', { text: 'Mi versión', version: 2 }]);
+  });
+
+  it('sin conexión: no se envía otra vez sola y el texto editado se conserva', async () => {
+    const user = userEvent.setup();
+    api.updateNews.mockRejectedValue(new OfflineError());
+    renderMore('/more/news');
+    await screen.findByText('Aviso sintético 0');
+    await user.click(
+      screen.getByRole('button', { name: 'Acciones de la novedad de Persona sintética' }),
+    );
+    await user.click(screen.getByRole('menuitem', { name: 'Editar' }));
+    const editor = screen.getByRole('textbox', { name: 'Editar novedad' });
+    await user.type(editor, ' sin red');
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Sin conexión');
+    expect(editor).toHaveValue('Aviso sintético 0 sin red');
+    expect(api.updateNews).toHaveBeenCalledTimes(1);
+  });
+
+  it('eliminar una respuesta: confirmación, Cancelar conserva el borrador; marcador, cita y contador actualizados', async () => {
+    const user = userEvent.setup();
+    const mine = newsReply({
+      id: 'r-mine',
+      text: 'Texto que se elimina',
+      author: { displayName: 'Persona sintética' },
+      permissions: { canEdit: true, canDelete: true },
+    });
+    const quoting = newsReply({ id: 'r-quoting', text: 'Te cito', quote: quoteOf(mine) });
+    api.fetchNews.mockResolvedValue(
+      listOf(
+        newsItem({
+          replyCount: 2,
+          hasConversation: true,
+          lastReply: { createdAt: quoting.createdAt, author: quoting.author },
+        }),
+      ),
+    );
+    api.fetchNewsReplies.mockResolvedValue(repliesOf(mine, quoting));
+    api.deleteNewsReply.mockResolvedValue({
+      reply: {
+        ...mine,
+        text: null,
+        deleted: true,
+        version: 2,
+        permissions: { canEdit: false, canDelete: false },
+      },
+      conversation: {
+        replyCount: 1,
+        hasConversation: true,
+        lastReply: { createdAt: quoting.createdAt, author: quoting.author },
+      },
+    });
+    renderMore('/more/news');
+    await screen.findByText('Aviso sintético 0');
+    await user.click(screen.getByRole('button', { name: 'Ver respuestas · 2' }));
+    await screen.findAllByText('Texto que se elimina');
+    const composer = screen.getByRole('textbox', { name: 'Tu respuesta' });
+    await user.type(composer, 'Borrador en curso');
+
+    const openDelete = async () => {
+      await user.click(
+        screen.getByRole('button', { name: 'Acciones del mensaje de Persona sintética' }),
+      );
+      await user.click(screen.getByRole('menuitem', { name: 'Eliminar' }));
+      return screen.findByRole('dialog');
+    };
+    let dialog = await openDelete();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
+    expect(api.deleteNewsReply).not.toHaveBeenCalled();
+    expect(composer).toHaveValue('Borrador en curso');
+
+    dialog = await openDelete();
+    await user.click(within(dialog).getByRole('button', { name: 'Eliminar' }));
+    await waitFor(() => expect(api.deleteNewsReply).toHaveBeenCalledWith('news-0', 'r-mine', 1));
+    await waitFor(() => expect(screen.queryByText('Texto que se elimina')).not.toBeInTheDocument());
+    expect(screen.getAllByText('Mensaje eliminado')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Ocultar respuestas · 1' })).toBeInTheDocument();
+    expect(composer).toHaveValue('Borrador en curso');
+    const marker = screen.getAllByText('Mensaje eliminado')[0]?.closest('li') as HTMLElement;
+    expect(within(marker).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('respuesta editada: texto actual, «Editado» y la cita lo indica', async () => {
+    const user = userEvent.setup();
+    const edited = newsReply({
+      id: 'r-edited',
+      text: 'Texto corregido',
+      editedAt: '2026-10-30T15:00:00.000Z',
+    });
+    api.fetchNewsReplies.mockResolvedValue(
+      repliesOf(edited, newsReply({ id: 'r-2', text: 'Respondo', quote: quoteOf(edited) })),
+    );
+    renderMore('/more/news');
+    await screen.findByText('Aviso sintético 0');
+    await user.click(screen.getByRole('button', { name: 'Ver respuestas · 0' }));
+    const quote = (await screen.findByText('Respondo')).closest('li') as HTMLElement;
+    expect(within(quote).getByText('(editado)')).toBeInTheDocument();
+    expect(
+      within(quote).getByText(/Texto corregido/, { selector: 'blockquote p' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Editado ·/)).toHaveTextContent('30/10/2026 12:00');
+  });
+
+  it('novedad eliminada: con conversación se abre y se responde; sin conversación queda solo el marcador', async () => {
+    api.fetchNews.mockResolvedValue(
+      listOf(
+        newsItem({
+          id: 'with-thread',
+          text: null,
+          deleted: true,
+          hasConversation: true,
+          permissions: { canEdit: false, canDelete: false, canReply: true },
+        }),
+        newsItem({
+          id: 'lonely',
+          text: null,
+          deleted: true,
+          employee: { ...PERSON, id: 'emp-2', displayName: 'Otra sintética' },
+          permissions: { canEdit: false, canDelete: false, canReply: false },
+        }),
+      ),
+    );
+    renderMore('/more/news');
+    const markers = await screen.findAllByText('Novedad eliminada');
+    expect(markers).toHaveLength(2);
+    const [withThread, lonely] = markers.map((marker) => marker.closest('li') as HTMLElement);
+    expect(
+      within(withThread as HTMLElement).getByRole('button', { name: 'Responder' }),
+    ).toBeInTheDocument();
+    expect(
+      within(withThread as HTMLElement).getByRole('button', { name: 'Ver respuestas · 0' }),
+    ).toBeInTheDocument();
+    expect(within(lonely as HTMLElement).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('compatibilidad: con un backend anterior (sin permisos ni marcas nuevas) se responde como antes y no hay menú', async () => {
+    const user = userEvent.setup();
+    const legacy = {
+      id: 'news-legacy',
+      text: 'Aviso con contrato anterior',
+      createdAt: new Date().toISOString(),
+      employee: PERSON,
+      replyCount: 1,
+      lastReply: null,
+    };
+    api.fetchNews.mockResolvedValue({ ...newsResponse(0), news: [legacy], total: 1 });
+    api.fetchNewsReplies.mockResolvedValue({
+      replies: [
+        {
+          id: 'r-legacy',
+          text: 'Respuesta con contrato anterior',
+          createdAt: new Date().toISOString(),
+          author: { displayName: 'Administrador' },
+          quote: null,
+        },
+      ],
+      hasOlder: false,
+      nextCursor: null,
+    });
+    renderMore('/more/news');
+    await screen.findByText('Aviso con contrato anterior');
+    await user.click(screen.getByRole('button', { name: 'Ver respuestas · 1' }));
+    expect(await screen.findByText('Respuesta con contrato anterior')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Acciones/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Responder' })).toHaveLength(2);
+  });
+
+  it('la cita se elimina mientras se redacta: conserva el borrador, muestra el conflicto y envía sin cita', async () => {
+    const user = userEvent.setup();
+    const target = newsReply({ id: 'r-target', text: 'Mensaje a citar' });
+    api.fetchNewsReplies
+      .mockResolvedValueOnce(repliesOf(target))
+      .mockResolvedValue(repliesOf({ ...target, text: null, deleted: true, version: 2 }));
+    api.createNewsReply
+      .mockRejectedValueOnce(
+        new ApiError(
+          409,
+          'El mensaje que querés citar fue eliminado. Quitá la cita o elegí otro mensaje.',
+          'NEWS_REPLY_QUOTE_DELETED',
+        ),
+      )
+      .mockResolvedValueOnce({ reply: newsReply({ id: 'r-new', text: 'Mi borrador' }) });
+    renderMore('/more/news');
+    await screen.findByText('Aviso sintético 0');
+    await user.click(screen.getByRole('button', { name: 'Ver respuestas · 0' }));
+    const row = (await screen.findByText('Mensaje a citar')).closest('li') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: 'Responder' }));
+    const composer = screen.getByRole('textbox', { name: 'Tu respuesta' });
+    await user.type(composer, 'Mi borrador');
+    await user.click(screen.getByRole('button', { name: 'Enviar' }));
+
+    expect(await screen.findByText('El mensaje que citabas fue eliminado.')).toBeInTheDocument();
+    expect(composer).toHaveValue('Mi borrador');
+    expect(screen.getByRole('button', { name: 'Enviar' })).toBeDisabled();
+    await waitFor(() => expect(screen.queryByText('Mensaje a citar')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Quitar cita' }));
+    await user.click(screen.getByRole('button', { name: 'Enviar' }));
+    await waitFor(() => expect(api.createNewsReply).toHaveBeenCalledTimes(2));
+    expect(api.createNewsReply.mock.calls[1]?.[1]).toEqual({ text: 'Mi borrador' });
+    expect(api.createNewsReply.mock.calls[0]?.[2]).not.toBe(api.createNewsReply.mock.calls[1]?.[2]);
   });
 });
 
@@ -372,32 +874,82 @@ describe('🌤️ Clima', () => {
 });
 
 describe('📸 Fotos', () => {
-  it('EMPLOYEE ve la galería y el visor sin "Eliminar" (solo ADMIN)', async () => {
-    const user = userEvent.setup();
-    renderMore('/more/photos');
-    await user.click(await screen.findByRole('button', { name: 'Ver Foto sintética' }));
-    const viewer = within(screen.getByRole('dialog'));
-    expect(viewer.getByText('Foto sintética')).toBeInTheDocument();
-    expect(viewer.getByText(/Persona sintética · recuerdo/)).toBeInTheDocument();
-    expect(viewer.queryByRole('button', { name: /Eliminar/ })).not.toBeInTheDocument();
+  const garden = photoFolder('folder-1', 'Jardín de invierno con un nombre bastante largo', {
+    photoCount: 2,
+    permissions: { canRename: true, canDelete: true },
+  });
+  const visits = photoFolder('folder-2', 'Visitas', { photoCount: 1 });
+  const inFolder = (folderId: string | null) => ({
+    ...photosResponse(),
+    photos: [{ ...photosResponse().photos[0]!, folderId }],
   });
 
-  it('ADMIN elimina con confirmación', async () => {
-    asAdmin();
-    const user = userEvent.setup();
-    api.deletePhoto.mockResolvedValue({});
+  it('pantalla principal: encabezado con acciones, carpetas como tarjetas y «Todas las fotos» como acceso secundario; una sola request', async () => {
+    api.fetchPhotoFolders.mockResolvedValue(
+      photoFoldersResponse([garden, visits], 'configured', 0),
+    );
     renderMore('/more/photos');
-    await user.click(await screen.findByRole('button', { name: 'Ver Foto sintética' }));
-    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Eliminar/ }));
-    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Eliminar' }));
-    await waitFor(() => expect(api.deletePhoto).toHaveBeenCalledWith('photo-1'));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Fotos' })).toBeInTheDocument();
+    expect(
+      screen.getByText('Las fotos de La Cañada, organizadas en carpetas compartidas.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Crear carpeta' })).toBeInTheDocument();
+    const list = within(await screen.findByRole('list', { name: 'Carpetas de fotos' }));
+    expect(screen.getByRole('button', { name: 'Subir foto' })).toBeEnabled();
+    const links = list.getAllByRole('link');
+    expect(links.map((link) => link.getAttribute('href'))).toEqual([
+      '/more/photos/folders/folder-1',
+      '/more/photos/folders/folder-2',
+    ]);
+    expect(links.map((link) => link.textContent)).toEqual([
+      `📁${garden.name}2 fotos`,
+      '📁Visitas1 foto',
+    ]);
+    // Ni «Todas las fotos» ni «Sin carpeta» son tarjetas de carpeta.
+    expect(list.queryByText(/Todas las fotos|Sin carpeta/)).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Ver todas las fotos (3)' })).toHaveAttribute(
+      'href',
+      '/more/photos/all',
+    );
+    // Sin fotos por organizar, no hay acceso.
+    expect(screen.queryByRole('link', { name: /por organizar/ })).not.toBeInTheDocument();
+    // «⋯» solo donde el backend autoriza acciones.
+    expect(list.getAllByRole('button', { name: /Acciones de la carpeta/ })).toHaveLength(1);
+    expect(api.fetchPhotoFolders).toHaveBeenCalledTimes(1);
+    expect(api.fetchPhotos).not.toHaveBeenCalled();
+    expect(api.fetchPhotoContent).not.toHaveBeenCalled();
   });
 
-  it('subir: título, tipo y persona viajan como metadatos con Idempotency-Key', async () => {
+  it('fotos anteriores sin carpeta: acceso discreto «Fotos por organizar» con su cantidad', async () => {
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([visits], 'configured', 4));
+    renderMore('/more/photos');
+    const access = await screen.findByRole('link', { name: /4 fotos por organizar/ });
+    expect(access).toHaveAttribute('href', '/more/photos/to-organize');
+  });
+
+  it('sin carpetas: estado vacío claro con «Crear la primera carpeta»', async () => {
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([], 'configured', 0));
+    renderMore('/more/photos');
+    expect(await screen.findByText('Todavía no hay carpetas')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Crear la primera carpeta' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Ver todas las fotos/ })).not.toBeInTheDocument();
+  });
+
+  it('sin almacenamiento configurado, «Subir foto» queda deshabilitado con aviso claro', async () => {
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([], 'unconfigured'));
+    renderMore('/more/photos');
+    expect(await screen.findByText(/falta configurar el almacenamiento/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Subir foto' })).toBeDisabled();
+  });
+
+  it('subir desde la pantalla principal: hay que elegir carpeta; viajan título, persona y carpeta (sin tipo) con Idempotency-Key', async () => {
     const user = userEvent.setup();
-    api.uploadPhoto.mockResolvedValue({ photo: photosResponse().photos[0] });
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([garden, visits]));
+    api.uploadPhoto.mockResolvedValue({
+      photo: { ...photosResponse().photos[0], folderId: 'folder-2' },
+    });
     const { container } = renderMore('/more/photos');
-    await screen.findByRole('button', { name: /Subir foto/ });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Subir foto' })).toBeEnabled());
     const file = new File([new Uint8Array([0xff, 0xd8, 0xff])], 'jardin.jpg', {
       type: 'image/jpeg',
     });
@@ -406,8 +958,10 @@ describe('📸 Fotos', () => {
       file,
     );
     const dialog = within(await screen.findByRole('dialog'));
+    expect(dialog.queryByLabelText('Tipo')).not.toBeInTheDocument();
+    expect(dialog.getByLabelText('Carpeta')).toHaveValue('');
     await user.type(dialog.getByLabelText('Título'), 'Jardín');
-    await user.selectOptions(dialog.getByLabelText('Tipo'), 'TASK_EVIDENCE');
+    await user.selectOptions(dialog.getByLabelText('Carpeta'), 'folder-2');
     // "Guardar" recién se habilita cuando el navegador terminó de cargar la
     // preview (jsdom no decodifica imágenes: el evento real lo dispara el navegador).
     expect(dialog.getByRole('button', { name: 'Guardar' })).toBeDisabled();
@@ -416,15 +970,354 @@ describe('📸 Fotos', () => {
     await waitFor(() => expect(api.uploadPhoto).toHaveBeenCalledTimes(1));
     const [sent, metadata, key] = api.uploadPhoto.mock.calls[0] as [File, object, string];
     expect(sent).toBe(file);
-    expect(metadata).toEqual({ title: 'Jardín', category: 'TASK_EVIDENCE', employeeId: null });
+    expect(metadata).toEqual({ title: 'Jardín', employeeId: null, folderId: 'folder-2' });
     expect(key).toMatch(/^[0-9a-f]{32}$/);
+    expect(await screen.findByText('La foto se guardó en «Visitas».')).toBeInTheDocument();
+    // Conteos de carpetas al día tras subir.
+    await waitFor(() => expect(api.fetchPhotoFolders).toHaveBeenCalledTimes(2));
   });
 
-  it('sin almacenamiento configurado, la subida queda deshabilitada con aviso claro', async () => {
-    api.fetchPhotos.mockResolvedValue(photosResponse('unconfigured'));
+  it('crear: valida sin request, envía el nombre normalizado una sola vez con Idempotency-Key y conserva el formulario ante un duplicado', async () => {
+    const user = userEvent.setup();
+    let reject!: (error: unknown) => void;
+    api.createPhotoFolder.mockReturnValueOnce(
+      new Promise((_, fail) => {
+        reject = fail;
+      }),
+    );
     renderMore('/more/photos');
-    expect(await screen.findByText(/falta configurar el almacenamiento/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Subir foto/ })).toBeDisabled();
+    await user.click(await screen.findByRole('button', { name: 'Crear carpeta' }));
+    const dialog = within(screen.getByRole('dialog'));
+    await user.click(dialog.getByRole('button', { name: 'Crear carpeta' }));
+    expect(dialog.getByRole('alert')).toHaveTextContent('Escribí un nombre para la carpeta.');
+    await user.type(dialog.getByLabelText('Nombre'), ' fotos   POR organizar ');
+    await user.click(dialog.getByRole('button', { name: 'Crear carpeta' }));
+    expect(dialog.getByRole('alert')).toHaveTextContent(/nombres reservados/);
+    expect(api.createPhotoFolder).not.toHaveBeenCalled();
+
+    await user.clear(dialog.getByLabelText('Nombre'));
+    await user.type(dialog.getByLabelText('Nombre'), '  Jardín   de invierno ');
+    await user.click(dialog.getByRole('button', { name: 'Crear carpeta' }));
+    await user.click(dialog.getByRole('button', { name: /Crear carpeta/ }));
+    expect(api.createPhotoFolder).toHaveBeenCalledTimes(1);
+    const [name, key] = api.createPhotoFolder.mock.calls[0] as [string, string];
+    expect(name).toBe('Jardín de invierno');
+    expect(key).toMatch(/^[0-9a-f]{32}$/);
+    reject(new ApiError(409, 'Ya existe una carpeta con ese nombre.', 'PHOTO_FOLDER_NAME_TAKEN'));
+    expect(await dialog.findByText('Ya existe una carpeta con ese nombre.')).toBeInTheDocument();
+    expect(dialog.getByLabelText('Nombre')).toHaveValue('  Jardín   de invierno ');
+
+    api.createPhotoFolder.mockResolvedValueOnce({ folder: photoFolder('folder-9', 'Huerta') });
+    // El listado revalidado ya la trae (como el backend).
+    api.fetchPhotoFolders.mockResolvedValue(
+      photoFoldersResponse([photoFolder('folder-9', 'Huerta')]),
+    );
+    await user.clear(dialog.getByLabelText('Nombre'));
+    await user.type(dialog.getByLabelText('Nombre'), 'Huerta');
+    await user.click(dialog.getByRole('button', { name: 'Crear carpeta' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(await screen.findByText('Se creó la carpeta «Huerta».')).toBeInTheDocument();
+    // La carpeta aparece enseguida y solo se revalida el listado de carpetas.
+    expect(await screen.findByRole('link', { name: /Huerta/ })).toBeInTheDocument();
+    await waitFor(() => expect(api.fetchPhotoFolders).toHaveBeenCalledTimes(2));
+    expect(api.fetchPhotos).not.toHaveBeenCalled();
+  });
+
+  it('sin conexión: la carpeta no se crea, se avisa y el formulario queda', async () => {
+    const user = userEvent.setup();
+    api.createPhotoFolder.mockRejectedValue(new OfflineError());
+    renderMore('/more/photos');
+    await user.click(await screen.findByRole('button', { name: 'Crear carpeta' }));
+    const dialog = within(screen.getByRole('dialog'));
+    await user.type(dialog.getByLabelText('Nombre'), 'Huerta');
+    await user.click(dialog.getByRole('button', { name: 'Crear carpeta' }));
+    expect(await dialog.findByRole('alert')).toHaveTextContent(/conexión/i);
+    expect(dialog.getByLabelText('Nombre')).toHaveValue('Huerta');
+    expect(api.createPhotoFolder).toHaveBeenCalledTimes(1);
+  });
+
+  it('dentro de una carpeta: regreso a Fotos, nombre, cantidad, acciones y miniaturas, sin filtros de tipo; subir la preselecciona', async () => {
+    const user = userEvent.setup();
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([garden, visits]));
+    api.fetchPhotos.mockResolvedValue(inFolder('folder-1'));
+    const { container } = renderMore('/more/photos/folders/folder-1');
+    expect(await screen.findByRole('heading', { level: 1, name: garden.name })).toBeInTheDocument();
+    expect(screen.getByText('2 fotos')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Fotos/ })).toHaveAttribute('href', '/more/photos');
+    expect(screen.getByRole('button', { name: /Acciones de la carpeta/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Ver Foto sintética' })).toBeInTheDocument();
+    for (const name of ['Todas', 'Tareas', 'Recuerdos']) {
+      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+    }
+    expect(api.fetchPhotos).toHaveBeenCalledWith({ scope: 'folder-1', page: 1, pageSize: 24 });
+    await user.upload(
+      container.ownerDocument.querySelector('input[type="file"]') as HTMLInputElement,
+      new File([new Uint8Array([0xff, 0xd8, 0xff])], 'x.jpg', { type: 'image/jpeg' }),
+    );
+    expect(within(await screen.findByRole('dialog')).getByLabelText('Carpeta')).toHaveValue(
+      'folder-1',
+    );
+  });
+
+  it('visor: imagen completa, persona y carpeta; «Eliminar» solo ADMIN; el tipo histórico de tarea se conserva visible', async () => {
+    const user = userEvent.setup();
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([garden]));
+    api.fetchPhotos.mockResolvedValue({
+      ...photosResponse(),
+      photos: [{ ...photosResponse().photos[0]!, folderId: 'folder-1', category: 'TASK_EVIDENCE' }],
+    });
+    renderMore('/more/photos/folders/folder-1');
+    await user.click(await screen.findByRole('button', { name: 'Ver Foto sintética' }));
+    const viewer = within(screen.getByRole('dialog'));
+    expect(viewer.getByText(/Persona sintética · hace/)).toBeInTheDocument();
+    expect(viewer.getByText(new RegExp(`${garden.name} · Evidencia de tarea`))).toBeInTheDocument();
+    expect(viewer.getByRole('button', { name: /Mover a carpeta/ })).toBeInTheDocument();
+    expect(viewer.queryByRole('button', { name: /Eliminar/ })).not.toBeInTheDocument();
+  });
+
+  it('ADMIN elimina una foto con confirmación', async () => {
+    asAdmin();
+    const user = userEvent.setup();
+    api.deletePhoto.mockResolvedValue({});
+    renderMore('/more/photos/all');
+    await user.click(await screen.findByRole('button', { name: 'Ver Foto sintética' }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Eliminar/ }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Eliminar' }));
+    await waitFor(() => expect(api.deletePhoto).toHaveBeenCalledWith('photo-1'));
+  });
+
+  it('una carpeta eliminada o inexistente muestra un estado claro (404 del backend o ausente del listado)', async () => {
+    // Carpetas y fotos se piden en paralelo (sin cascada al recargar el enlace).
+    api.fetchPhotoFolders.mockReturnValue(new Promise(() => undefined));
+    api.fetchPhotos.mockRejectedValue(
+      new ApiError(404, 'La carpeta no existe o fue eliminada.', 'PHOTO_FOLDER_NOT_FOUND'),
+    );
+    const first = renderMore('/more/photos/folders/folder-1');
+    expect(await screen.findByText('Esta carpeta no existe o fue eliminada.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Volver a Fotos' })).toHaveAttribute(
+      'href',
+      '/more/photos',
+    );
+    first.unmount();
+
+    api.fetchPhotos.mockReset();
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([visits]));
+    api.fetchPhotos.mockReturnValue(new Promise(() => undefined));
+    renderMore('/more/photos/folders/folder-1');
+    expect(await screen.findByText('Esta carpeta no existe o fue eliminada.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Subir foto' })).not.toBeInTheDocument();
+  });
+
+  it('mover: destino precargado, una request con la carpeta vista; sale de la vista de origen sin recargarla', async () => {
+    const user = userEvent.setup();
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([garden, visits]));
+    api.fetchPhotos.mockResolvedValue(inFolder('folder-1'));
+    api.movePhoto.mockResolvedValue({
+      moved: true,
+      photo: { ...photosResponse().photos[0], folderId: 'folder-2' },
+    });
+    renderMore('/more/photos/folders/folder-1');
+    await user.click(await screen.findByRole('button', { name: 'Ver Foto sintética' }));
+    await user.click(screen.getByRole('button', { name: /Mover a carpeta/ }));
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByLabelText('Carpeta')).toHaveValue('folder-1');
+    expect(
+      within(dialog.getByLabelText('Carpeta'))
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual([garden.name, 'Visitas']);
+    expect(dialog.getByRole('button', { name: 'Mover' })).toBeDisabled();
+    await user.selectOptions(dialog.getByLabelText('Carpeta'), 'folder-2');
+    const photosCalls = api.fetchPhotos.mock.calls.length;
+    await user.click(dialog.getByRole('button', { name: 'Mover' }));
+    await user.click(dialog.getByRole('button', { name: /Mover/ }));
+    expect(api.movePhoto).toHaveBeenCalledTimes(1);
+    expect(api.movePhoto).toHaveBeenCalledWith('photo-1', {
+      folderId: 'folder-2',
+      fromFolderId: 'folder-1',
+    });
+    expect(await screen.findByText('«Foto sintética» se movió a «Visitas».')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Ver Foto sintética' })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText('Esta carpeta está vacía.')).toBeInTheDocument();
+    // Conteos sí; la vista de origen no se vuelve a pedir.
+    await waitFor(() => expect(api.fetchPhotoFolders).toHaveBeenCalledTimes(2));
+    expect(api.fetchPhotos).toHaveBeenCalledTimes(photosCalls);
+  });
+
+  it('Fotos por organizar: mover una foto anterior a una carpeta (sin opción «sin carpeta»); al vaciarse, estado claro', async () => {
+    const user = userEvent.setup();
+    api.fetchPhotoFolders.mockResolvedValue(
+      photoFoldersResponse([garden, visits], 'configured', 1),
+    );
+    api.fetchPhotos.mockResolvedValue(inFolder(null));
+    api.movePhoto.mockResolvedValue({
+      moved: true,
+      photo: { ...photosResponse().photos[0], folderId: 'folder-2' },
+    });
+    renderMore('/more/photos/to-organize');
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Fotos por organizar' }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText(/1 foto sin carpeta/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Subir foto' })).not.toBeInTheDocument();
+    expect(api.fetchPhotos).toHaveBeenCalledWith({ scope: 'none', page: 1, pageSize: 24 });
+    await user.click(await screen.findByRole('button', { name: 'Ver Foto sintética' }));
+    expect(within(screen.getByRole('dialog')).getByText(/Por organizar/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Mover a carpeta/ }));
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByLabelText('Carpeta')).toHaveValue('');
+    expect(dialog.getByRole('button', { name: 'Mover' })).toBeDisabled();
+    expect(
+      within(dialog.getByLabelText('Carpeta'))
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual(['Elegí una carpeta', garden.name, 'Visitas']);
+    await user.selectOptions(dialog.getByLabelText('Carpeta'), 'folder-2');
+    await user.click(dialog.getByRole('button', { name: 'Mover' }));
+    expect(api.movePhoto).toHaveBeenCalledWith('photo-1', {
+      folderId: 'folder-2',
+      fromFolderId: null,
+    });
+    expect(await screen.findByText('No quedan fotos por organizar.')).toBeInTheDocument();
+  });
+
+  it('el enlace anterior «/more/photos/unfiled» sigue funcionando (lleva a Fotos por organizar)', async () => {
+    api.fetchPhotos.mockResolvedValue(inFolder(null));
+    renderMore('/more/photos/unfiled');
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Fotos por organizar' }),
+    ).toBeInTheDocument();
+    expect(api.fetchPhotos).toHaveBeenCalledWith({ scope: 'none', page: 1, pageSize: 24 });
+  });
+
+  it('mover sin carpetas: se crea la primera desde el mismo diálogo y queda elegida', async () => {
+    const user = userEvent.setup();
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([], 'configured', 1));
+    api.fetchPhotos.mockResolvedValue(inFolder(null));
+    api.createPhotoFolder.mockResolvedValue({ folder: photoFolder('folder-new', 'Huerta') });
+    renderMore('/more/photos/to-organize');
+    await user.click(await screen.findByRole('button', { name: 'Ver Foto sintética' }));
+    await user.click(screen.getByRole('button', { name: /Mover a carpeta/ }));
+    const dialog = within(screen.getByRole('dialog'));
+    api.fetchPhotoFolders.mockResolvedValue(
+      photoFoldersResponse([photoFolder('folder-new', 'Huerta')], 'configured', 1),
+    );
+    await user.type(dialog.getByLabelText('Nombre de la carpeta nueva'), 'Huerta');
+    await user.click(dialog.getByRole('button', { name: 'Crear' }));
+    await waitFor(() => expect(dialog.getByLabelText('Carpeta')).toHaveValue('folder-new'));
+    expect(dialog.getByRole('button', { name: 'Mover' })).toBeEnabled();
+  });
+
+  it('mover cuando otra persona ya la movió: conflicto visible, sin pisar, y la vista se actualiza', async () => {
+    const user = userEvent.setup();
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([garden, visits]));
+    api.fetchPhotos.mockResolvedValue(inFolder('folder-1'));
+    api.movePhoto.mockRejectedValue(
+      new ApiError(
+        409,
+        'Otra persona movió esta foto mientras la tenías abierta. Revisá dónde está ahora y volvé a intentar.',
+        'PHOTO_MOVE_CONFLICT',
+      ),
+    );
+    renderMore('/more/photos/folders/folder-1');
+    await user.click(await screen.findByRole('button', { name: 'Ver Foto sintética' }));
+    await user.click(screen.getByRole('button', { name: /Mover a carpeta/ }));
+    await user.selectOptions(
+      within(screen.getByRole('dialog')).getByLabelText('Carpeta'),
+      'folder-2',
+    );
+    const photosCalls = api.fetchPhotos.mock.calls.length;
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mover' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Otra persona movió esta foto/);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(api.fetchPhotos.mock.calls.length).toBeGreaterThan(photosCalls));
+  });
+
+  it('renombrar desde la carpeta: versión vista y encabezado al día sin volver a pedir fotos', async () => {
+    const user = userEvent.setup();
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([garden, visits]));
+    api.fetchPhotos.mockResolvedValue(inFolder('folder-1'));
+    api.renamePhotoFolder.mockResolvedValue({ folder: { ...garden, name: 'Huerta', version: 2 } });
+    renderMore('/more/photos/folders/folder-1');
+    await user.click(await screen.findByRole('button', { name: /Acciones de la carpeta/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Renombrar' }));
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByLabelText('Nombre')).toHaveValue(garden.name);
+    await user.clear(dialog.getByLabelText('Nombre'));
+    await user.type(dialog.getByLabelText('Nombre'), 'Huerta');
+    const photosCalls = api.fetchPhotos.mock.calls.length;
+    await user.click(dialog.getByRole('button', { name: 'Guardar' }));
+    expect(api.renamePhotoFolder).toHaveBeenCalledWith('folder-1', { name: 'Huerta', version: 1 });
+    expect(await screen.findByRole('heading', { level: 1, name: 'Huerta' })).toBeInTheDocument();
+    expect(api.fetchPhotos).toHaveBeenCalledTimes(photosCalls);
+    expect(api.fetchPhotoFolders).toHaveBeenCalledTimes(1);
+  });
+
+  it('renombrar con el mismo nombre no envía nada; cancelar no envía nada', async () => {
+    const user = userEvent.setup();
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([garden]));
+    renderMore('/more/photos');
+    await user.click(await screen.findByRole('button', { name: /Acciones de la carpeta/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Renombrar' }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /Acciones de la carpeta/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Renombrar' }));
+    await user.type(within(screen.getByRole('dialog')).getByLabelText('Nombre'), ' 2');
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancelar' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(api.renamePhotoFolder).not.toHaveBeenCalled();
+  });
+
+  it('eliminar: confirmación explícita, una carpeta con fotos informa el 409 y una vacía vuelve a Fotos', async () => {
+    const user = userEvent.setup();
+    const empty = { ...garden, photoCount: 0 };
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([garden]));
+    api.deletePhotoFolder.mockRejectedValueOnce(
+      new ApiError(
+        409,
+        'La carpeta todavía tiene fotos. Movelas a otra carpeta antes de eliminarla.',
+        'PHOTO_FOLDER_NOT_EMPTY',
+      ),
+    );
+    renderMore('/more/photos');
+    await user.click(await screen.findByRole('button', { name: /Acciones de la carpeta/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Eliminar' }));
+    let dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByText(/tiene 2 fotos/)).toBeInTheDocument();
+    // Mientras tanto otra persona vació la carpeta: el 409 revalida el listado.
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([empty]));
+    await user.click(dialog.getByRole('button', { name: 'Eliminar' }));
+    expect(await dialog.findByText(/todavía tiene fotos/)).toBeInTheDocument();
+    expect(api.deletePhotoFolder).toHaveBeenCalledWith('folder-1', 1);
+    await waitFor(() => expect(api.fetchPhotoFolders).toHaveBeenCalledTimes(2));
+    await user.click(dialog.getByRole('button', { name: 'Cancelar' }));
+
+    api.fetchPhotos.mockResolvedValue({ ...photosResponse(), photos: [], total: 0 });
+    api.deletePhotoFolder.mockResolvedValueOnce({ folder: { id: 'folder-1', deleted: true } });
+    await user.click(await screen.findByRole('link', { name: new RegExp(empty.name) }));
+    await user.click(await screen.findByRole('button', { name: /Acciones de la carpeta/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Eliminar' }));
+    dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByText(/ninguna foto se borra/)).toBeInTheDocument();
+    await user.click(dialog.getByRole('button', { name: 'Eliminar' }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Fotos' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: new RegExp(empty.name) })).not.toBeInTheDocument();
+  });
+
+  it('un EMPLOYEE ajeno no ve acciones de la carpeta, pero sí puede mover fotos', async () => {
+    const user = userEvent.setup();
+    api.fetchPhotoFolders.mockResolvedValue(photoFoldersResponse([visits]));
+    api.fetchPhotos.mockResolvedValue(inFolder('folder-2'));
+    renderMore('/more/photos/folders/folder-2');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Visitas' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Acciones de la carpeta/ }),
+    ).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'Ver Foto sintética' }));
+    expect(screen.getByRole('button', { name: /Mover a carpeta/ })).toBeInTheDocument();
   });
 });
 
@@ -440,7 +1333,31 @@ describe('🌳 Jardín', () => {
     expect(
       screen.queryByRole('button', { name: /Publicar nueva versión/ }),
     ).not.toBeInTheDocument();
+    // «Crear plano» acompaña a publicar: mismo permiso (solo ADMIN).
+    expect(screen.queryByRole('link', { name: /Crear plano/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Diseñá el plano en Canva/)).not.toBeInTheDocument();
     expect(api.fetchGardenPlanVersions).toHaveBeenCalledWith(1, 20);
+  });
+
+  it('ADMIN: «Crear plano» abre Canva en una pestaña nueva, junto a publicar', async () => {
+    asAdmin();
+    renderMore('/more/garden');
+    const current = await screen.findByRole('region', { name: 'Plano vigente' });
+    const link = screen.getByRole('link', {
+      name: 'Crear plano en Canva (se abre en una pestaña nueva)',
+    });
+    expect(link).toHaveAttribute('href', 'https://canva.link/aizpx47290iq6w5');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link).toHaveTextContent('Crear plano');
+    expect(link).toHaveAccessibleDescription('Diseñá el plano en Canva, descargalo y subilo acá.');
+    expect(screen.getByText('Se abre en una pestaña nueva.')).toBeInTheDocument();
+    // Junto a «Publicar nueva versión», que sigue igual; el plano vigente no cambia.
+    const publish = screen.getByRole('button', { name: /Publicar nueva versión/ });
+    expect(publish.closest('.garden-actions')).toContainElement(link);
+    expect(publish).toBeEnabled();
+    expect(within(current).getByText('Versión 2')).toBeInTheDocument();
+    expect(api.publishGardenPlanVersion).not.toHaveBeenCalled();
   });
 
   it('abre el visor de una versión con quién la publicó y cuándo', async () => {
@@ -519,6 +1436,11 @@ describe('🌳 Jardín', () => {
     renderMore('/more/garden');
     expect(await screen.findByText(/falta configurar el almacenamiento/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Publicar nueva versión/ })).toBeDisabled();
+    // Diseñar en Canva no depende del almacenamiento de la app.
+    expect(screen.getByRole('link', { name: /Crear plano/ })).toHaveAttribute(
+      'href',
+      'https://canva.link/aizpx47290iq6w5',
+    );
   });
 });
 

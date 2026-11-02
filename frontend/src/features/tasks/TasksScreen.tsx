@@ -41,6 +41,7 @@ import { TaskFormDialog } from './TaskFormDialog';
 import { TaskHistory } from './TaskHistory';
 import { TaskItem } from './TaskItem';
 import { TasksSubnav } from './TasksSubnav';
+import { invalidateTaskViews } from './taskCache';
 
 type LoadState =
   | { status: 'loading' }
@@ -144,14 +145,13 @@ export function TasksScreen() {
   }, [tasksQuery, employeesQuery]);
 
   /**
-   * Invalidación selectiva tras una mutación: lista e historial de Tareas y
-   * Desempeño (completar/revertir cambia el cumplimiento). Nada más.
+   * Invalidación selectiva tras una mutación: lista e historial de Tareas,
+   * Desempeño (completar/revertir cambia el cumplimiento) e Inicio. Nada más.
    */
-  const refresh = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(userId) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.performance.all(userId) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard(userId) });
-  }, [queryClient, userId]);
+  const refresh = useCallback(
+    () => invalidateTaskViews(queryClient, userId),
+    [queryClient, userId],
+  );
 
   const closeDialog = useCallback(() => setDialog({ type: 'none' }), []);
 
@@ -322,7 +322,7 @@ export function TasksScreen() {
               checked={showAll}
               onChange={(event) => setShowAll(event.target.checked)}
             />
-            Incluir desactivadas y únicas ya completadas
+            Incluir desactivadas y completadas («Una vez» y urgentes)
           </label>
         ) : null}
       </div>
@@ -335,11 +335,21 @@ export function TasksScreen() {
             description={isAdmin ? 'Creá la primera con «Nueva tarea».' : undefined}
           />
         ) : visible.length === 0 ? (
-          <EmptyState
-            icon={<span aria-hidden="true">✅</span>}
-            title="No hay tareas con estos filtros."
-            description="Probá con otra persona o frecuencia."
-          />
+          // Las urgentes completadas salen del listado (como las «Una vez»):
+          // el vacío lo dice, en vez de sugerir que no existen.
+          frequency === 'URGENT' && !showAll ? (
+            <EmptyState
+              icon={<span aria-hidden="true">✅</span>}
+              title="No hay urgentes pendientes."
+              description="Las urgentes completadas se consultan en el historial y en Desempeño."
+            />
+          ) : (
+            <EmptyState
+              icon={<span aria-hidden="true">✅</span>}
+              title="No hay tareas con estos filtros."
+              description="Probá con otra persona o frecuencia."
+            />
+          )
         ) : (
           <ul className="task-list" role="list" aria-label="Tareas del período">
             {visible.map((task) => (

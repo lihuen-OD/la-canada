@@ -84,6 +84,75 @@ export const createNewsBodySchema = z
   })
   .strict();
 
+export const NEWS_REPLY_TEXT_MAX = 1000;
+
+function containsDisallowedControlCharacters(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0);
+    if (
+      code !== undefined &&
+      ((code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) || code === 0x7f)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const newsReplyTextSchema = z
+  .string({ message: 'La respuesta debe ser texto.' })
+  .transform((text) => text.trim().replace(/\r\n?/g, '\n'))
+  .pipe(
+    z
+      .string()
+      .min(1, 'La respuesta no puede estar vacía.')
+      .max(NEWS_REPLY_TEXT_MAX, `La respuesta no puede superar ${NEWS_REPLY_TEXT_MAX} caracteres.`)
+      .refine(
+        (text) => !containsDisallowedControlCharacters(text),
+        'La respuesta contiene caracteres inválidos.',
+      ),
+  );
+
+export const createNewsReplyBodySchema = z
+  .object({
+    text: newsReplyTextSchema,
+    quotedReplyId: uuidSchema.optional(),
+  })
+  .strict();
+
+/**
+ * Versión que el cliente vio al abrir la edición o la confirmación: si el
+ * mensaje cambió desde entonces, el backend responde 409 en vez de pisarlo.
+ */
+const messageVersionSchema = z
+  .number({ message: 'Falta la versión del mensaje.' })
+  .int('La versión del mensaje es inválida.')
+  .min(1, 'La versión del mensaje es inválida.')
+  .max(2_147_483_647, 'La versión del mensaje es inválida.');
+
+/** Editar el texto de una novedad: las mismas validaciones que el alta. */
+export const updateNewsBodySchema = z
+  .object({ text: plainText('La novedad', NEWS_TEXT_MAX), version: messageVersionSchema })
+  .strict();
+
+/** Editar una respuesta: las mismas validaciones que al enviarla. */
+export const updateNewsReplyBodySchema = z
+  .object({ text: newsReplyTextSchema, version: messageVersionSchema })
+  .strict();
+
+/** Eliminar (lógicamente) una novedad o una respuesta. */
+export const deleteNewsMessageBodySchema = z.object({ version: messageVersionSchema }).strict();
+
+export const listNewsRepliesQuerySchema = z
+  .object({
+    beforeCreatedAt: z.iso.datetime({ offset: true }).optional(),
+    beforeId: uuidSchema.optional(),
+  })
+  .strict()
+  .refine((query) => (query.beforeCreatedAt === undefined) === (query.beforeId === undefined), {
+    message: 'El cursor de respuestas está incompleto.',
+  });
+
 // ── 📅 Eventos ───────────────────────────────────────────────────────────
 
 export const listEventsQuerySchema = z
@@ -117,9 +186,17 @@ export const updateEventBodySchema = z
 
 // ── 📸 Fotos ─────────────────────────────────────────────────────────────
 
+/**
+ * `folder`: sin valor = todas las fotos; `none` = «Sin carpeta»; un UUID =
+ * esa carpeta. Combinable con el tipo y la página.
+ */
 export const listPhotosQuerySchema = z
   .object({
     category: z.enum(GALLERY_CATEGORIES, { message: 'Tipo de foto inválido.' }).optional(),
+    folder: z
+      .union([z.literal('none'), z.string().uuid()], { message: 'Carpeta inválida.' })
+      .transform((value) => value.toLowerCase())
+      .optional(),
     page: pageSchema,
     pageSize: pageSizeSchema(48, 24),
   })
@@ -128,6 +205,15 @@ export const listPhotosQuerySchema = z
 /**
  * Metadatos de "Guardar foto" (viajan en la query: el cuerpo es la imagen).
  * Título vacío = "Sin título" (prototipo); persona opcional.
+ *
+ * - `folderId`: la carpeta de la foto. El servicio la EXIGE (400
+ *   `PHOTO_FOLDER_REQUIRED`): desde 2026-10-30 ninguna foto nueva de la
+ *   galería queda sin carpeta. Acá es opcional solo para responder con ese
+ *   código propio (y no un error genérico) a un cliente anterior.
+ * - `category`: ya no se le pide a la persona. Sin valor, `MEMORY`, la
+ *   categoría general de la galería ("fotografía general o recuerdo",
+ *   docs/DATABASE.md); nunca `TASK_EVIDENCE` por defecto. Un cliente
+ *   anterior que la envía la conserva tal cual.
  */
 export const uploadPhotoQuerySchema = z
   .object({
@@ -135,8 +221,88 @@ export const uploadPhotoQuerySchema = z
       .union([z.literal(''), plainText('El título', PHOTO_TITLE_MAX)])
       .optional()
       .transform((value) => value || 'Sin título'),
-    category: z.enum(GALLERY_CATEGORIES, { message: 'Elegí el tipo de foto.' }),
+    category: z.enum(GALLERY_CATEGORIES, { message: 'Tipo de foto inválido.' }).default('MEMORY'),
     employeeId: uuidSchema.optional(),
+    folderId: uuidSchema.transform((value) => value.toLowerCase()).optional(),
+  })
+  .strict();
+
+// ── 📸 Carpetas de Fotos ─────────────────────────────────────────────────
+
+export const PHOTO_FOLDER_NAME_MAX = 80;
+/**
+ * Nombres de los accesos especiales de la pantalla (y el anterior «Sin
+ * carpeta»): no pueden ser carpetas.
+ */
+export const RESERVED_PHOTO_FOLDER_NAMES = [
+  'Sin carpeta',
+  'Todas las fotos',
+  'Fotos por organizar',
+] as const;
+
+/**
+ * Clave de unicidad de una carpeta: el nombre YA normalizado en minúsculas.
+ * Dos nombres que solo difieren en mayúsculas o en espacios son el mismo.
+ */
+export const photoFolderNameKey = (name: string) => name.toLowerCase();
+const RESERVED_KEYS = new Set(
+  RESERVED_PHOTO_FOLDER_NAMES.map((name) => photoFolderNameKey(normalizeStockText(name))),
+);
+
+/**
+ * Nombre de carpeta: texto plano (sin HTML ni caracteres de control),
+ * Unicode NFC, extremos recortados y espacios internos colapsados, de 1 a
+ * 80 caracteres y distinto de los accesos especiales.
+ */
+const photoFolderNameSchema = z
+  .string({ message: 'El nombre de la carpeta debe ser texto.' })
+  .transform((value) => value.normalize('NFC'))
+  .pipe(plainText('El nombre de la carpeta', PHOTO_FOLDER_NAME_MAX))
+  .refine(
+    (name) => !RESERVED_KEYS.has(photoFolderNameKey(name)),
+    '«Todas las fotos», «Fotos por organizar» y «Sin carpeta» son nombres reservados de Fotos: elegí otro.',
+  );
+
+/** Versión que se vio al abrir el renombre o la confirmación (409 si cambió). */
+const photoFolderVersionSchema = z
+  .number({ message: 'Falta la versión de la carpeta.' })
+  .int('La versión de la carpeta es inválida.')
+  .min(1, 'La versión de la carpeta es inválida.')
+  .max(2_147_483_647, 'La versión de la carpeta es inválida.');
+
+export const createPhotoFolderBodySchema = z.object({ name: photoFolderNameSchema }).strict();
+
+export const renamePhotoFolderBodySchema = z
+  .object({ name: photoFolderNameSchema, version: photoFolderVersionSchema })
+  .strict();
+
+export const deletePhotoFolderBodySchema = z.object({ version: photoFolderVersionSchema }).strict();
+
+const folderRefSchema = (message: string) =>
+  z.union(
+    [
+      z.null(),
+      z
+        .string()
+        .uuid()
+        .transform((value) => value.toLowerCase()),
+    ],
+    { message },
+  );
+
+/**
+ * "Mover a carpeta": destino (siempre una carpeta: ninguna foto vuelve a
+ * quedar sin carpeta) y la carpeta en la que quien mueve VIO la foto
+ * (`fromFolderId`, `null` = una foto anterior por organizar). Si ya no está
+ * ahí, 409 en lugar de pisar el movimiento de otra persona.
+ */
+export const movePhotoBodySchema = z
+  .object({
+    folderId: z
+      .string({ message: 'Elegí una carpeta.' })
+      .uuid('Elegí una carpeta.')
+      .transform((value) => value.toLowerCase()),
+    fromFolderId: folderRefSchema('Falta la carpeta en la que estaba la foto.'),
   })
   .strict();
 

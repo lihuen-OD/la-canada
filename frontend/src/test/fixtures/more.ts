@@ -5,8 +5,13 @@ import type {
   GardenVersionsResponse,
   ManagedEmployee,
   MoreSummary,
+  NewsItem,
   NewsListResponse,
+  NewsReply,
+  NewsReplyQuote,
   PersonalProfileResponse,
+  PhotoFolder,
+  PhotoFoldersResponse,
   PhotosListResponse,
   TeamMember,
   WeatherReport,
@@ -30,11 +35,46 @@ export const newsResponse = (count = 1): NewsListResponse => ({
     text: `Aviso sintético ${index}`,
     createdAt: new Date(Date.now() - 3 * 3600_000).toISOString(),
     employee: PERSON,
+    version: 1,
+    deleted: false,
+    editedAt: null,
+    replyCount: 0,
+    hasConversation: false,
+    lastReply: null,
+    permissions: { canEdit: true, canDelete: true, canReply: true },
   })),
   page: 1,
   pageSize: 20,
   total: count,
   totalPages: 1,
+});
+
+/** Novedad sintética con el contrato completo (permisos según quien mira). */
+export const newsItem = (overrides: Partial<NewsItem> = {}): NewsItem => ({
+  ...(newsResponse().news[0] as NewsItem),
+  ...overrides,
+});
+
+export const newsReply = (overrides: Partial<NewsReply> = {}): NewsReply => ({
+  id: 'reply-1',
+  text: 'Respuesta sintética',
+  createdAt: new Date().toISOString(),
+  author: { displayName: 'Administrador' },
+  version: 1,
+  deleted: false,
+  editedAt: null,
+  quote: null,
+  permissions: { canEdit: false, canDelete: false },
+  ...overrides,
+});
+
+/** La cita tal como la arma el backend: estado actual del mensaje citado. */
+export const quoteOf = (reply: NewsReply): NewsReplyQuote => ({
+  id: reply.id,
+  text: reply.text,
+  author: reply.author,
+  deleted: reply.deleted,
+  editedAt: reply.editedAt,
 });
 
 export const eventsResponse = (): EventsResponse => ({
@@ -147,6 +187,7 @@ export const photosResponse = (
       title: 'Foto sintética',
       category: 'MEMORY',
       createdAt: new Date().toISOString(),
+      folderId: null,
       employee: PERSON,
     },
   ],
@@ -154,6 +195,32 @@ export const photosResponse = (
   pageSize: 24,
   total: 1,
   totalPages: 1,
+  photoStorage: storage,
+});
+
+/** Carpetas SINTÉTICAS de Fotos (sin datos reales): ids, nombres y conteos inventados para pruebas. */
+export const photoFolder = (
+  id: string,
+  name: string,
+  overrides: Partial<PhotoFolder> = {},
+): PhotoFolder => ({
+  id,
+  name,
+  version: 1,
+  createdAt: new Date().toISOString(),
+  photoCount: 0,
+  permissions: { canRename: false, canDelete: false },
+  ...overrides,
+});
+
+export const photoFoldersResponse = (
+  folders: PhotoFolder[] = [],
+  storage: 'configured' | 'unconfigured' = 'configured',
+  unfiled = 1,
+): PhotoFoldersResponse => ({
+  folders,
+  unfiled: { photoCount: unfiled },
+  all: { photoCount: unfiled + folders.reduce((sum, folder) => sum + folder.photoCount, 0) },
   photoStorage: storage,
 });
 

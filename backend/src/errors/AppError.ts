@@ -166,6 +166,26 @@ export class TaskAlreadyCompletedError extends AppError {
   }
 }
 
+/** Carga olvidada: la obligación elegida ya tiene una ejecución vigente (también si otra persona la registró mientras tanto). */
+export class TaskObligationAlreadyCompletedError extends AppError {
+  constructor() {
+    super('Esta tarea ya figura como realizada en ese período. Actualizamos los datos.', 409, {
+      code: 'TASK_OBLIGATION_ALREADY_COMPLETED',
+    });
+  }
+}
+
+/** Carga olvidada: la obligación ya no está entre las que se pueden registrar (fuera de la ventana, planificación cambiada o inexistente). */
+export class TaskObligationUnavailableError extends AppError {
+  constructor() {
+    super(
+      'Esta tarea ya no se puede registrar para ese período desde Desempeño. Actualizamos los datos.',
+      409,
+      { code: 'TASK_OBLIGATION_UNAVAILABLE' },
+    );
+  }
+}
+
 /** Una tarea desactivada no se puede completar hasta reactivarla. */
 export class TaskInactiveError extends AppError {
   constructor() {
@@ -501,6 +521,66 @@ export class EventNotFoundError extends AppError {
   }
 }
 
+export class NewsNotFoundError extends AppError {
+  constructor() {
+    super('La novedad no existe.', 404, { code: 'NEWS_NOT_FOUND' });
+  }
+}
+
+export class NewsReplyQuoteInvalidError extends AppError {
+  constructor() {
+    super('La respuesta citada no pertenece a esta novedad.', 400, {
+      code: 'NEWS_REPLY_QUOTE_INVALID',
+    });
+  }
+}
+
+export class NewsReplyNotFoundError extends AppError {
+  constructor() {
+    super('La respuesta no existe en esta novedad.', 404, { code: 'NEWS_REPLY_NOT_FOUND' });
+  }
+}
+
+/** Cita de una respuesta eliminada: el borrador se conserva y se elige otra cita o ninguna. */
+export class NewsReplyQuoteDeletedError extends AppError {
+  constructor() {
+    super('El mensaje que querés citar fue eliminado. Quitá la cita o elegí otro mensaje.', 409, {
+      code: 'NEWS_REPLY_QUOTE_DELETED',
+    });
+  }
+}
+
+/** Novedad eliminada que no tenía conversación: queda como marcador, sin respuestas nuevas. */
+export class NewsConversationClosedError extends AppError {
+  constructor() {
+    super('Esta novedad fue eliminada y no tiene una conversación para continuar.', 409, {
+      code: 'NEWS_CONVERSATION_CLOSED',
+    });
+  }
+}
+
+/** Editar un mensaje (novedad o respuesta) ya eliminado. */
+export class NewsMessageDeletedError extends AppError {
+  constructor() {
+    super('Este mensaje fue eliminado y ya no se puede editar.', 409, {
+      code: 'NEWS_MESSAGE_DELETED',
+    });
+  }
+}
+
+/** La versión enviada no es la vigente: otra pantalla editó o eliminó el mensaje. */
+export class NewsMessageVersionConflictError extends AppError {
+  constructor() {
+    super(
+      'Este mensaje cambió desde que lo abriste. Revisá la versión actual y volvé a intentar.',
+      409,
+      {
+        code: 'NEWS_MESSAGE_VERSION_CONFLICT',
+      },
+    );
+  }
+}
+
 /** Mismo título, fecha y tipo que otro evento vigente. */
 export class EventDuplicateError extends AppError {
   constructor() {
@@ -573,6 +653,71 @@ export class FamilyUsesEmployeeProfileError extends AppError {
 export class PhotoNotFoundError extends AppError {
   constructor() {
     super('La foto no existe o ya fue eliminada.', 404, { code: 'PHOTO_NOT_FOUND' });
+  }
+}
+
+// ── 📸 Carpetas de Fotos ──────────────────────────────────────────────────
+
+/** La carpeta pedida no existe o fue eliminada (ya no se ve ni se edita). */
+export class PhotoFolderNotFoundError extends AppError {
+  constructor() {
+    super('La carpeta no existe o fue eliminada.', 404, { code: 'PHOTO_FOLDER_NOT_FOUND' });
+  }
+}
+
+/** Una foto nueva de la galería sin carpeta (p. ej. un cliente anterior a las carpetas). */
+export class PhotoFolderRequiredError extends AppError {
+  constructor() {
+    super('Elegí una carpeta para guardar la foto. Si no ves esa opción, recargá la página.', 400, {
+      code: 'PHOTO_FOLDER_REQUIRED',
+    });
+  }
+}
+
+/** Destino de una subida o de un movimiento eliminado mientras se elegía: nunca se usa otro. */
+export class PhotoFolderUnavailableError extends AppError {
+  constructor() {
+    super('La carpeta elegida ya no existe. Elegí otra carpeta.', 409, {
+      code: 'PHOTO_FOLDER_UNAVAILABLE',
+    });
+  }
+}
+
+/** Otra carpeta vigente ya usa ese nombre (sin distinguir mayúsculas ni espacios). */
+export class PhotoFolderNameTakenError extends AppError {
+  constructor() {
+    super('Ya existe una carpeta con ese nombre.', 409, { code: 'PHOTO_FOLDER_NAME_TAKEN' });
+  }
+}
+
+/** La versión enviada no es la vigente: otra pantalla renombró la carpeta. */
+export class PhotoFolderVersionConflictError extends AppError {
+  constructor() {
+    super(
+      'Otra persona cambió esta carpeta mientras la tenías abierta. Revisá su nombre actual y volvé a intentar.',
+      409,
+      { code: 'PHOTO_FOLDER_VERSION_CONFLICT' },
+    );
+  }
+}
+
+/** Solo se eliminan carpetas sin fotos: nunca se borran ni se mueven fotos para vaciarla. */
+export class PhotoFolderNotEmptyError extends AppError {
+  constructor() {
+    super('La carpeta todavía tiene fotos. Movelas a otra carpeta antes de eliminarla.', 409, {
+      code: 'PHOTO_FOLDER_NOT_EMPTY',
+    });
+  }
+}
+
+/** La foto ya no está donde la vio quien la mueve: otra persona la movió antes. */
+export class PhotoMoveConflictError extends AppError {
+  constructor() {
+    super(
+      'Otra persona movió esta foto mientras la tenías abierta. Revisá dónde está ahora y volvé a intentar.',
+      409,
+      { code: 'PHOTO_MOVE_CONFLICT' },
+    );
   }
 }
 
@@ -760,5 +905,16 @@ export class PetDueAlreadyFulfilledError extends AppError {
     super('Esta atención programada ya fue registrada.', 409, {
       code: 'PET_DUE_ALREADY_FULFILLED',
     });
+  }
+}
+
+/** La próxima fecha ya no es la que vio quien la corrige: otra persona la cambió antes. */
+export class PetNextDueChangedError extends AppError {
+  constructor() {
+    super(
+      'Otra persona cambió esta fecha mientras la tenías abierta. Revisá la fecha actual y volvé a intentar.',
+      409,
+      { code: 'PET_NEXT_DUE_CHANGED' },
+    );
   }
 }

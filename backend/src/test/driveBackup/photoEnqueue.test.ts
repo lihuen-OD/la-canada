@@ -21,6 +21,7 @@ const db = vi.hoisted(() => {
       findUniqueOrThrow: fn(),
     },
     driveBackupJob: { create: fn() },
+    photoFolder: { findFirst: fn() },
     gardenPlanVersion: { aggregate: fn(), create: fn() },
     idempotencyRecord: { findUnique: fn() },
     auditLog: { create: fn() },
@@ -41,6 +42,7 @@ import type { TaskActor } from '../../tasks/tasksService';
 const META = { ipAddress: null, userAgent: 'vitest' };
 const FILE_ID = '22222222-2222-4222-8222-222222222222';
 const PET_ID = '44444444-4444-4444-8444-444444444444';
+const FOLDER_ID = '55555555-5555-4555-8555-555555555555';
 const ADMIN: TaskActor = { userId: 'user-a', role: 'ADMIN', employeeId: null };
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
 const DEMO = {
@@ -83,6 +85,7 @@ beforeEach(() => {
     taggedEmployee: null,
   });
   db.animal.findUnique.mockResolvedValue({ active: true });
+  db.photoFolder.findFirst.mockResolvedValue({ id: FOLDER_ID });
   db.$queryRaw.mockResolvedValue([{ id: PET_ID }]);
   setObjectStorageForTests({
     bucket: 'bucket-test',
@@ -102,7 +105,7 @@ const uploadGallery = () =>
   uploadPhoto(
     ADMIN,
     { body: JPEG, declaredType: 'image/jpeg', filename: 'x.jpg' },
-    { category: 'MEMORY', title: 'Jardín' },
+    { category: 'MEMORY', title: 'Jardín', folderId: FOLDER_ID },
     META,
   );
 const uploadPet = () =>

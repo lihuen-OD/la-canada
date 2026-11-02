@@ -3,7 +3,7 @@ import type { FormEvent, SyntheticEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { IdempotencyIntent, intentFingerprint } from '../../api/idempotency';
 import { uploadPhoto } from '../../api/moreApi';
-import type { GalleryCategory } from '../../api/moreTypes';
+import type { GalleryPhoto } from '../../api/moreTypes';
 import { STALE_TIME } from '../../api/queryClient';
 import { queryKeys } from '../../api/queryKeys';
 import { fetchTaskEmployees } from '../../api/tasksApi';
@@ -13,26 +13,35 @@ import { Modal } from '../../components/ui/Modal';
 import { AlertIcon } from '../../components/ui/icons';
 import { useSubmitGuard } from '../tasks/useSubmitGuard';
 import { errorCodeOf, errorMessageOf, isSessionExpired } from '../pets/petErrors';
-import { PHOTO_CATEGORY_OPTION, PHOTO_TYPES, normalizeText } from './moreLabels';
+import { PHOTO_TYPES, normalizeText } from './moreLabels';
+import { FolderSelect, InlineFolderCreate } from './PhotoFolderDialogs';
+import { isMissingFolder, usePhotoFolders } from './photoFolders';
+import { useMoreCache } from './useMoreCache';
 
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 type PreviewState = 'idle' | 'loading' | 'ready' | 'error';
-const CATEGORIES: readonly GalleryCategory[] = ['MEMORY', 'TASK_EVIDENCE'];
 
 interface PhotoUploadDialogProps {
   file: File;
+  /** Carpeta preseleccionada (la que se está mirando); `null` = hay que elegirla. */
+  defaultFolderId: string | null;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (photo: GalleryPhoto) => void;
   onSessionExpired: () => void;
 }
 
 /**
  * "Guardar foto" (`mo-foto`): vista previa, título ("Sin título" si queda
- * vacío), tipo (📷 Recuerdo / ✅ Tarea) y persona opcional. El backend valida
- * el tipo real y el tamaño; el mismo envío repetido no duplica la foto.
+ * vacío), persona opcional y carpeta OBLIGATORIA (se puede crear ahí mismo
+ * si no hay ninguna). Ya no se pide el tipo: el backend usa la categoría
+ * general de la galería. El backend valida el tipo real y el tamaño y
+ * asigna la carpeta al confirmar; el mismo envío repetido no duplica la
+ * foto. Si la carpeta deja de existir antes de confirmar, se informa y hay
+ * que elegir otra (nunca se guarda sin carpeta ni en otra).
  */
 export function PhotoUploadDialog({
   file,
+  defaultFolderId,
   onClose,
   onSaved,
   onSessionExpired,
@@ -42,8 +51,14 @@ export function PhotoUploadDialog({
   const { isSubmitting, run } = useSubmitGuard();
   const intent = useRef(new IdempotencyIntent());
   const [title, setTitle] = useState('');
-  const [category, setCategory] = useState<GalleryCategory>('MEMORY');
   const [employeeId, setEmployeeId] = useState('');
+  const [folderRequired, setFolderRequired] = useState(false);
+  const [folderId, setFolderId] = useState<string | null>(defaultFolderId);
+  const folders = usePhotoFolders();
+  const folderList = folders.data?.folders ?? [];
+  // Mientras el listado no llegó, la carpeta preseleccionada se da por válida.
+  const folderMissing = Boolean(folders.data) && isMissingFolder(folderId, folderList);
+  const { refreshPhotoFolders } = useMoreCache();
   const [error, setError] = useState<string | null>(() =>
     !PHOTO_TYPES.includes(file.type)
       ? 'La foto debe ser JPG, PNG o WebP.'
@@ -108,11 +123,16 @@ export function PhotoUploadDialog({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (!valid || !previewReady) return;
+    if (!valid || !previewReady || folderMissing) return;
+    if (folderId === null) {
+      setFolderRequired(true);
+      setError('Elegí una carpeta para guardar la foto.');
+      return;
+    }
     const metadata = {
       title: normalizeText(title) || 'Sin título',
-      category,
       employeeId: employeeId || null,
+      folderId,
     };
     const fingerprint = intentFingerprint(
       `${file.name}:${file.size}:${file.lastModified}`,
@@ -121,15 +141,19 @@ export function PhotoUploadDialog({
     void run(async () => {
       setError(null);
       try {
-        await uploadPhoto(file, metadata, intent.current.keyFor(fingerprint));
+        const saved = await uploadPhoto(file, metadata, intent.current.keyFor(fingerprint));
         intent.current.discard();
-        onSaved();
+        onSaved(saved.photo);
       } catch (caught) {
         if (isSessionExpired(caught)) {
           onSessionExpired();
           return;
         }
-        if (errorCodeOf(caught) !== 'IDEMPOTENCY_RECORD_PENDING') intent.current.discard();
+        const code = errorCodeOf(caught);
+        if (code !== 'IDEMPOTENCY_RECORD_PENDING') intent.current.discard();
+        // La carpeta ya no existe: el listado se actualiza y el selector la
+        // marca; el resto del formulario queda como estaba.
+        if (code === 'PHOTO_FOLDER_UNAVAILABLE') refreshPhotoFolders();
         setError(errorMessageOf(caught));
       }
     });
@@ -158,39 +182,45 @@ export function PhotoUploadDialog({
             }}
           />
         ) : null}
-        <div className="field">
-          <label className="field__label" htmlFor={`${formId}-name`}>
-            Título
-          </label>
-          <input
-            id={`${formId}-name`}
-            className="field__input"
-            maxLength={80}
-            autoComplete="off"
-            placeholder="Ej: Jardín después del corte"
-            value={title}
+        <FolderSelect
+          id={`${formId}-folder`}
+          value={folderId}
+          folders={folderList}
+          disabled={isSubmitting}
+          invalid={folderRequired && folderId === null}
+          onChange={(next) => {
+            setFolderId(next);
+            setFolderRequired(false);
+            setError(null);
+          }}
+        />
+        {folders.data ? (
+          <InlineFolderCreate
+            noFolders={folderList.length === 0}
             disabled={isSubmitting}
-            onChange={(change) => setTitle(change.target.value)}
+            onCreated={(folder) => {
+              setFolderId(folder.id);
+              setFolderRequired(false);
+              setError(null);
+            }}
+            onSessionExpired={onSessionExpired}
           />
-        </div>
+        ) : null}
         <div className="more-form__row">
           <div className="field">
-            <label className="field__label" htmlFor={`${formId}-type`}>
-              Tipo
+            <label className="field__label" htmlFor={`${formId}-name`}>
+              Título
             </label>
-            <select
-              id={`${formId}-type`}
+            <input
+              id={`${formId}-name`}
               className="field__input"
-              value={category}
+              maxLength={80}
+              autoComplete="off"
+              placeholder="Ej: Jardín después del corte"
+              value={title}
               disabled={isSubmitting}
-              onChange={(change) => setCategory(change.target.value as GalleryCategory)}
-            >
-              {CATEGORIES.map((option) => (
-                <option key={option} value={option}>
-                  {PHOTO_CATEGORY_OPTION[option]}
-                </option>
-              ))}
-            </select>
+              onChange={(change) => setTitle(change.target.value)}
+            />
           </div>
           <div className="field">
             <label className="field__label" htmlFor={`${formId}-person`}>
@@ -225,7 +255,11 @@ export function PhotoUploadDialog({
           <Button variant="secondary" onClick={onClose} disabled={isSubmitting}>
             Cancelar
           </Button>
-          <Button type="submit" loading={isSubmitting} disabled={!valid || !previewReady}>
+          <Button
+            type="submit"
+            loading={isSubmitting}
+            disabled={!valid || !previewReady || folderMissing}
+          >
             Guardar
           </Button>
         </div>

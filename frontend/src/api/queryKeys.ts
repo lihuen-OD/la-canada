@@ -1,5 +1,6 @@
 import type { ChickenCoopPeriodDays } from './chickenCoopTypes';
-import type { EventType, GalleryCategory, TeamFilter } from './moreTypes';
+import type { EventType, PhotoScope, TeamFilter } from './moreTypes';
+import type { PerformanceDetailFilters } from './performanceTypes';
 import type { MedicalRecordType, PetDueFilters } from './petTypes';
 import type {
   ListStockItemsParams,
@@ -43,6 +44,28 @@ export const queryKeys = {
       [...scope(userId), 'performance', 'summary', from, to] as const,
     employee: (userId: string, employeeId: string, from: string, to: string) =>
       [...scope(userId), 'performance', 'employee', employeeId, from, to] as const,
+    /**
+     * Detalle paginado («Ver más») de una persona: rango y filtros en la clave
+     * (cada combinación tiene sus páginas; cambiar cualquiera empieza de nuevo).
+     */
+    employeeDetail: (
+      userId: string,
+      employeeId: string,
+      from: string,
+      to: string,
+      filters: PerformanceDetailFilters,
+    ) =>
+      [
+        ...scope(userId),
+        'performance',
+        'employee-detail',
+        employeeId,
+        from,
+        to,
+        filters.date ?? 'all',
+        filters.frequency ?? 'all',
+        filters.status ?? 'all',
+      ] as const,
   },
   /**
    * 🥬 Huerta: claves PROPIAS (nunca `tasks` ni `performance`), así que sus
@@ -159,17 +182,26 @@ export const queryKeys = {
     summary: (userId: string) => [...scope(userId), 'more', 'summary'] as const,
     /** Historial de novedades (`useInfiniteQuery`). */
     news: (userId: string) => [...scope(userId), 'more', 'news'] as const,
+    /** Conversación diferida por novedad; `pageParams` guarda cada cursor sin mezclar hilos. */
+    newsReplies: (userId: string, newsId: string) =>
+      [...scope(userId), 'more', 'news-replies', newsId] as const,
     /** Eventos + cumpleaños derivados por filtro de tipo; el prefijo invalida todos los filtros. */
     events: (userId: string, type?: EventType | 'all') =>
       type === undefined
         ? ([...scope(userId), 'more', 'events'] as const)
         : ([...scope(userId), 'more', 'events', type] as const),
     weather: (userId: string) => [...scope(userId), 'more', 'weather'] as const,
-    /** Galería por tipo (`useInfiniteQuery`); el prefijo invalida todos los filtros. */
-    photos: (userId: string, category?: GalleryCategory | 'all') =>
-      category === undefined
+    /**
+     * Galería (`useInfiniteQuery`) por parte de la galería (`all`, `none` =
+     * por organizar, o el id de una carpeta); la página vive en `pageParams`.
+     * Sin `photoScope`, el prefijo de toda la galería.
+     */
+    photos: (userId: string, photoScope?: PhotoScope) =>
+      photoScope === undefined
         ? ([...scope(userId), 'more', 'photos'] as const)
-        : ([...scope(userId), 'more', 'photos', category] as const),
+        : ([...scope(userId), 'more', 'photos', photoScope] as const),
+    /** Carpetas de Fotos con sus conteos, «Sin carpeta» y «Todas las fotos» (una request). */
+    photoFolders: (userId: string) => [...scope(userId), 'more', 'photo-folders'] as const,
     /** Imagen por id de foto: inmutable (una foto nueva es otro id). */
     photoContent: (userId: string, photoId: string) =>
       [...scope(userId), 'more', 'photo-content', photoId] as const,

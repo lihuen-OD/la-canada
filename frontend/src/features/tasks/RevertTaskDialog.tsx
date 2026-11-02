@@ -11,7 +11,8 @@ const REASON_MAX = 300;
 
 interface RevertTaskDialogProps {
   description: string;
-  execution: TaskExecution;
+  /** Solo se muestra quién la había completado. */
+  execution: Pick<TaskExecution, 'completedByEmployee'>;
   /** El backend exige motivo cuando corrige un ADMIN; para un empleado es opcional. */
   reasonRequired: boolean;
   onCancel: () => void;

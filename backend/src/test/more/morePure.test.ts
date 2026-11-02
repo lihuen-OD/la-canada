@@ -255,13 +255,19 @@ describe('schemas de Más (.strict())', () => {
       createEventBodySchema.safeParse({ title: 'X', date: '2026-10-01', type: 'PARTY' }).success,
     ).toBe(false);
   });
-  it('foto: título vacío = "Sin título" (prototipo) y tipo obligatorio', () => {
+  it('foto: título vacío = "Sin título" (prototipo); tipo general por defecto, nunca evidencia', () => {
     expect(uploadPhotoQuerySchema.parse({ category: 'MEMORY' }).title).toBe('Sin título');
     expect(uploadPhotoQuerySchema.parse({ category: 'MEMORY', title: '' }).title).toBe(
       'Sin título',
     );
-    expect(uploadPhotoQuerySchema.safeParse({ title: 'x' }).success).toBe(false);
+    // Ya no se pide la clasificación: sin valor, la categoría general.
+    expect(uploadPhotoQuerySchema.parse({ title: 'x' }).category).toBe('MEMORY');
+    // Un cliente anterior que la envía la conserva tal cual.
+    expect(uploadPhotoQuerySchema.parse({ category: 'TASK_EVIDENCE' }).category).toBe(
+      'TASK_EVIDENCE',
+    );
     expect(uploadPhotoQuerySchema.safeParse({ category: 'ANIMAL_PROFILE' }).success).toBe(false);
+    expect(uploadPhotoQuerySchema.safeParse({ category: 'GARDEN_PLAN' }).success).toBe(false);
   });
   it('perfil: formulario completo, vacíos a null, teléfono y CUIL con formato razonable', () => {
     const base = {

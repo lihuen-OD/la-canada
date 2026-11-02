@@ -248,6 +248,23 @@ export function formatCompletedAt(iso: string, timeZone: string, today: string):
   return dayKey === today ? `hoy, ${full.slice(11)}` : full;
 }
 
+/** `YYYY-MM-DD` → `dd/mm` (día y mes, como las etiquetas parciales). */
+const dayAndMonth = (date: string) => `${date.slice(8, 10)}/${date.slice(5, 7)}`;
+
+/**
+ * Carga olvidada: «Realizada el 29/10 · Registrada el 30/10». La realización
+ * es solo un día (nunca una hora que nadie indicó); el registro, el día real
+ * en que se cargó, en la zona de negocio que devuelve la API.
+ */
+export function formatLateRegistration(
+  performedOn: string,
+  recordedAt: string,
+  timeZone: string,
+): string {
+  const recordedDay = new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date(recordedAt));
+  return `Realizada el ${dayAndMonth(performedOn)} · Registrada el ${dayAndMonth(recordedDay)}`;
+}
+
 /** `YYYY-MM-DD` → "lun 22 sep" (la fecha ya es local; se formatea en UTC para no desplazarla). */
 export function formatLocalDay(key: string, options: Intl.DateTimeFormatOptions = {}): string {
   return new Intl.DateTimeFormat('es-AR', {

@@ -113,14 +113,28 @@ describe('próxima aplicación o control y Vencimientos', () => {
     ).toBe(false);
   });
 
-  it('la corrección acepta solo la fecha; Vencimientos filtra por estados conocidos', () => {
-    expect(updatePetRecordNextDueBodySchema.safeParse({ nextDueDate: '2026-12-01' }).success).toBe(
+  it('la corrección acepta solo la fecha y la que vio la pantalla; Vencimientos filtra por estados conocidos', () => {
+    const parse = (body: object) => updatePetRecordNextDueBodySchema.safeParse(body);
+    expect(parse({ nextDueDate: '2026-12-01', expectedNextDueDate: '2026-11-01' }).success).toBe(
       true,
     );
-    expect(
-      updatePetRecordNextDueBodySchema.safeParse({ nextDueDate: '2026-12-01', type: 'VACCINE' })
-        .success,
-    ).toBe(false);
+    // Sin fecha anterior (completar un registro que no la tenía).
+    expect(parse({ nextDueDate: '2026-12-01', expectedNextDueDate: null }).success).toBe(true);
+    // Un cliente anterior que no manda lo que vio no puede pisar otra corrección.
+    const missing = parse({ nextDueDate: '2026-12-01' });
+    expect(missing.success).toBe(false);
+    expect(missing.error?.issues[0]?.message).toBe(
+      'Falta la fecha que estaba programada. Recargá la página.',
+    );
+    expect(parse({ nextDueDate: '2026-12-01', expectedNextDueDate: '01/11/2026' }).success).toBe(
+      false,
+    );
+    // Nada más del registro (ni el actor) viaja en el cuerpo.
+    for (const extra of ['type', 'recordDate', 'description', 'weightKg', 'recordedByUserId']) {
+      expect(
+        parse({ nextDueDate: '2026-12-01', expectedNextDueDate: null, [extra]: 'x' }).success,
+      ).toBe(false);
+    }
     expect(listPetDueQuerySchema.parse({})).toMatchObject({ page: 1, pageSize: 20 });
     expect(listPetDueQuerySchema.safeParse({ status: 'OVERDUE' }).success).toBe(true);
     expect(listPetDueQuerySchema.safeParse({ status: 'vencida' }).success).toBe(false);

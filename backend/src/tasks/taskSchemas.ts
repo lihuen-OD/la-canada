@@ -140,6 +140,32 @@ export const taskStatusBodySchema = z.object({ active: z.boolean() }).strict();
  */
 export const completeTaskBodySchema = z.object({ employeeId: uuidSchema.optional() }).strict();
 
+/** Clave de período de una recurrente (fecha, quincena, bimestre o año). El servicio la valida contra Desempeño. */
+const periodKeySchema = z
+  .string({ message: 'El período indicado no es válido.' })
+  .regex(/^\d{4}-(\d{2}-(\d{2}|Q[12])|B[1-6]|A)$/, 'El período indicado no es válido.');
+
+/** Fecha de calendario real `YYYY-MM-DD` (sin hora). */
+const calendarDateSchema = z
+  .string({ message: 'Indicá la fecha en que se realizó.' })
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha en que se realizó debe tener formato YYYY-MM-DD.')
+  .refine((value) => parseLocalDate(value) !== null, 'La fecha en que se realizó no existe.');
+
+/**
+ * Carga olvidada (Desempeño → Detalle): identifica la obligación (`periodKey`
+ * de la tarea de la ruta) y la fecha REAL de realización. Responsable,
+ * frecuencia y estado pendiente nunca se aceptan: los reconstruye el
+ * servidor. `employeeId` = quién la realizó, solo ADMIN. `.strict()`: un
+ * `assignedEmployeeId`, `frequency`, `completedAt`, etc. → 400.
+ */
+export const lateCompletionBodySchema = z
+  .object({
+    periodKey: periodKeySchema,
+    performedOn: calendarDateSchema,
+    employeeId: uuidSchema.optional(),
+  })
+  .strict();
+
 export const revertTaskBodySchema = z
   .object({
     executionId: uuidSchema,

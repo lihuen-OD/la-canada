@@ -95,8 +95,11 @@ export interface PetRecord {
   recordedBy?: RecordedBy | null;
   /** Próxima aplicación o control programada con este registro (`null` = sin fecha). */
   nextDue?: NextDue | null;
-  /** El pendiente que esta atención cumplió. */
-  fulfills?: { id: string; type: MedicalRecordType; recordDate: string } | null;
+  /**
+   * El pendiente que esta atención cumplió. `voided`: ese registro original
+   * se anuló (anular esta atención ya no lo vuelve a dejar pendiente).
+   */
+  fulfills?: { id: string; type: MedicalRecordType; recordDate: string; voided: boolean } | null;
   createdAt: string;
 }
 
