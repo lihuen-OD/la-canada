@@ -5,7 +5,8 @@ import type {
   GardenActivitiesResponse,
   GardenActivity,
   GardenCandidate,
-  GardenHistoryResponse,
+  GardenHistoryEntriesResponse,
+  GardenHistoryFilters,
   GardenParticipant,
   GardenPerformanceResponse,
   GardenStatusFilter,
@@ -111,15 +112,20 @@ export function revertGardenCompletion(
   });
 }
 
-export function fetchGardenHistory(params: {
-  week?: string;
-  participantId?: string;
-}): Promise<GardenHistoryResponse> {
+/** 📅 Historial cronológico: una página de 20 (filtros y orden en el backend). */
+export function fetchGardenHistoryEntries(
+  filters: GardenHistoryFilters,
+  cursor: string | null,
+): Promise<GardenHistoryEntriesResponse> {
   const query = new URLSearchParams();
-  if (params.week) query.set('week', params.week);
-  if (params.participantId) query.set('participantId', params.participantId);
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== false && value !== '') query.set(key, String(value));
+  }
+  if (cursor) query.set('cursor', cursor);
   const search = query.toString();
-  return apiRequest(`${BASE}/history${search ? `?${search}` : ''}`, { authenticated: true });
+  return apiRequest(`${BASE}/history/entries${search ? `?${search}` : ''}`, {
+    authenticated: true,
+  });
 }
 
 const rangeQuery = (from: string, to: string) => new URLSearchParams({ from, to }).toString();

@@ -23,12 +23,12 @@ export const addParticipantBodySchema = z.object({ userId: uuidSchema }).strict(
 
 export const participantStatusBodySchema = z.object({ active: z.boolean() }).strict();
 
-export const GARDEN_ACTIVITY_KINDS = ['SOWING', 'TRANSPLANT', 'OTHER'] as const;
+export const GARDEN_ACTIVITY_KINDS = ['SOWING', 'TRANSPLANT', 'HARVEST', 'OTHER'] as const;
 export const GARDEN_NOTES_MAX_LENGTH = 500;
 
-/** Tipo de un registro: siembra, trasplante u otra actividad (nunca se deduce de la descripción). */
+/** Tipo de un registro: siembra, trasplante, cosecha u otra actividad (nunca se deduce de la descripción). */
 const kindSchema = z.enum(GARDEN_ACTIVITY_KINDS, {
-  message: 'Elegí el tipo: siembra, trasplante u otra actividad.',
+  message: 'Elegí el tipo: siembra, trasplante, cosecha u otra actividad.',
 });
 
 /** Observaciones de una línea; vacías (o solo espacios) = sin observaciones (`null`). */
@@ -123,3 +123,31 @@ export const gardenHistoryQuerySchema = z
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha debe tener formato YYYY-MM-DD.');
 export const gardenPerformanceRangeSchema = z.object({ from: date, to: date }).strict();
+
+export const HISTORY_SEARCH_MIN_LENGTH = 2;
+export const HISTORY_SEARCH_MAX_LENGTH = 100;
+const flag = z.enum(['true', 'false']).transform((value) => value === 'true');
+
+/**
+ * 📅 Historial cronológico: rango (o `all=true`), texto (2–100 caracteres,
+ * vacío = sin búsqueda), tipo (o `UNCLASSIFIED`), persona que la realizó,
+ * deshechas a pedido y el cursor de «Ver más». Sin tamaño de página: lo fija
+ * el backend.
+ */
+export const gardenHistoryEntriesQuerySchema = z
+  .object({
+    from: date.optional(),
+    to: date.optional(),
+    all: flag.optional(),
+    q: z.preprocess(
+      (value) => (typeof value === 'string' && normalizeText(value) === '' ? undefined : value),
+      plainText('La búsqueda', HISTORY_SEARCH_MIN_LENGTH, HISTORY_SEARCH_MAX_LENGTH).optional(),
+    ),
+    kind: z
+      .enum([...GARDEN_ACTIVITY_KINDS, 'UNCLASSIFIED'], { message: 'Tipo inválido.' })
+      .optional(),
+    participantId: uuidSchema.optional(),
+    includeReverted: flag.optional(),
+    cursor: z.string().max(200, 'La página pedida no es válida.').optional(),
+  })
+  .strict();

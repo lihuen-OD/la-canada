@@ -54,6 +54,9 @@ type DialogState =
 type Notice = { tone: 'positive' | 'danger'; text: string } | null;
 
 const STALE_DATA_NOTICE = 'No pudimos actualizar los registros. Mostramos los últimos datos.';
+/** Regla de ✅ Tareas aplicada a la Huerta (la decide el backend con la semana de `completedAt`). */
+const COMPLETED_HINT =
+  'Las «Una vez» y urgentes completadas siguen acá hasta el domingo de la semana en que se completaron; después se consultan en el Historial.';
 
 /** Pendiente del período vigente: activa y sin ejecución vigente (las completadas van aparte). */
 const isPending = (activity: GardenActivity) => activity.active && !activity.currentExecution;
@@ -268,13 +271,20 @@ export function GardenRecordsScreen() {
     />
   );
 
-  const section = (title: string, icon: string, items: GardenActivity[], extra = '') =>
+  const section = (
+    title: string,
+    icon: string,
+    items: GardenActivity[],
+    extra = '',
+    hint?: string,
+  ) =>
     items.length === 0 ? null : (
       <section className={`garden-section ${extra}`.trim()} key={title} aria-label={title}>
         <h2 className="garden-section__title">
           <span aria-hidden="true">{icon} </span>
           {title} <span className="garden-section__count">({items.length})</span>
         </h2>
+        {hint ? <p className="garden-section__hint">{hint}</p> : null}
         <ul className="task-list" role="list" aria-label={title}>
           {items.map(renderItem)}
         </ul>
@@ -342,7 +352,7 @@ export function GardenRecordsScreen() {
             pending.filter((activity) => activity.agenda === agenda),
           ),
         )}
-        {section('Completadas', '✅', done, 'garden-section--done')}
+        {section('Completadas', '✅', done, 'garden-section--done', COMPLETED_HINT)}
         {section('Desactivadas', '⏸️', inactive, 'garden-section--done')}
         {pending.length === 0 ? (
           <p className="garden-all-done" role="status">
@@ -430,7 +440,7 @@ export function GardenRecordsScreen() {
                 checked={showAll}
                 onChange={(event) => setShowAll(event.target.checked)}
               />
-              Incluir desactivados y únicos ya completados
+              Incluir desactivados y completados de semanas anteriores («Una vez» y urgentes)
             </label>
           ) : null}
         </div>

@@ -35,6 +35,7 @@ import {
   type SuggestionValues,
 } from '../tasks/taskSuggestion';
 import { FREQUENCY_ORDER } from '../tasks/taskOrder';
+import { isCompletedOneOffVisible } from '../tasks/completionRules';
 import { GARDEN_SOON_DAYS, agendaOf, compareAgenda } from './gardenAgenda';
 import {
   loadParticipantDirectory,
@@ -52,7 +53,7 @@ import {
  * (períodos, «Una vez» con fecha, sugerencias, orden, una ejecución vigente
  * por período, reversión lógica, planificación histórica) sobre tablas
  * propias `kitchen_garden_*`: nada se lee ni se escribe en las de Tareas.
- * Cada una tiene además un tipo opcional (siembra, trasplante u otra; las
+ * Cada una tiene además un tipo opcional (siembra, trasplante, cosecha u otra; las
  * anteriores quedan «Sin clasificar») y observaciones, que no versionan.
  * Permisos: consultar, todos; crear y editar (también las de otro
  * responsable), ADMIN y participantes activos; activar/desactivar, solo
@@ -122,10 +123,10 @@ const executionSelect = {
 
 type ExecutionRow = Prisma.KitchenGardenExecutionGetPayload<{ select: typeof executionSelect }>;
 
-type Directory = Map<string, GardenParticipantEntry>;
+export type Directory = Map<string, GardenParticipantEntry>;
 
 /** Persona de un participante; si no estuviera en el directorio (no debería), un rótulo neutro. */
-const personFrom = (directory: Directory, participantId: string): GardenPerson =>
+export const personFrom = (directory: Directory, participantId: string): GardenPerson =>
   directory.get(participantId)?.person ?? {
     id: participantId,
     displayName: 'Participante',
@@ -142,7 +143,7 @@ function isUniqueViolation(error: unknown): boolean {
  * Un participante deshace lo que él mismo completó y solo en el período
  * vigente; un ADMIN corrige cualquier ejecución vigente (con motivo).
  */
-function canRevertExecution(
+export function canRevertExecution(
   actor: GardenActor,
   execution: { periodKey: string; completedByParticipantId: string },
   currentPeriodKey: string,
@@ -290,7 +291,17 @@ export async function listGardenActivities(
   ]);
   const executions = await loadCurrentExecutions(activities, now);
   const today = toLocalDate(now, config.businessTimeZone);
+  // «Una vez» y urgentes completadas: siguen (tachadas) durante la semana de
+  // negocio de su finalización vigente (`completedAt`, la misma regla de ✅
+  // Tareas) y salen el lunes siguiente; se consultan en el historial y un
+  // ADMIN las ve con `status=all`. Nunca se renuevan ni se desactivan.
+  const hidden = (activity: ActivityRow, execution: ExecutionRow | undefined) =>
+    filters.status === 'active' &&
+    execution !== undefined &&
+    (activity.frequency === 'ONE_TIME' || activity.frequency === 'URGENT') &&
+    !isCompletedOneOffVisible(execution.completedAt, today, config.businessTimeZone);
   const serialized = activities
+    .filter((activity) => !hidden(activity, executions.get(activity.id)))
     .map((activity) =>
       serializeActivity(
         directory,
@@ -300,16 +311,6 @@ export async function listGardenActivities(
         actor,
         today,
       ),
-    )
-    // Una «Una vez» ya completada sale del listado operativo (como en
-    // Tareas): se conserva en el historial y un ADMIN la ve con `status=all`.
-    .filter(
-      (activity) =>
-        !(
-          filters.status === 'active' &&
-          activity.frequency === 'ONE_TIME' &&
-          activity.currentExecution
-        ),
     )
     .sort(compareAgenda);
 

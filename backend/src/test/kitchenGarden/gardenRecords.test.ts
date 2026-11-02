@@ -429,9 +429,9 @@ describe('validación de entrada', () => {
     expect(
       createGardenActivityBodySchema.safeParse({ ...base, notes: 'x'.repeat(501) }).success,
     ).toBe(false);
-    expect(createGardenActivityBodySchema.safeParse({ ...base, kind: 'HARVEST' }).success).toBe(
-      false,
-    );
+    expect(createGardenActivityBodySchema.safeParse({ ...base, kind: 'CROP' }).success).toBe(false);
+    // Cosecha es un tipo propio (2026-11-02); el trasplante sigue exclusivo de la siembra.
+    expect(createGardenActivityBodySchema.parse({ ...base, kind: 'HARVEST' }).kind).toBe('HARVEST');
   });
 
   it('editar exige la versión, no admite quitar el tipo y rechaza un cuerpo sin cambios', () => {

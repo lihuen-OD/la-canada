@@ -5,10 +5,18 @@ import { ApiError } from '../../api/httpClient';
 import { OfflineError } from '../../api/transportErrors';
 import type {
   GardenActivity,
+  GardenHistoryEntry,
   GardenParticipant,
   GardenPerformanceResponse,
 } from '../../api/kitchenGardenTypes';
-import { createTestQueryClient, render, screen, waitFor, within } from '../../test/render';
+import {
+  createTestQueryClient,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '../../test/render';
 
 const gardenApi = vi.hoisted(() => ({
   fetchGardenParticipants: vi.fn(),
@@ -21,7 +29,7 @@ const gardenApi = vi.hoisted(() => ({
   setGardenActivityActive: vi.fn(),
   completeGardenActivity: vi.fn(),
   revertGardenCompletion: vi.fn(),
-  fetchGardenHistory: vi.fn(),
+  fetchGardenHistoryEntries: vi.fn(),
   fetchGardenPerformance: vi.fn(),
   fetchGardenParticipantPerformance: vi.fn(),
 }));
@@ -546,6 +554,79 @@ describe('🥬 Huerta — 📝 Registros', () => {
     expect(gardenApi.createGardenActivity).toHaveBeenCalledTimes(1);
   });
 
+  it('🧺 Cosecha: opción propia al crear y filtrar; el trasplante sigue siendo solo de la siembra', async () => {
+    const user = userEvent.setup();
+    gardenApi.fetchGardenActivities.mockResolvedValue({
+      period: PERIOD,
+      viewer: { canWrite: true, canManage: true },
+      activities: [
+        OVERDUE,
+        { ...TODAY, kind: 'HARVEST', description: 'Cosechar zapallo sintético' },
+      ],
+    });
+    renderGarden();
+    await screen.findByRole('list', { name: 'Vencidas' });
+    await user.click(
+      within(screen.getByRole('group', { name: 'Filtrar por tipo' })).getByRole('button', {
+        name: '🧺 Cosecha',
+      }),
+    );
+    expect(allDescriptions()).toEqual(['Cosechar zapallo sintético']);
+    await user.click(screen.getByRole('button', { name: '+ Nuevo registro' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Nuevo registro' });
+    await user.selectOptions(within(dialog).getByLabelText('Tipo'), 'HARVEST');
+    expect(
+      within(dialog).queryByRole('checkbox', { name: /Programar también el trasplante/ }),
+    ).not.toBeInTheDocument();
+    await user.selectOptions(within(dialog).getByLabelText('Tipo'), 'SOWING');
+    expect(
+      within(dialog).getByRole('checkbox', { name: /Programar también el trasplante/ }),
+    ).toBeInTheDocument();
+  });
+
+  it('«Una vez» y urgentes completadas que manda el backend: tachadas en Completadas y fuera de los pendientes', async () => {
+    const execution = {
+      id: '00000000-0000-4000-8000-00000000e009',
+      periodKey: 'ONE_TIME',
+      completedAt: '2026-10-26T12:00:00.000Z',
+      assignedTo: PABLO,
+      completedBy: PABLO,
+      canRevert: true,
+    };
+    gardenApi.fetchGardenActivities.mockResolvedValue({
+      period: PERIOD,
+      viewer: { canWrite: true, canManage: true },
+      activities: [
+        TODAY,
+        { ...OVERDUE, currentExecution: execution, canComplete: false, scheduleStatus: null },
+        activity('8', 'Urgente sintética', PABLO, {
+          frequency: 'URGENT',
+          periodKey: 'URGENT',
+          currentExecution: { ...execution, periodKey: 'URGENT' },
+          canComplete: false,
+        }),
+      ],
+    });
+    renderGarden();
+    await screen.findByRole('list', { name: 'Completadas' });
+    expect(descriptionsIn('Completadas')).toEqual([
+      'Trasplantar TOMATE sintético',
+      'Urgente sintética',
+    ]);
+    expect(
+      screen.getByText(/siguen acá hasta el domingo de la semana en que se completaron/),
+    ).toBeInTheDocument();
+    for (const item of within(screen.getByRole('list', { name: 'Completadas' })).getAllByRole(
+      'listitem',
+    )) {
+      expect(item).toHaveClass('task-item--done');
+    }
+    const summary = screen.getByRole('list', { name: 'Resumen de pendientes' });
+    expect(summary).toHaveTextContent('0 vencidas');
+    expect(summary).toHaveTextContent('1 para hoy');
+    expect(screen.queryByRole('list', { name: 'Vencidas' })).not.toBeInTheDocument();
+  });
+
   it('un reintento tras una falla de red reutiliza la misma clave (no duplica)', async () => {
     const user = userEvent.setup();
     gardenApi.createGardenActivity
@@ -631,6 +712,233 @@ describe('🥬 Huerta — 📝 Registros', () => {
   });
 });
 
+describe('🥬 Huerta — 📅 Historial cronológico', () => {
+  const RANGE = {
+    mode: 'recent' as const,
+    from: '2026-09-28',
+    to: '2026-10-27',
+    today: '2026-10-27',
+    timeZone: PERIOD.timeZone,
+  };
+  const entry = (id: string, extra: Partial<GardenHistoryEntry> = {}): GardenHistoryEntry => ({
+    id: `00000000-0000-4000-8000-00000000c${id.padStart(3, '0')}`,
+    periodKey: 'ONE_TIME',
+    completedAt: '2026-10-27T16:58:00.000Z',
+    completedOn: '2026-10-27',
+    activity: {
+      id: `00000000-0000-4000-8000-00000000d${id.padStart(3, '0')}`,
+      description: `Realización sintética ${id}`,
+      kind: 'SOWING',
+      frequency: 'ONE_TIME',
+      active: true,
+    },
+    completedBy: { id: PABLO.id, displayName: PABLO.displayName, colorHex: PABLO.colorHex },
+    assignedTo: { id: PABLO.id, displayName: PABLO.displayName, colorHex: PABLO.colorHex },
+    recordedBy: null,
+    reverted: null,
+    canRevert: false,
+    ...extra,
+  });
+  const page = (
+    entries: GardenHistoryEntry[],
+    nextCursor: string | null = null,
+    range: Partial<typeof RANGE> = {},
+  ) => ({
+    range: { ...RANGE, ...range },
+    entries,
+    nextCursor,
+    generatedAt: PERIOD.generatedAt,
+  });
+  const calls = () => gardenApi.fetchGardenHistoryEntries.mock.calls;
+  const lastFilters = () => calls().at(-1)![0];
+
+  beforeEach(() => {
+    asEmployee();
+    gardenApi.fetchGardenParticipants.mockResolvedValue({
+      participants: [PABLO, { ...ADMIN_P, active: false }],
+    });
+  });
+
+  it('por defecto los últimos 30 días, con el rango visible y agrupado por día (más reciente primero)', async () => {
+    gardenApi.fetchGardenHistoryEntries.mockResolvedValue(
+      page([
+        entry('1', { canRevert: true }),
+        entry('2', {
+          completedAt: '2026-10-20T12:00:00.000Z',
+          completedOn: '2026-10-20',
+          activity: {
+            id: 'a-2',
+            description: 'Trasplantar TOMATE sintético',
+            kind: null,
+            frequency: 'WEEKLY',
+            active: true,
+          },
+          completedBy: { id: ADMIN_P.id, displayName: ADMIN_P.displayName, colorHex: null },
+          recordedBy: { id: 'u-admin', displayName: 'Admin sintética' },
+        }),
+      ]),
+    );
+    renderGarden('/kitchen-garden/history');
+    expect(
+      await screen.findByText('Últimos 30 días: del 28/09/2026 al 27/10/2026'),
+    ).toBeInTheDocument();
+    expect(gardenApi.fetchGardenHistoryEntries).toHaveBeenCalledWith({}, null);
+    expect(screen.getByLabelText('Desde')).toHaveValue('2026-09-28');
+    expect(screen.getByLabelText('Hasta')).toHaveValue('2026-10-27');
+    expect(
+      screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent),
+    ).toEqual(['Hoy · Martes 27/10/2026', 'Martes 20/10/2026']);
+    const today = screen.getByRole('list', { name: 'Realizaciones del Hoy · Martes 27/10/2026' });
+    expect(today).toHaveTextContent('Completada el 27/10/2026 13:58 por Pablo sintético');
+    expect(
+      within(today).getByRole('button', { name: 'Deshacer: Realización sintética 1' }),
+    ).toBeInTheDocument();
+    expect(today).not.toHaveTextContent('Registró');
+    const older = screen.getByRole('list', { name: 'Realizaciones del Martes 20/10/2026' });
+    expect(older).toHaveTextContent('Sin clasificar');
+    expect(older).toHaveTextContent('Asignada a Pablo sintético');
+    expect(older).toHaveTextContent('Registró: Admin sintética');
+    expect(within(older).queryByRole('button', { name: /Deshacer/ })).not.toBeInTheDocument();
+  });
+
+  it('búsqueda con debounce: menos de 2 caracteres no busca y escribir no hace una request por tecla', async () => {
+    const user = userEvent.setup();
+    gardenApi.fetchGardenHistoryEntries.mockResolvedValue(page([entry('1')]));
+    renderGarden('/kitchen-garden/history');
+    await screen.findByText(/Últimos 30 días/);
+    const input = screen.getByLabelText('Buscar en la descripción');
+    await user.type(input, 'l');
+    expect(screen.getByText('Escribí al menos 2 caracteres para buscar.')).toBeInTheDocument();
+    await user.type(input, 'echuga');
+    await waitFor(() => expect(lastFilters()).toEqual({ q: 'lechuga' }));
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(calls().filter(([filters]) => 'q' in filters)).toHaveLength(1);
+    expect(calls()).toHaveLength(2);
+  });
+
+  it('filtros combinables en el backend (todo el historial, tipo Cosecha, persona) y rango propio', async () => {
+    const user = userEvent.setup();
+    gardenApi.fetchGardenHistoryEntries.mockResolvedValue(page([entry('1')]));
+    renderGarden('/kitchen-garden/history');
+    await screen.findByText(/Últimos 30 días/);
+    await user.click(screen.getByRole('button', { name: 'Todo el historial' }));
+    await waitFor(() => expect(lastFilters()).toEqual({ all: true }));
+    await user.click(
+      within(screen.getByRole('group', { name: 'Filtrar por tipo' })).getByRole('button', {
+        name: '🧺 Cosecha',
+      }),
+    );
+    await user.selectOptions(screen.getByLabelText('Persona que la realizó'), ADMIN_P.id);
+    await waitFor(() =>
+      expect(lastFilters()).toEqual({ all: true, kind: 'HARVEST', participantId: ADMIN_P.id }),
+    );
+    expect(
+      screen.getByRole('option', { name: `${ADMIN_P.displayName} (ya no participa)` }),
+    ).toBeInTheDocument();
+    // Una fecha propia: el otro extremo queda vacío (todo el historial no tenía rango).
+    fireEvent.change(screen.getByLabelText('Desde'), { target: { value: '2026-06-01' } });
+    await waitFor(() =>
+      expect(lastFilters()).toEqual({
+        from: '2026-06-01',
+        kind: 'HARVEST',
+        participantId: ADMIN_P.id,
+      }),
+    );
+    // «Desde» posterior a «Hasta»: aviso y ninguna request.
+    const before = calls().length;
+    fireEvent.change(screen.getByLabelText('Hasta'), { target: { value: '2026-05-01' } });
+    expect(
+      await screen.findByText('«Desde» no puede ser posterior a «Hasta».'),
+    ).toBeInTheDocument();
+    expect(calls()).toHaveLength(before);
+  });
+
+  it('«Ver más» sigue el cursor sin duplicar; si falla conserva lo cargado y ofrece Reintentar', async () => {
+    const user = userEvent.setup();
+    gardenApi.fetchGardenHistoryEntries
+      .mockResolvedValueOnce(page([entry('1'), entry('2')], 'cursor-1'))
+      .mockResolvedValueOnce(page([entry('2'), entry('3')], 'cursor-2'))
+      .mockRejectedValueOnce(new Error('red'))
+      .mockResolvedValueOnce(page([entry('4')]));
+    renderGarden('/kitchen-garden/history');
+    await screen.findByText('Realización sintética 2');
+    await user.click(screen.getByRole('button', { name: 'Ver más' }));
+    await screen.findByText('Realización sintética 3');
+    expect(calls()[1]).toEqual([{}, 'cursor-1']);
+    expect(screen.getAllByText('Realización sintética 2')).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: 'Ver más' }));
+    expect(await screen.findByText(/No pudimos cargar más realizaciones/)).toBeInTheDocument();
+    expect(screen.getByText('Realización sintética 1')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Reintentar' }));
+    await screen.findByText('Realización sintética 4');
+    expect(calls()[3]).toEqual([{}, 'cursor-2']);
+    expect(screen.queryByRole('button', { name: 'Ver más' })).not.toBeInTheDocument();
+  });
+
+  it('las deshechas, solo a pedido y marcadas, sin acciones', async () => {
+    const user = userEvent.setup();
+    gardenApi.fetchGardenHistoryEntries
+      .mockResolvedValueOnce(page([entry('1')]))
+      .mockResolvedValueOnce(
+        page([
+          entry('1'),
+          entry('9', {
+            reverted: {
+              revertedAt: '2026-10-27T18:00:00.000Z',
+              revertedBy: 'Admin sintética',
+              reason: 'Cargada dos veces',
+            },
+          }),
+        ]),
+      );
+    renderGarden('/kitchen-garden/history');
+    await screen.findByText('Realización sintética 1');
+    await user.click(screen.getByRole('checkbox', { name: 'Incluir finalizaciones deshechas' }));
+    await waitFor(() => expect(lastFilters()).toEqual({ includeReverted: true }));
+    const row = (await screen.findByText('Realización sintética 9')).closest('li')!;
+    expect(row).toHaveClass('garden-entry--reverted');
+    expect(row).toHaveTextContent('Deshecha');
+    expect(row).toHaveTextContent(
+      'Deshecha el 27/10/2026 15:00 por Admin sintética · Motivo: Cargada dos veces',
+    );
+    expect(within(row).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('deshacer desde el Historial: confirmación, endpoint de siempre y recarga solo de la Huerta', async () => {
+    const user = userEvent.setup();
+    gardenApi.fetchGardenHistoryEntries.mockResolvedValue(page([entry('1', { canRevert: true })]));
+    gardenApi.revertGardenCompletion.mockResolvedValue({});
+    renderGarden('/kitchen-garden/history');
+    await user.click(
+      await screen.findByRole('button', { name: 'Deshacer: Realización sintética 1' }),
+    );
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /Deshacer/ }));
+    await waitFor(() =>
+      expect(gardenApi.revertGardenCompletion).toHaveBeenCalledWith(
+        entry('1').activity.id,
+        entry('1').id,
+        undefined,
+      ),
+    );
+    expect(
+      await screen.findByText('Se deshizo la finalización de «Realización sintética 1».'),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(calls().length).toBeGreaterThan(1));
+  });
+
+  it('sin realizaciones en 30 días: lo explica y ofrece todo el historial', async () => {
+    const user = userEvent.setup();
+    gardenApi.fetchGardenHistoryEntries.mockResolvedValue(page([]));
+    renderGarden('/kitchen-garden/history');
+    expect(
+      await screen.findByText('No hay realizaciones en los últimos 30 días.'),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Ver todo el historial' }));
+    await waitFor(() => expect(lastFilters()).toEqual({ all: true }));
+  });
+});
+
 describe('🥬 Huerta — participantes, historial y desempeño', () => {
   it('Participantes: un 409 por actividades activas se muestra en el diálogo y no se cierra', async () => {
     const user = userEvent.setup();
@@ -662,28 +970,6 @@ describe('🥬 Huerta — participantes, historial y desempeño', () => {
     expect(
       screen.queryByRole('button', { name: /Desactivar|Agregar participante/ }),
     ).not.toBeInTheDocument();
-  });
-
-  it('Historial: endpoint propio de la Huerta y sus textos', async () => {
-    gardenApi.fetchGardenParticipants.mockResolvedValue({ participants: [PABLO] });
-    gardenApi.fetchGardenHistory.mockResolvedValue({
-      week: {
-        start: '2026-10-26',
-        end: '2026-11-01',
-        days: [],
-        isCurrent: true,
-        timeZone: PERIOD.timeZone,
-      },
-      summary: { expected: 0, completed: 0 },
-      recurring: [],
-      others: [],
-    });
-    renderGarden('/kitchen-garden/history');
-    expect(await screen.findByText('Sin actividades registradas esta semana.')).toBeInTheDocument();
-    expect(gardenApi.fetchGardenHistory).toHaveBeenCalledWith({
-      week: undefined,
-      participantId: undefined,
-    });
   });
 
   it('Desempeño: endpoints propios; sin obligaciones, «Sin actividades previstas» (nunca 0 %)', async () => {

@@ -45,7 +45,7 @@ export interface GardenExecution {
 }
 
 /** Tipo de un registro de la Huerta; `null` = «Sin clasificar» (actividades anteriores). */
-export type GardenActivityKind = 'SOWING' | 'TRANSPLANT' | 'OTHER';
+export type GardenActivityKind = 'SOWING' | 'TRANSPLANT' | 'HARVEST' | 'OTHER';
 
 /**
  * Grupo de 📝 Registros que calcula el backend: «Una vez» vencida, para hoy,
@@ -121,23 +121,52 @@ export interface CreateGardenActivityResponse {
   transplant: GardenActivity | null;
 }
 
-export interface GardenHistoryActivity {
-  id: string;
-  description: string;
-  frequency: TaskFrequency;
-  active: boolean;
-  responsible: GardenPerson;
-  scheduledDate: string | null;
+/** Filtros del 📅 Historial cronológico (todos opcionales; sin rango = últimos 30 días). */
+export interface GardenHistoryFilters {
+  from?: string;
+  to?: string;
+  all?: boolean;
+  q?: string;
+  kind?: GardenActivityKind | 'UNCLASSIFIED';
+  participantId?: string;
+  includeReverted?: boolean;
 }
 
-export interface GardenHistoryResponse {
-  week: { start: string; end: string; days: string[]; isCurrent: boolean; timeZone: string };
-  summary: { expected: number; completed: number };
-  recurring: {
-    activity: GardenHistoryActivity;
-    slots: { periodKey: string; expected: boolean; execution: GardenExecution | null }[];
-  }[];
-  others: { activity: GardenHistoryActivity; execution: GardenExecution }[];
+/** Una ejecución del historial (vigente o, a pedido, deshecha). */
+export interface GardenHistoryEntry {
+  id: string;
+  periodKey: string;
+  /** Cuándo se registró como completada: la única fecha que guarda la Huerta. */
+  completedAt: string;
+  /** Día de negocio de `completedAt` (para agrupar). */
+  completedOn: string;
+  /** Descripción y tipo ACTUALES de la actividad (no se versionan). */
+  activity: {
+    id: string;
+    description: string;
+    kind: GardenActivityKind | null;
+    frequency: TaskFrequency;
+    active: boolean;
+  };
+  completedBy: GardenPerson;
+  assignedTo: GardenPerson;
+  /** Solo si la registró otra persona. */
+  recordedBy: { id: string; displayName: string } | null;
+  reverted: { revertedAt: string; revertedBy: string | null; reason: string | null } | null;
+  canRevert: boolean;
+}
+
+export interface GardenHistoryEntriesResponse {
+  range: {
+    mode: 'recent' | 'custom' | 'all';
+    from: string | null;
+    to: string | null;
+    today: string;
+    timeZone: string;
+  };
+  entries: GardenHistoryEntry[];
+  nextCursor: string | null;
+  generatedAt: string;
 }
 
 export interface GardenPerformanceOccurrence {

@@ -20,11 +20,13 @@ import {
   updateGardenActivity,
 } from '../kitchenGarden/gardenActivitiesService';
 import { getGardenPerformance } from '../kitchenGarden/gardenPerformanceService';
+import { listGardenHistoryEntries } from '../kitchenGarden/gardenHistoryEntries';
 import {
   addParticipantBodySchema,
   completeGardenActivityBodySchema,
   createGardenActivityBodySchema,
   gardenActivityStatusBodySchema,
+  gardenHistoryEntriesQuerySchema,
   gardenHistoryQuerySchema,
   gardenIdParamSchema,
   gardenPerformanceRangeSchema,
@@ -148,6 +150,13 @@ export async function getHistory(req: Request, res: Response): Promise<void> {
   const actor = await actorFrom(req);
   const params = parseOrThrow(gardenHistoryQuerySchema, req.query, 'Parámetros inválidos.');
   send(res, 200, await getGardenWeeklyHistory(actor, params));
+}
+
+/** 📅 Historial cronológico (más reciente primero, filtros y «Ver más» en el backend). */
+export async function getHistoryEntries(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const params = parseOrThrow(gardenHistoryEntriesQuerySchema, req.query, 'Filtros inválidos.');
+  send(res, 200, await listGardenHistoryEntries(actor, params));
 }
 
 export async function getPerformanceSummary(req: Request, res: Response): Promise<void> {

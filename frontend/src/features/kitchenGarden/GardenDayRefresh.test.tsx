@@ -95,6 +95,50 @@ afterEach(() => {
 });
 
 describe('🥬 Huerta y el cambio de día', () => {
+  it('el lunes confirmado por el servidor, una «Una vez» completada la semana anterior sale del listado (sin sondeo)', async () => {
+    // Domingo 01/11 a las 23:59 de Argentina (ya lunes en UTC): sigue tachada.
+    vi.setSystemTime(ar('2026-11-01', '23:59:00'));
+    resetBusinessDayForTests();
+    gardenApi.fetchGardenActivities.mockImplementation(async () => {
+      const base = activitiesResponse();
+      const today = serverDay();
+      const completed = {
+        ...base.activities[0]!,
+        id: '00000000-0000-4000-8000-0000000b0002',
+        description: 'Cosechar acelga (sintética)',
+        kind: 'HARVEST' as const,
+        currentExecution: {
+          id: '00000000-0000-4000-8000-0000000e0002',
+          periodKey: 'ONE_TIME',
+          completedAt: ar('2026-10-29', '10:00:00').toISOString(),
+          assignedTo: { id: 'p1', displayName: 'Pablo sintético', colorHex: null },
+          completedBy: { id: 'p1', displayName: 'Pablo sintético', colorHex: null },
+          canRevert: true,
+        },
+        canComplete: false,
+      };
+      // El backend decide: hasta el domingo la incluye; desde el lunes, no.
+      return { ...base, activities: today < '2026-11-02' ? [completed] : [] };
+    });
+    render(
+      <StrictMode>
+        <BusinessDayRefresh />
+        <Routes>
+          <Route path="/kitchen-garden/*" element={<KitchenGardenModule />} />
+        </Routes>
+      </StrictMode>,
+      { route: '/kitchen-garden' },
+    );
+    expect(await screen.findByText('Cosechar acelga (sintética)')).toBeInTheDocument();
+    const before = gardenApi.fetchGardenActivities.mock.calls.length;
+    deviceAt(ar('2026-11-02', '00:00:05'));
+    await waitFor(() =>
+      expect(screen.queryByText('Cosechar acelga (sintética)')).not.toBeInTheDocument(),
+    );
+    expect(gardenApi.fetchGardenActivities).toHaveBeenCalledTimes(before + 1);
+    expect(tasksApi.fetchTasks).not.toHaveBeenCalled();
+  });
+
   it('al confirmarse el día nuevo, las actividades se revalidan una vez (Programada → Para hoy)', async () => {
     vi.setSystemTime(ar('2026-10-26', '23:59:00'));
     resetBusinessDayForTests();

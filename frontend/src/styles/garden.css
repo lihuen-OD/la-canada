@@ -169,3 +169,116 @@
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
 }
+
+.garden-section__hint {
+  margin: 0 0 var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+/* ── 📅 Historial cronológico (2026-11-02) ────────────────────────────────
+   Filtros arriba (período, fechas, búsqueda, persona, tipo), el rango
+   vigente y las realizaciones agrupadas por día, más recientes primero. */
+
+.garden-history__filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.garden-history__fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-3);
+}
+
+.garden-history__fields .field {
+  margin: 0;
+  min-width: 0;
+}
+
+.garden-history__search {
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 768px) {
+  .garden-history__fields {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .garden-history__search {
+    grid-column: auto;
+  }
+}
+
+.garden-history__range {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.garden-history__day + .garden-history__day {
+  margin-top: var(--space-4);
+}
+
+.garden-history__list {
+  display: grid;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.garden-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+}
+
+.garden-entry + .garden-entry {
+  border-top: var(--border-width) solid var(--color-surface-muted);
+}
+
+.garden-entry__body {
+  display: grid;
+  flex: 1;
+  gap: 0.1875rem;
+  min-width: 0;
+}
+
+.garden-entry__description {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.garden-entry__line {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+.garden-entry__line strong {
+  color: var(--color-text);
+}
+
+/* Deshecha: atenuada y tachada; nunca se confunde con una realización vigente. */
+.garden-entry--reverted .garden-entry__description {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+.garden-entry__reverted {
+  color: var(--color-danger);
+}
+
+.garden-history__note {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}

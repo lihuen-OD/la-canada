@@ -648,3 +648,11 @@ Cambios de esta revisión:
 - **Migraciones**: `20261102120000_kitchen_garden_crops` (de la propuesta anterior; tablas sin uso, sin modificar) y `20261102180000_kitchen_garden_activity_kind_notes` (aditiva), ambas **aplicadas a `demo` el 2026-11-02** con autorización del usuario y **pendientes en `production`**, en ese orden.
 - **Validación (2026-11-02)**: lint, typecheck, build y format:check; backend 1626/1626 y frontend 881/881 unitarias; integración `kitchenGarden` contra `demo` 20/20; el código actual de `demo` con la base migrada (`migrate status` al día, `kitchenGarden` 15/15); revisión en Chrome contra `demo` (EMPLOYEE participante en 360/390 px, quien no participa, ADMIN en 1366 px). Fixtures sintéticos borrados por id y huella real idéntica.
 - **Pendiente**: revisión y aprobación de la interfaz por el usuario; después, integrar a `demo` (con autorización) y, más adelante, `production`.
+
+### 🥬 Huerta: completadas durante su semana, 📅 Historial cronológico y 🧺 Cosecha 🟡 en `feat/huerta-cultivos` (2026-11-02, sobre el rediseño de `70562c5`)
+
+- **Alcance** (pedido explícito del usuario): la regla semanal de ✅ Tareas para «Una vez» y urgentes completadas, aplicada a la Huerta; Historial cronológico (30 días por defecto, rango o todo, texto, tipo y persona en el backend, «Ver más» de 20 por cursor, deshechas a pedido) en lugar de la navegación por semanas; tipo Cosecha. Tareas, Desempeño y la historia sin cambios. Ver `docs/BUSINESS_RULES.md` y `docs/ARCHITECTURE.md` §54.
+- **Migración**: `20261102200000_kitchen_garden_activity_kind_harvest` (solo `ADD VALUE`), **aplicada a `demo` el 2026-11-02** y **pendiente en `production`**, después de las dos anteriores de la rama.
+- **Validación**: lint, typecheck, build y format:check; backend 1647/1647 y frontend 890/890; integración `kitchenGarden` contra `demo` 26/26; revisión en Chrome contra `demo`. Fixtures sintéticos borrados por id y huella real idéntica.
+- **Pendiente**: aprobación de la interfaz por el usuario; integrar a `demo` y después a `production`, con autorización.
+

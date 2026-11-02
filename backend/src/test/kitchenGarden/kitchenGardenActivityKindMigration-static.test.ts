@@ -12,12 +12,13 @@ const STATEMENTS = MIGRATION.split('\n')
   .join('\n');
 
 describe('migración kitchen_garden_activity_kind_notes (🥬 Huerta: 📝 Registros)', () => {
-  it('es la última y va después de la de cultivos (ya aplicada en demo, sin tocar)', () => {
+  it('va después de la de cultivos y antes de la de cosecha (las tres ya aplicadas en demo, sin tocar)', () => {
     const migrations = readdirSync(resolve(ROOT, 'prisma/migrations'))
       .filter((entry) => /^\d{14}_/.test(entry))
       .sort();
-    expect(migrations.at(-1)).toBe(NAME);
-    expect(migrations.at(-2)).toBe('20261102120000_kitchen_garden_crops');
+    const index = migrations.indexOf(NAME);
+    expect(migrations[index - 1]).toBe('20261102120000_kitchen_garden_crops');
+    expect(migrations[index + 1]).toBe('20261102200000_kitchen_garden_activity_kind_harvest');
   });
 
   it('solo agrega: un tipo y tres columnas, con tipo y observaciones opcionales', () => {
