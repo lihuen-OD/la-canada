@@ -53,7 +53,7 @@ export function requireGardenAdmin(actor: GardenActor, message?: string): void {
 }
 
 /** Lo público de un usuario: su nombre visible (Employee → Mi perfil → «Administrador») y color. */
-export const userPublicSelect = {
+const userPublicSelect = {
   role: true,
   status: true,
   employee: { select: { displayName: true, colorHex: true, role: true } },

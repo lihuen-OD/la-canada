@@ -2,6 +2,7 @@ import { Route, Routes } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../api/httpClient';
+import { OfflineError } from '../../api/transportErrors';
 import type {
   GardenActivity,
   GardenParticipant,
@@ -81,6 +82,11 @@ function activity(
     description,
     frequency: 'DAILY',
     active: true,
+    kind: 'OTHER',
+    notes: null,
+    version: 1,
+    agenda: 'TODAY',
+    agendaDate: '2026-10-27',
     responsible: {
       id: responsible.id,
       displayName: responsible.displayName,
@@ -138,11 +144,12 @@ function renderGarden(route = '/kitchen-garden', queryClient = createTestQueryCl
   return queryClient;
 }
 
-const list = () => screen.getByRole('list', { name: 'Actividades del período' });
-const descriptions = () =>
-  within(list())
-    .getAllByRole('listitem')
-    .map((item) => item.querySelector('.task-item__description')?.textContent);
+const descriptionsOf = (root: HTMLElement) =>
+  Array.from(root.querySelectorAll('.task-item__description')).map((item) => item.textContent);
+const descriptionsIn = (section: string) =>
+  descriptionsOf(screen.getByRole('list', { name: section }));
+/** Todo lo visible, en orden de pantalla (grupos y completadas). */
+const allDescriptions = () => descriptionsOf(document.body);
 
 beforeEach(() => {
   for (const mock of [
@@ -217,110 +224,373 @@ describe('🥬 Huerta — inicio vacío y configuración desde la UI', () => {
     ).toBeInTheDocument();
     expect(
       screen.queryByRole('button', {
-        name: /Agregar participante|Nueva actividad|Crear actividad/,
+        name: /Agregar participante|Nuevo registro|Crear registro/,
       }),
     ).not.toBeInTheDocument();
   });
 
-  it('con participantes y sin actividades: «Crear actividad» abre «Nueva actividad» y envía el participante', async () => {
+  it('con participantes y sin registros: «Crear registro» abre «Nuevo registro», exige el tipo y envía «Una vez» por defecto', async () => {
     const user = userEvent.setup();
     gardenApi.fetchGardenParticipants.mockResolvedValue({ participants: [PABLO] });
-    gardenApi.createGardenActivity.mockResolvedValue({ activity: activity('1', 'Regar', PABLO) });
-    renderGarden();
-    expect(await screen.findByText('Todavía no hay actividades.')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Crear actividad' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Nueva actividad' });
-    // Sin persona elegida por defecto.
-    expect((within(dialog).getByLabelText('Responsable') as HTMLSelectElement).value).toBe('');
-    await user.type(within(dialog).getByLabelText('Descripción'), 'Regar almácigos');
-    await user.selectOptions(within(dialog).getByLabelText('Responsable'), PABLO.id);
-    await user.selectOptions(within(dialog).getByLabelText('Frecuencia'), 'DAILY');
-    await user.click(within(dialog).getByRole('button', { name: 'Crear actividad' }));
-    await waitFor(() => expect(gardenApi.createGardenActivity).toHaveBeenCalledTimes(1));
-    const body = gardenApi.createGardenActivity.mock.calls[0]?.[0];
-    expect(body).toEqual({
-      description: 'Regar almácigos',
-      participantId: PABLO.id,
-      frequency: 'DAILY',
+    gardenApi.createGardenActivity.mockResolvedValue({
+      activity: activity('1', 'Regar', PABLO),
+      transplant: null,
     });
-    expect(body).not.toHaveProperty('employeeId');
+    renderGarden();
+    expect(await screen.findByText('Todavía no hay registros.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Crear registro' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Nuevo registro' });
+    // Sin persona elegida por defecto; frecuencia «Una vez».
+    expect((within(dialog).getByLabelText('Responsable') as HTMLSelectElement).value).toBe('');
+    expect((within(dialog).getByLabelText('Frecuencia') as HTMLSelectElement).value).toBe(
+      'ONE_TIME',
+    );
+    await user.type(within(dialog).getByLabelText('Descripción'), 'Desmalezar canteros');
+    await user.selectOptions(within(dialog).getByLabelText('Responsable'), PABLO.id);
+    await user.click(within(dialog).getByRole('button', { name: 'Crear registro' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Elegí el tipo');
+    expect(gardenApi.createGardenActivity).not.toHaveBeenCalled();
+    await user.selectOptions(within(dialog).getByLabelText('Tipo'), 'OTHER');
+    await user.type(within(dialog).getByLabelText('Observaciones (opcional)'), '  Cantero norte ');
+    await user.click(within(dialog).getByRole('button', { name: 'Crear registro' }));
+    await waitFor(() => expect(gardenApi.createGardenActivity).toHaveBeenCalledTimes(1));
+    const [body, key] = gardenApi.createGardenActivity.mock.calls[0]!;
+    expect(body).toEqual({
+      kind: 'OTHER',
+      description: 'Desmalezar canteros',
+      participantId: PABLO.id,
+      frequency: 'ONE_TIME',
+      notes: 'Cantero norte',
+    });
+    expect(key).toMatch(/^[a-f0-9]{32}$/);
+    expect(await screen.findByText('Registro creado.')).toBeInTheDocument();
   });
 });
 
-describe('🥬 Huerta — actividades', () => {
-  const ONE = activity('1', 'Única sintética 15/01', PABLO, {
+describe('🥬 Huerta — 📝 Registros', () => {
+  const OVERDUE = activity('1', 'Trasplantar TOMATE sintético', PABLO, {
     frequency: 'ONE_TIME',
     periodKey: 'ONE_TIME',
-    scheduledDate: '2027-01-15',
-    scheduleStatus: 'SCHEDULED',
-    executionOrder: 2,
+    kind: 'TRANSPLANT',
+    scheduledDate: '2026-10-20',
+    scheduleStatus: 'OVERDUE',
+    agenda: 'OVERDUE',
+    agendaDate: '2026-10-20',
   });
-  const DAILY_P = activity('2', 'Regar almácigos', PABLO, { executionOrder: 1 });
-  const DAILY_A = activity('3', 'Ventilar invernadero', ADMIN_P, { canComplete: false });
+  const TODAY = activity('2', 'Regar huerta sintética', PABLO, { executionOrder: 1 });
+  const WEEKLY = activity('3', 'Revisar riego sintético', ADMIN_P, {
+    frequency: 'WEEKLY',
+    periodKey: '2026-10-26',
+    kind: null,
+    suggestedWeekday: 5,
+    suggestedDate: '2026-10-30',
+    agenda: 'UPCOMING',
+    agendaDate: '2026-10-30',
+    canComplete: false,
+  });
+  const LEGACY = activity('4', 'Sembrar CHAUCHA sintética', PABLO, {
+    frequency: 'ONE_TIME',
+    periodKey: 'ONE_TIME',
+    kind: null,
+    agenda: 'NO_DATE',
+    agendaDate: null,
+    notes: null,
+  });
+  const DONE = activity('5', 'Ventilar invernadero sintético', ADMIN_P, {
+    kind: 'OTHER',
+    canComplete: false,
+    currentExecution: {
+      id: '00000000-0000-4000-8000-00000000e001',
+      periodKey: '2026-10-27',
+      completedAt: '2026-10-27T12:00:00.000Z',
+      assignedTo: ADMIN_P,
+      completedBy: ADMIN_P,
+      canRevert: true,
+    },
+  });
 
   beforeEach(() => {
     gardenApi.fetchGardenParticipants.mockResolvedValue({ participants: [PABLO, ADMIN_P] });
     gardenApi.fetchGardenActivities.mockResolvedValue({
       period: PERIOD,
-      activities: [ONE, DAILY_P, DAILY_A],
+      viewer: { canWrite: true, canManage: true },
+      activities: [OVERDUE, TODAY, WEEKLY, LEGACY, DONE],
     });
   });
 
-  it('el orden del backend se respeta y los filtros por participante y frecuencia no reordenan', async () => {
-    const user = userEvent.setup();
+  it('pestañas: Registros · Historial · Desempeño · Participantes (sin Cultivos ni Actividades)', async () => {
     renderGarden();
-    await screen.findByRole('list', { name: 'Actividades del período' });
-    expect(descriptions()).toEqual([
-      'Única sintética 15/01',
-      'Regar almácigos',
-      'Ventilar invernadero',
-    ]);
-    await user.click(screen.getByRole('button', { name: /Pablo sintético/ }));
-    expect(descriptions()).toEqual(['Única sintética 15/01', 'Regar almácigos']);
-    await user.click(
-      within(screen.getByRole('group', { name: 'Filtrar por frecuencia' })).getByRole('button', {
-        name: 'Diarias',
-      }),
-    );
-    expect(descriptions()).toEqual(['Regar almácigos']);
+    const nav = await screen.findByRole('navigation', { name: 'Secciones de la Huerta' });
+    expect(
+      within(nav)
+        .getAllByRole('link')
+        .map((link) => link.textContent),
+    ).toEqual(['📝 Registros', '📅 Historial', '🏆 Desempeño', '👥 Participantes']);
   });
 
-  it('«Una vez»: «Hoy»/«Vencidas» hablan de actividades', async () => {
+  it.each(['/kitchen-garden/crops', '/kitchen-garden/crops/abc', '/kitchen-garden/records'])(
+    'la ruta anterior %s lleva a Registros',
+    async (route) => {
+      renderGarden(route);
+      expect(await screen.findByRole('list', { name: 'Vencidas' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Registros' })).toHaveAttribute(
+        'aria-current',
+        'page',
+      );
+    },
+  );
+
+  it('grupos en el orden del backend, completadas aparte y resumen solo de pendientes', async () => {
+    renderGarden();
+    await screen.findByRole('list', { name: 'Vencidas' });
+    expect(
+      screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent),
+    ).toEqual([
+      '⚠️ Vencidas (1)',
+      '📍 Para hoy (1)',
+      '🗓️ Próximas (1)',
+      '🕓 Sin fecha (1)',
+      '✅ Completadas (1)',
+    ]);
+    expect(descriptionsIn('Para hoy')).toEqual(['Regar huerta sintética']);
+    expect(descriptionsIn('Completadas')).toEqual(['Ventilar invernadero sintético']);
+    const summary = screen.getByRole('list', { name: 'Resumen de pendientes' });
+    expect(summary).toHaveTextContent('1 vencida');
+    expect(summary).toHaveTextContent('1 para hoy');
+    expect(summary).toHaveTextContent('1 en los próximos 7 días');
+    // Una recurrente nunca aparece como vencida por su fecha sugerida.
+    expect(descriptionsIn('Próximas')).toEqual(['Revisar riego sintético']);
+  });
+
+  it('tipo visible y «Sin clasificar» discreto; filtros por tipo y por persona', async () => {
     const user = userEvent.setup();
     renderGarden();
-    await screen.findByRole('list', { name: 'Actividades del período' });
+    await screen.findByRole('list', { name: 'Vencidas' });
+    expect(
+      within(screen.getByRole('list', { name: 'Sin fecha' })).getByText('Sin clasificar'),
+    ).toHaveClass('garden-kind--unclassified');
+    const types = screen.getByRole('group', { name: 'Filtrar por tipo' });
+    await user.click(within(types).getByRole('button', { name: 'Sin clasificar' }));
+    expect(allDescriptions()).toEqual(['Revisar riego sintético', 'Sembrar CHAUCHA sintética']);
+    await user.click(within(types).getByRole('button', { name: '🪴 Trasplante' }));
+    expect(allDescriptions()).toEqual(['Trasplantar TOMATE sintético']);
+    await user.click(within(types).getByRole('button', { name: 'Todos' }));
+    await user.click(screen.getByRole('button', { name: /Admin sintética/ }));
+    expect(allDescriptions()).toEqual([
+      'Revisar riego sintético',
+      'Ventilar invernadero sintético',
+    ]);
+  });
+
+  it('un participante crea y edita (también lo ajeno) pero no desactiva', async () => {
+    asEmployee();
+    gardenApi.fetchGardenActivities.mockResolvedValue({
+      period: PERIOD,
+      viewer: { canWrite: true, canManage: false },
+      activities: [OVERDUE, WEEKLY],
+    });
+    renderGarden();
+    await screen.findByRole('list', { name: 'Vencidas' });
+    expect(screen.getByRole('button', { name: '+ Nuevo registro' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Editar: Revisar riego sintético' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Desactivar/ })).not.toBeInTheDocument();
+  });
+
+  it('quien no participa solo consulta (lo decide el backend en `viewer`)', async () => {
+    asEmployee();
+    gardenApi.fetchGardenActivities.mockResolvedValue({
+      period: PERIOD,
+      viewer: { canWrite: false, canManage: false },
+      activities: [OVERDUE],
+    });
+    renderGarden();
+    await screen.findByRole('list', { name: 'Vencidas' });
+    expect(screen.queryByRole('button', { name: /Nuevo registro|Editar/ })).not.toBeInTheDocument();
+  });
+
+  it('clasificar un registro anterior envía solo el tipo y la versión; sin cambios no envía nada', async () => {
+    const user = userEvent.setup();
+    gardenApi.updateGardenActivity.mockResolvedValue({
+      activity: { ...LEGACY, kind: 'SOWING', version: 2 },
+    });
+    renderGarden();
     await user.click(
-      within(screen.getByRole('group', { name: 'Filtrar por frecuencia' })).getByRole('button', {
-        name: 'Una vez',
+      await screen.findByRole('button', { name: 'Editar: Sembrar CHAUCHA sintética' }),
+    );
+    let dialog = await screen.findByRole('dialog', { name: 'Editar registro' });
+    expect((within(dialog).getByLabelText('Tipo') as HTMLSelectElement).value).toBe('');
+    expect(within(dialog).getByText(/anterior a los tipos/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Editar registro' })).not.toBeInTheDocument(),
+    );
+    expect(gardenApi.updateGardenActivity).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Editar: Sembrar CHAUCHA sintética' }));
+    dialog = await screen.findByRole('dialog', { name: 'Editar registro' });
+    await user.selectOptions(within(dialog).getByLabelText('Tipo'), 'SOWING');
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() =>
+      expect(gardenApi.updateGardenActivity).toHaveBeenCalledWith(LEGACY.id, {
+        version: 1,
+        kind: 'SOWING',
       }),
     );
-    expect(screen.getByRole('button', { name: 'Hoy, 0 actividades' })).toBeInTheDocument();
+    expect(await screen.findByText('Registro actualizado.')).toBeInTheDocument();
+  });
+
+  it('una recurrente muestra solo lo pertinente: sin fecha prevista, con su sugerencia en «Opciones avanzadas» abiertas', async () => {
+    const user = userEvent.setup();
+    renderGarden();
+    await user.click(
+      await screen.findByRole('button', { name: 'Editar: Revisar riego sintético' }),
+    );
+    const dialog = await screen.findByRole('dialog', { name: 'Editar registro' });
+    expect(within(dialog).queryByLabelText('Fecha prevista (opcional)')).not.toBeInTheDocument();
+    expect(within(dialog).getByText('Opciones avanzadas').closest('details')).toHaveAttribute(
+      'open',
+    );
+    expect(within(dialog).getByLabelText('Día sugerido')).toHaveValue('5');
+    expect(
+      within(dialog).queryByRole('checkbox', { name: /Programar también el trasplante/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('409 al editar: muestra el aviso, no cierra y refresca el listado', async () => {
+    const user = userEvent.setup();
+    gardenApi.updateGardenActivity.mockRejectedValue(
+      new ApiError(
+        409,
+        'Otra persona modificó este registro mientras lo editabas. Cerrá y volvé a abrirlo para ver los datos actuales.',
+        'GARDEN_ACTIVITY_CHANGED',
+      ),
+    );
+    renderGarden();
+    await user.click(
+      await screen.findByRole('button', { name: 'Editar: Trasplantar TOMATE sintético' }),
+    );
+    const dialog = await screen.findByRole('dialog', { name: 'Editar registro' });
+    const calls = gardenApi.fetchGardenActivities.mock.calls.length;
+    await user.type(within(dialog).getByLabelText('Observaciones (opcional)'), 'Con cuidado');
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar cambios' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Otra persona modificó');
+    expect(gardenApi.updateGardenActivity).toHaveBeenCalledWith(OVERDUE.id, {
+      version: 1,
+      notes: 'Con cuidado',
+    });
+    await waitFor(() =>
+      expect(gardenApi.fetchGardenActivities.mock.calls.length).toBeGreaterThan(calls),
+    );
+  });
+
+  it('siembra «Una vez» + trasplante: valores editables, fecha validada y un solo envío ante doble clic', async () => {
+    const user = userEvent.setup();
+    let resolve!: (value: unknown) => void;
+    gardenApi.createGardenActivity.mockImplementation(
+      () => new Promise((done) => (resolve = done)),
+    );
+    renderGarden();
+    await screen.findByRole('list', { name: 'Vencidas' });
+    await user.click(screen.getByRole('button', { name: '+ Nuevo registro' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Nuevo registro' });
+    const transplantBox = () =>
+      within(dialog).queryByRole('checkbox', { name: /Programar también el trasplante/ });
+    expect(transplantBox()).not.toBeInTheDocument();
+    await user.selectOptions(within(dialog).getByLabelText('Tipo'), 'SOWING');
+    await user.type(within(dialog).getByLabelText('Descripción'), 'Sembrar LECHUGA');
+    await user.selectOptions(within(dialog).getByLabelText('Responsable'), PABLO.id);
+    await user.type(within(dialog).getByLabelText('Fecha prevista (opcional)'), '2026-11-05');
+    await user.click(transplantBox()!);
+    expect(within(dialog).getByText(/dos registros independientes/)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Descripción del trasplante')).toHaveValue(
+      'Trasplantar LECHUGA',
+    );
+    expect(within(dialog).getByLabelText('Responsable del trasplante')).toHaveValue(PABLO.id);
+    await user.selectOptions(
+      within(dialog).getByLabelText('Responsable del trasplante'),
+      ADMIN_P.id,
+    );
+    await user.type(
+      within(dialog).getByLabelText('Fecha prevista del trasplante (opcional)'),
+      '2026-11-01',
+    );
+    const submitButton = within(dialog).getByRole('button', { name: 'Crear siembra y trasplante' });
+    await user.click(submitButton);
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'no puede ser anterior a la de la siembra',
+    );
+    expect(gardenApi.createGardenActivity).not.toHaveBeenCalled();
+    const transplantDate = within(dialog).getByLabelText(
+      'Fecha prevista del trasplante (opcional)',
+    );
+    await user.clear(transplantDate);
+    await user.type(transplantDate, '2026-11-25');
+    await user.dblClick(submitButton);
+    await waitFor(() => expect(gardenApi.createGardenActivity).toHaveBeenCalledTimes(1));
+    expect(gardenApi.createGardenActivity.mock.calls[0]![0]).toEqual({
+      kind: 'SOWING',
+      description: 'Sembrar LECHUGA',
+      participantId: PABLO.id,
+      frequency: 'ONE_TIME',
+      scheduledDate: '2026-11-05',
+      transplant: {
+        description: 'Trasplantar LECHUGA',
+        participantId: ADMIN_P.id,
+        scheduledDate: '2026-11-25',
+      },
+    });
+    resolve({ activity: TODAY, transplant: OVERDUE });
+    expect(await screen.findByText('Siembra y trasplante creados.')).toBeInTheDocument();
+    expect(gardenApi.createGardenActivity).toHaveBeenCalledTimes(1);
+  });
+
+  it('un reintento tras una falla de red reutiliza la misma clave (no duplica)', async () => {
+    const user = userEvent.setup();
+    gardenApi.createGardenActivity
+      .mockRejectedValueOnce(new OfflineError())
+      .mockResolvedValueOnce({ activity: TODAY, transplant: null });
+    renderGarden();
+    await screen.findByRole('list', { name: 'Vencidas' });
+    await user.click(screen.getByRole('button', { name: '+ Nuevo registro' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Nuevo registro' });
+    await user.selectOptions(within(dialog).getByLabelText('Tipo'), 'OTHER');
+    await user.type(within(dialog).getByLabelText('Descripción'), 'Abonar canteros');
+    await user.selectOptions(within(dialog).getByLabelText('Responsable'), PABLO.id);
+    await user.click(within(dialog).getByRole('button', { name: 'Crear registro' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Sin conexión');
+    await user.click(within(dialog).getByRole('button', { name: 'Crear registro' }));
+    await waitFor(() => expect(gardenApi.createGardenActivity).toHaveBeenCalledTimes(2));
+    const calls = gardenApi.createGardenActivity.mock.calls;
+    expect(calls[1]![1]).toBe(calls[0]![1]);
   });
 
   it('un participante completa lo suyo sin diálogo; lo ajeno no se puede marcar', async () => {
     const user = userEvent.setup();
     asEmployee();
-    gardenApi.completeGardenActivity.mockResolvedValue({ activity: DAILY_P });
+    gardenApi.completeGardenActivity.mockResolvedValue({ activity: TODAY });
     renderGarden();
-    await screen.findByRole('list', { name: 'Actividades del período' });
+    await screen.findByRole('list', { name: 'Vencidas' });
     expect(
-      screen.getByRole('button', { name: 'Marcar como completada: Ventilar invernadero' }),
+      screen.getByRole('button', { name: 'Marcar como completada: Revisar riego sintético' }),
     ).toBeDisabled();
-    expect(screen.queryByRole('button', { name: /Editar/ })).not.toBeInTheDocument();
     await user.click(
-      screen.getByRole('button', { name: 'Marcar como completada: Regar almácigos' }),
+      screen.getByRole('button', { name: 'Marcar como completada: Regar huerta sintética' }),
     );
-    await waitFor(() => expect(gardenApi.completeGardenActivity).toHaveBeenCalledWith(DAILY_P.id));
-    expect(await screen.findByText('«Regar almácigos» quedó completada.')).toBeInTheDocument();
+    await waitFor(() => expect(gardenApi.completeGardenActivity).toHaveBeenCalledWith(TODAY.id));
+    expect(
+      await screen.findByText('«Regar huerta sintética» quedó completada.'),
+    ).toBeInTheDocument();
   });
 
   it('ADMIN registra quién la realizó: un participante activo, sin preselección', async () => {
     const user = userEvent.setup();
-    gardenApi.completeGardenActivity.mockResolvedValue({ activity: DAILY_P });
+    gardenApi.completeGardenActivity.mockResolvedValue({ activity: TODAY });
     renderGarden();
-    await screen.findByRole('list', { name: 'Actividades del período' });
+    await screen.findByRole('list', { name: 'Vencidas' });
     await user.click(
-      screen.getByRole('button', { name: 'Marcar como completada: Regar almácigos' }),
+      screen.getByRole('button', { name: 'Marcar como completada: Regar huerta sintética' }),
     );
     const dialog = await screen.findByRole('dialog', { name: '✅ Registrar actividad completada' });
     await user.click(within(dialog).getByRole('button', { name: 'Registrar' }));
@@ -330,14 +600,14 @@ describe('🥬 Huerta — actividades', () => {
     await user.click(within(dialog).getByRole('radio', { name: /Admin sintética/ }));
     await user.click(within(dialog).getByRole('button', { name: 'Registrar' }));
     await waitFor(() =>
-      expect(gardenApi.completeGardenActivity).toHaveBeenCalledWith(DAILY_P.id, ADMIN_P.id),
+      expect(gardenApi.completeGardenActivity).toHaveBeenCalledWith(TODAY.id, ADMIN_P.id),
     );
   });
 
   it('las invalidaciones quedan en la Huerta: nunca Tareas, Desempeño general ni Inicio', async () => {
     const user = userEvent.setup();
     asEmployee();
-    gardenApi.completeGardenActivity.mockResolvedValue({ activity: DAILY_P });
+    gardenApi.completeGardenActivity.mockResolvedValue({ activity: TODAY });
     const queryClient = createTestQueryClient();
     const seed = (key: readonly unknown[]) => queryClient.setQueryData(key, { seeded: true });
     const outside = [
@@ -351,9 +621,9 @@ describe('🥬 Huerta — actividades', () => {
     ];
     for (const key of [...outside, ...inside]) seed(key);
     renderGarden('/kitchen-garden', queryClient);
-    await screen.findByRole('list', { name: 'Actividades del período' });
+    await screen.findByRole('list', { name: 'Vencidas' });
     await user.click(
-      screen.getByRole('button', { name: 'Marcar como completada: Regar almácigos' }),
+      screen.getByRole('button', { name: 'Marcar como completada: Regar huerta sintética' }),
     );
     await waitFor(() => expect(queryClient.getQueryState(inside[0]!)?.isInvalidated).toBe(true));
     expect(queryClient.getQueryState(inside[1]!)?.isInvalidated).toBe(true);

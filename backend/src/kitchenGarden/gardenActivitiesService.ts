@@ -1,5 +1,5 @@
 import { Prisma } from '../generated/prisma/client';
-import type { TaskFrequency } from '../generated/prisma/enums';
+import type { KitchenGardenActivityKind, TaskFrequency } from '../generated/prisma/enums';
 import { prisma } from '../lib/prisma';
 import { config } from '../config';
 import { recordAuditLog } from '../auth/auditLog';
@@ -14,10 +14,12 @@ import {
   toLocalDate,
   type LocalDate,
 } from '../lib/businessTime';
+import { canonicalRequestHash, executeIdempotent } from '../lib/idempotency';
 import {
   DuplicateGardenActivityError,
   ForbiddenError,
   GardenActivityAlreadyCompletedError,
+  GardenActivityChangedError,
   GardenActivityInactiveError,
   GardenActivityNotFoundError,
   GardenExecutionNotActiveError,
@@ -32,7 +34,8 @@ import {
   type SuggestionField,
   type SuggestionValues,
 } from '../tasks/taskSuggestion';
-import { FREQUENCY_ORDER, compareOperationalOrder } from '../tasks/taskOrder';
+import { FREQUENCY_ORDER } from '../tasks/taskOrder';
+import { GARDEN_SOON_DAYS, agendaOf, compareAgenda } from './gardenAgenda';
 import {
   loadParticipantDirectory,
   lockParticipant,
@@ -44,18 +47,29 @@ import {
 } from './gardenParticipants';
 
 /**
- * 🥬 Huerta — actividades (docs/BUSINESS_RULES.md, "🥬 Huerta"). Las MISMAS
- * reglas que ✅ Tareas (períodos, «Una vez» con fecha, sugerencias, orden,
- * una ejecución vigente por período, reversión lógica, planificación
- * histórica) sobre tablas propias `kitchen_garden_*`: nada se lee ni se
- * escribe en las de Tareas. Permisos: consultar, todos; crear, editar,
- * asignar y activar/desactivar, solo ADMIN; completar, el participante
- * activo responsable (lo propio) o un ADMIN indicando quién la realizó.
+ * 🥬 Huerta — actividades, que la interfaz llama «registros» (📝 Registros;
+ * docs/BUSINESS_RULES.md, "🥬 Huerta"). Las MISMAS reglas que ✅ Tareas
+ * (períodos, «Una vez» con fecha, sugerencias, orden, una ejecución vigente
+ * por período, reversión lógica, planificación histórica) sobre tablas
+ * propias `kitchen_garden_*`: nada se lee ni se escribe en las de Tareas.
+ * Cada una tiene además un tipo opcional (siembra, trasplante u otra; las
+ * anteriores quedan «Sin clasificar») y observaciones, que no versionan.
+ * Permisos: consultar, todos; crear y editar (también las de otro
+ * responsable), ADMIN y participantes activos; activar/desactivar, solo
+ * ADMIN; completar, el participante activo responsable (lo propio) o un
+ * ADMIN indicando quién la realizó.
  */
 
 const SCHEDULED_DATE_ONLY_ONE_TIME =
   'La fecha para realizar solo se puede indicar en actividades «Una vez».';
 const RESPONSIBLE_INVALID = 'El responsable debe ser un participante activo de la Huerta.';
+
+/** Crear y editar registros: un ADMIN o un participante activo (identidad de la sesión). */
+function requireGardenWriter(actor: GardenActor, message: string): void {
+  if (actor.role !== 'ADMIN' && actor.participantId === null) throw new ForbiddenError(message);
+}
+
+const canWrite = (actor: GardenActor) => actor.role === 'ADMIN' || actor.participantId !== null;
 
 function assertScheduledDateFits(frequency: TaskFrequency, date: string | null | undefined): void {
   if (date != null && frequency !== 'ONE_TIME')
@@ -91,6 +105,9 @@ const activitySelect = {
   scheduledDate: true,
   executionOrder: true,
   ...suggestionSelect,
+  kind: true,
+  notes: true,
+  version: true,
 } as const;
 
 type ActivityRow = Prisma.KitchenGardenActivityGetPayload<{ select: typeof activitySelect }>;
@@ -167,12 +184,17 @@ function serializeActivity(
   const scheduledDate = scheduledDateText(activity.scheduledDate);
   const suggestion = suggestionOf(activity);
   const suggestedDate = suggestedDateIn(activity.frequency, suggestion, today);
+  const suggestedText = suggestedDate ? formatLocalDate(suggestedDate) : null;
   const responsible = directory.get(activity.participantId);
   return {
     id: activity.id,
     description: activity.description,
     frequency: activity.frequency,
     active: activity.active,
+    /** `null` = «Sin clasificar» (actividades anteriores al tipo). */
+    kind: activity.kind,
+    notes: activity.notes,
+    version: activity.version,
     responsible: {
       ...personFrom(directory, activity.participantId),
       active: responsible?.active ?? false,
@@ -183,7 +205,12 @@ function serializeActivity(
     executionOrder: activity.executionOrder,
     ...suggestion,
     // Fecha sugerida del período vigente: solo una sugerencia, nunca un vencimiento.
-    suggestedDate: suggestedDate ? formatLocalDate(suggestedDate) : null,
+    suggestedDate: suggestedText,
+    // Grupo de 📝 Registros (vencidas, para hoy, próximas, sin fecha) y su fecha.
+    ...agendaOf(
+      { frequency: activity.frequency, scheduledDate, suggestedDate: suggestedText },
+      formatLocalDate(today),
+    ),
     currentExecution: execution
       ? serializeExecution(directory, execution, canRevertExecution(actor, execution, periodKey))
       : null,
@@ -236,7 +263,11 @@ export interface ListGardenActivitiesFilters {
   status: 'active' | 'inactive' | 'all';
 }
 
-/** `GET /kitchen-garden/activities`: las del período vigente, en el orden operativo de Tareas. */
+/**
+ * `GET /kitchen-garden/activities`: las del período vigente, agrupadas para
+ * 📝 Registros (vencidas → para hoy → próximas → sin fecha; dentro de cada
+ * grupo por fecha y después el orden operativo de Tareas).
+ */
 export async function listGardenActivities(
   actor: GardenActor,
   filters: ListGardenActivitiesFilters,
@@ -280,21 +311,25 @@ export async function listGardenActivities(
           activity.currentExecution
         ),
     )
-    .sort(compareOperationalOrder);
+    .sort(compareAgenda);
 
   return {
     period: {
       today: formatLocalDate(today),
       weekStart: formatLocalDate(startOfWeek(today)),
+      // Último día de «Próximos días» en el resumen de 📝 Registros.
+      soonUntil: formatLocalDate(addDays(today, GARDEN_SOON_DAYS)),
       timeZone: config.businessTimeZone,
       // Hora del servidor para el reloj del día compartido (docs/ARCHITECTURE.md §39.1).
       generatedAt: now.toISOString(),
     },
+    // Qué acciones mostrar; el backend vuelve a validar cada una.
+    viewer: { canWrite: canWrite(actor), canManage: actor.role === 'ADMIN' },
     activities: serialized,
   };
 }
 
-// ── Administración (ADMIN) ────────────────────────────────────────────────
+// ── Alta y edición (ADMIN y participantes activos) ────────────────────────
 
 /** Programación sugerida enviada: omitido = sin cambios (o vacío al crear), `null` = quitar. */
 type SuggestionInput = Partial<Record<SuggestionField, number | null>>;
@@ -313,92 +348,244 @@ async function requireActiveResponsible(tx: Prisma.TransactionClient, participan
   if (!participant?.active) throw new ValidationError(RESPONSIBLE_INVALID);
 }
 
+export type GardenActivityKind = KitchenGardenActivityKind;
+
+/** «Programar también el trasplante»: otra actividad «Una vez» de tipo trasplante. */
+export interface ScheduledTransplantInput {
+  description: string;
+  participantId: string;
+  scheduledDate?: string | null;
+}
+
 export interface CreateGardenActivityInput extends SuggestionInput {
+  kind: GardenActivityKind;
   description: string;
   participantId: string;
   frequency: TaskFrequency;
   scheduledDate?: string | null;
+  notes?: string | null;
   executionOrder?: number | null;
+  transplant?: ScheduledTransplantInput;
 }
 
+interface NewActivity {
+  kind: GardenActivityKind;
+  description: string;
+  participantId: string;
+  frequency: TaskFrequency;
+  scheduledDate: string | null;
+  notes: string | null;
+  executionOrder: number | null;
+  suggestion: SuggestionValues;
+}
+
+/** Una actividad nueva con su primera versión de planificación y su auditoría. */
+async function insertActivity(
+  tx: Prisma.TransactionClient,
+  actor: GardenActor,
+  activity: NewActivity,
+  meta: RequestMeta,
+  now: Date,
+  link: Record<string, string> = {},
+): Promise<string> {
+  const { kind, description, participantId, frequency, scheduledDate, notes, executionOrder } =
+    activity;
+  await requireActiveResponsible(tx, participantId);
+  const created = await tx.kitchenGardenActivity.create({
+    data: {
+      kind,
+      description,
+      participantId,
+      frequency,
+      scheduledDate: scheduledDateValue(scheduledDate),
+      notes,
+      executionOrder,
+      ...activity.suggestion,
+    },
+    select: { id: true },
+  });
+  await tx.kitchenGardenPlanningInterval.create({
+    data: {
+      activityId: created.id,
+      participantId,
+      frequency,
+      scheduledDate: scheduledDateValue(scheduledDate),
+      validFrom: now,
+    },
+  });
+  await recordAuditLog(tx, {
+    actorUserId: actor.userId,
+    action: 'kitchen_garden.activity_created',
+    entityType: 'KitchenGardenActivity',
+    entityId: created.id,
+    newState: {
+      kind,
+      description,
+      participantId,
+      frequency,
+      ...(scheduledDate ? { scheduledDate } : {}),
+      ...(notes ? { notes } : {}),
+      ...filledOf({ executionOrder, ...activity.suggestion }),
+      active: true,
+      actorRole: actor.role,
+      ...link,
+    },
+    ...meta,
+  });
+  return created.id;
+}
+
+const CREATE_ENDPOINT = 'POST /kitchen-garden/activities';
+
+/** Lo que guarda la idempotencia: los ids creados (la respuesta se arma al día). */
+interface CreatedIds {
+  activityId: string;
+  transplantId: string | null;
+}
+
+/** Huella canónica del alta (orden fijo; mismo cuerpo → misma huella). */
+const createHashParts = (input: CreateGardenActivityInput) => [
+  CREATE_ENDPOINT,
+  input.kind,
+  input.description,
+  input.participantId,
+  input.frequency,
+  input.scheduledDate ?? null,
+  input.notes ?? null,
+  input.executionOrder ?? null,
+  ...SUGGESTION_FIELDS.map((field) => input[field] ?? null),
+  input.transplant ? 1 : 0,
+  input.transplant?.description ?? null,
+  input.transplant?.participantId ?? null,
+  input.transplant?.scheduledDate ?? null,
+];
+
+/**
+ * Alta de un registro (actividad). El tipo es obligatorio en las nuevas.
+ * Con `transplant` (solo siembra «Una vez») crea además el trasplante como
+ * otra actividad independiente, en la MISMA transacción: o quedan las dos o
+ * ninguna. Después se gestionan por separado (completar una nunca completa
+ * la otra). Con `Idempotency-Key`, un doble envío devuelve lo ya creado.
+ */
 export async function createGardenActivity(
   actor: GardenActor,
   input: CreateGardenActivityInput,
   meta: RequestMeta,
   now = new Date(),
+  idempotencyKey?: string,
 ) {
-  requireGardenAdmin(actor, 'Solo un administrador puede crear actividades.');
+  requireGardenWriter(
+    actor,
+    'Solo un administrador o un participante activo de la Huerta puede crear registros.',
+  );
   assertScheduledDateFits(input.frequency, input.scheduledDate);
+  const { transplant } = input;
+  if (transplant) {
+    if (input.kind !== 'SOWING' || input.frequency !== 'ONE_TIME') {
+      throw new ValidationError(
+        'El trasplante solo se puede programar junto con una siembra «Una vez».',
+      );
+    }
+    if (transplant.scheduledDate && input.scheduledDate) {
+      if (transplant.scheduledDate < input.scheduledDate) {
+        throw new ValidationError(
+          'La fecha prevista del trasplante no puede ser anterior a la de la siembra.',
+        );
+      }
+    }
+  }
   const suggestion = resolveSuggestion(input.frequency, EMPTY_SUGGESTION, suggestionInputOf(input));
-  const {
-    scheduledDate = null,
-    executionOrder = null,
-    description,
-    participantId,
-    frequency,
-  } = input;
-  let activityId: string;
+
+  const write = async (tx: Prisma.TransactionClient): Promise<CreatedIds> => {
+    const activityId = await insertActivity(
+      tx,
+      actor,
+      {
+        kind: input.kind,
+        description: input.description,
+        participantId: input.participantId,
+        frequency: input.frequency,
+        scheduledDate: input.scheduledDate ?? null,
+        notes: input.notes ?? null,
+        executionOrder: input.executionOrder ?? null,
+        suggestion,
+      },
+      meta,
+      now,
+    );
+    const transplantId = transplant
+      ? await insertActivity(
+          tx,
+          actor,
+          {
+            kind: 'TRANSPLANT',
+            description: transplant.description,
+            participantId: transplant.participantId,
+            frequency: 'ONE_TIME',
+            scheduledDate: transplant.scheduledDate ?? null,
+            notes: null,
+            executionOrder: null,
+            suggestion: EMPTY_SUGGESTION,
+          },
+          meta,
+          now,
+          // Solo un rastro en la auditoría: no hay vínculo ni automatismo entre ambas.
+          { scheduledWithSowingId: activityId },
+        )
+      : null;
+    return { activityId, transplantId };
+  };
+
+  let created: CreatedIds;
   try {
-    activityId = await prisma.$transaction(async (tx) => {
-      await requireActiveResponsible(tx, participantId);
-      const activity = await tx.kitchenGardenActivity.create({
-        data: {
-          description,
-          participantId,
-          frequency,
-          scheduledDate: scheduledDateValue(scheduledDate),
-          executionOrder,
-          ...suggestion,
-        },
-        select: { id: true },
-      });
-      await tx.kitchenGardenPlanningInterval.create({
-        data: {
-          activityId: activity.id,
-          participantId,
-          frequency,
-          scheduledDate: scheduledDateValue(scheduledDate),
-          validFrom: now,
-        },
-      });
-      await recordAuditLog(tx, {
+    if (idempotencyKey === undefined) {
+      created = await prisma.$transaction(write);
+    } else {
+      const result = await executeIdempotent({
         actorUserId: actor.userId,
-        action: 'kitchen_garden.activity_created',
-        entityType: 'KitchenGardenActivity',
-        entityId: activity.id,
-        newState: {
-          description,
-          participantId,
-          frequency,
-          ...(scheduledDate ? { scheduledDate } : {}),
-          ...filledOf({ executionOrder, ...suggestion }),
-          active: true,
-        },
-        ...meta,
+        endpoint: CREATE_ENDPOINT,
+        key: idempotencyKey,
+        requestHash: canonicalRequestHash(createHashParts(input)),
+        status: 201,
+        run: async (tx) => ({ ...(await write(tx)) }),
       });
-      return activity.id;
-    });
+      created = result.kind === 'created' ? result.body : (result.body as unknown as CreatedIds);
+    }
   } catch (error) {
     if (isUniqueViolation(error)) throw new DuplicateGardenActivityError();
     throw error;
   }
-  return { activity: await loadSerializedActivity(activityId, actor, now) };
+  return {
+    activity: await loadSerializedActivity(created.activityId, actor, now),
+    transplant: created.transplantId
+      ? await loadSerializedActivity(created.transplantId, actor, now)
+      : null,
+  };
 }
 
 export interface UpdateGardenActivityInput extends SuggestionInput {
+  /** La versión que vio la pantalla (concurrencia optimista). */
+  version: number;
+  kind?: GardenActivityKind;
   description?: string;
   participantId?: string;
   frequency?: TaskFrequency;
   scheduledDate?: string | null;
+  notes?: string | null;
   executionOrder?: number | null;
 }
+
+type ActivityChanges = Omit<UpdateGardenActivityInput, 'version'>;
 
 /**
  * Mismas reglas que editar una tarea: omitido conserva, `null` quita; cambiar
  * de frecuencia limpia SOLO la sugerencia que deja de valer (y la fecha si
  * deja de ser «Una vez»). Reasignar, cambiar la frecuencia o reprogramar
  * cierran la versión de planificación vigente y abren otra: las ejecuciones
- * y lo esperado antes no se reescriben. Orden y sugerencia no versionan.
+ * y lo esperado antes no se reescriben. Tipo, observaciones, orden y
+ * sugerencia no versionan la planificación. La fila se bloquea antes de
+ * leerla y la `version` enviada debe ser la vigente (409 si otra persona la
+ * cambió); sin cambios reales no se escribe ni se audita nada.
  */
 export async function updateGardenActivity(
   actor: GardenActor,
@@ -407,18 +594,29 @@ export async function updateGardenActivity(
   meta: RequestMeta,
   now = new Date(),
 ) {
-  requireGardenAdmin(actor, 'Solo un administrador puede editar actividades.');
+  requireGardenWriter(
+    actor,
+    'Solo un administrador o un participante activo de la Huerta puede editar registros.',
+  );
   try {
     await prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<{ id: string }[]>(
+        Prisma.sql`SELECT "id" FROM "kitchen_garden_activities" WHERE "id" = ${activityId}::uuid FOR UPDATE`,
+      );
+      if (locked.length === 0) throw new GardenActivityNotFoundError();
       const current = await tx.kitchenGardenActivity.findUnique({
         where: { id: activityId },
         select: activitySelect,
       });
       if (!current) throw new GardenActivityNotFoundError();
+      if (!current.active && actor.role !== 'ADMIN') {
+        throw new ForbiddenError('Solo un administrador puede editar registros desactivados.');
+      }
+      if (current.version !== input.version) throw new GardenActivityChangedError();
 
-      const changes: UpdateGardenActivityInput = {};
-      const previous: UpdateGardenActivityInput = {};
-      for (const key of ['description', 'participantId', 'frequency'] as const) {
+      const changes: ActivityChanges = {};
+      const previous: ActivityChanges = {};
+      for (const key of ['kind', 'description', 'participantId', 'frequency', 'notes'] as const) {
         const next = input[key];
         if (next !== undefined && next !== current[key]) {
           (changes as Record<string, unknown>)[key] = next;
@@ -484,6 +682,7 @@ export async function updateGardenActivity(
           ...(scheduledDate !== undefined
             ? { scheduledDate: scheduledDateValue(scheduledDate) }
             : {}),
+          version: { increment: 1 },
         },
       });
       await recordAuditLog(tx, {
@@ -491,8 +690,8 @@ export async function updateGardenActivity(
         action: 'kitchen_garden.activity_updated',
         entityType: 'KitchenGardenActivity',
         entityId: activityId,
-        previousState: { ...previous },
-        newState: { ...changes },
+        previousState: { ...previous, version: current.version },
+        newState: { ...changes, version: current.version + 1, actorRole: actor.role },
         ...meta,
       });
     });
@@ -502,6 +701,8 @@ export async function updateGardenActivity(
   }
   return { activity: await loadSerializedActivity(activityId, actor, now) };
 }
+
+// ── Activar y desactivar (solo ADMIN) ─────────────────────────────────────
 
 /** Sin borrado: desactivar conserva la actividad y todo su historial. */
 export async function setGardenActivityActive(
@@ -542,7 +743,11 @@ export async function setGardenActivityActive(
         data: { validTo: now },
       });
     }
-    await tx.kitchenGardenActivity.update({ where: { id: activityId }, data: { active } });
+    // La versión sube: una edición abierta antes del cambio recibe 409 y no lo pisa.
+    await tx.kitchenGardenActivity.update({
+      where: { id: activityId },
+      data: { active, version: { increment: 1 } },
+    });
     await recordAuditLog(tx, {
       actorUserId: actor.userId,
       action: active ? 'kitchen_garden.activity_activated' : 'kitchen_garden.activity_deactivated',

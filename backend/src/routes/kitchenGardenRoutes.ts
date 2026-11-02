@@ -3,17 +3,6 @@ import { requireAuth } from '../middleware/requireAuth';
 import { requireJsonContentType } from '../middleware/requireJsonContentType';
 import {
   getActivities,
-  getBatch,
-  getBatches,
-  getCropRecords,
-  getCrops,
-  patchBatch,
-  patchCropRecord,
-  postBatchArchive,
-  postBatchReopen,
-  postCropRecordVoid,
-  postSowing,
-  postTransplant,
   getHistory,
   getParticipantCandidates,
   getParticipantPerformance,
@@ -58,15 +47,3 @@ kitchenGardenRouter.post('/activities/:id/revert', requireJsonContentType, postA
 kitchenGardenRouter.get('/history', getHistory);
 kitchenGardenRouter.get('/performance/summary', getPerformanceSummary);
 kitchenGardenRouter.get('/performance/participants/:id', getParticipantPerformance);
-// 🥕 Cultivos y 📝 Registros: consulta para todos; escribir, ADMIN y participantes activos.
-kitchenGardenRouter.get('/crops', getCrops);
-kitchenGardenRouter.get('/batches', getBatches);
-kitchenGardenRouter.post('/batches', requireJsonContentType, postSowing);
-kitchenGardenRouter.get('/batches/:id', getBatch);
-kitchenGardenRouter.patch('/batches/:id', requireJsonContentType, patchBatch);
-kitchenGardenRouter.post('/batches/:id/archive', requireJsonContentType, postBatchArchive);
-kitchenGardenRouter.post('/batches/:id/reopen', requireJsonContentType, postBatchReopen);
-kitchenGardenRouter.post('/batches/:id/transplants', requireJsonContentType, postTransplant);
-kitchenGardenRouter.get('/crop-records', getCropRecords);
-kitchenGardenRouter.patch('/crop-records/:id', requireJsonContentType, patchCropRecord);
-kitchenGardenRouter.post('/crop-records/:id/void', requireJsonContentType, postCropRecordVoid);

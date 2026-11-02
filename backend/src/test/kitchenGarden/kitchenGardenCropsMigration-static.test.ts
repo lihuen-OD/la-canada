@@ -12,12 +12,24 @@ const STATEMENTS = MIGRATION.split('\n')
   .join('\n');
 const TABLES = ['kitchen_garden_crops', 'kitchen_garden_batches', 'kitchen_garden_crop_records'];
 
-describe('migración kitchen_garden_crops (🥬 Huerta: cultivos y registros)', () => {
-  it('es la última y solo agrega: tres tipos y tres tablas nuevas', () => {
-    const migrations = readdirSync(resolve(ROOT, 'prisma/migrations'))
-      .filter((entry) => /^\d{14}_/.test(entry))
-      .sort();
-    expect(migrations.at(-1)).toBe(NAME);
+/**
+ * Aplicada en `demo` el 2026-11-02 y sin modificar desde entonces (su checksum
+ * tiene que seguir coincidiendo). El diseño de Cultivos y tandas se reemplazó
+ * por 📝 Registros (`20261102180000_kitchen_garden_activity_kind_notes`): sus
+ * tablas siguen existiendo, sin uso desde la aplicación.
+ */
+describe('migración kitchen_garden_crops (tablas de cultivos, hoy sin uso)', () => {
+  it('existe, es la única que crea esas tablas y solo agrega: tres tipos y tres tablas nuevas', () => {
+    const migrations = readdirSync(resolve(ROOT, 'prisma/migrations')).filter((entry) =>
+      /^\d{14}_/.test(entry),
+    );
+    expect(migrations).toContain(NAME);
+    const creators = migrations.filter((entry) =>
+      read(`prisma/migrations/${entry}/migration.sql`).includes(
+        'CREATE TABLE "kitchen_garden_crops"',
+      ),
+    );
+    expect(creators).toEqual([NAME]);
     const created = [...STATEMENTS.matchAll(/CREATE TABLE "(\w+)"/g)].map((match) => match[1]);
     expect(created.sort()).toEqual([...TABLES].sort());
     const types = [...STATEMENTS.matchAll(/CREATE TYPE "(\w+)"/g)].map((match) => match[1]);
@@ -63,14 +75,16 @@ describe('migración kitchen_garden_crops (🥬 Huerta: cultivos y registros)', 
   });
 });
 
-describe('aislamiento: los cultivos son de la Huerta', () => {
+describe('aislamiento: nada de la aplicación lee ni escribe las tablas de cultivos', () => {
   it.each([
     'src/tasks/tasksService.ts',
     'src/performance/performanceService.ts',
     'src/dashboard/dashboardService.ts',
     'src/kitchenGarden/gardenActivitiesService.ts',
     'src/kitchenGarden/gardenPerformanceService.ts',
-  ])('%s no lee cultivos ni registros', (path) => {
+    'src/kitchenGarden/gardenParticipants.ts',
+    'src/controllers/kitchenGardenController.ts',
+  ])('%s no usa las tablas de cultivos', (path) => {
     expect(read(path)).not.toMatch(/kitchenGardenBatch|kitchenGardenCrop|gardenCrops/);
   });
 });

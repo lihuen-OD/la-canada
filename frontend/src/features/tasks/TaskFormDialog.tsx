@@ -5,7 +5,6 @@ import type {
   TaskEmployee,
   TaskFrequency,
   TaskItem,
-  TaskSuggestion,
   TaskSuggestionField,
   UpdateTaskRequest,
 } from '../../api/taskTypes';
@@ -29,53 +28,18 @@ import {
   TASK_NOUN,
   type ItemNoun,
 } from './taskLabels';
+import {
+  DESCRIPTION_MAX,
+  ORDER_ERROR,
+  SUGGESTION_FIELDS,
+  keepValidSuggestion,
+  normalizeDescription,
+  parseExecutionOrder,
+  suggestionFormOf,
+  validateDescription,
+  type SuggestionForm,
+} from './taskFormFields';
 import { useSubmitGuard } from './useSubmitGuard';
-
-const DESCRIPTION_MAX = 200;
-
-/** Misma normalización que el backend (que igual vuelve a validar todo). */
-function normalizeDescription(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
-}
-
-const SUGGESTION_FIELDS: readonly TaskSuggestionField[] = [
-  'suggestedWeekday',
-  'suggestedFirstHalfDay',
-  'suggestedSecondHalfDay',
-  'suggestedMonthDay',
-  'suggestedMonth',
-];
-/** Valores de los `<select>` de la sugerencia; vacío = sin dato. */
-type SuggestionForm = Record<TaskSuggestionField, string>;
-
-const suggestionFormOf = (task?: TaskSuggestion): SuggestionForm =>
-  Object.fromEntries(
-    SUGGESTION_FIELDS.map((field) => [field, task?.[field] != null ? String(task[field]) : '']),
-  ) as SuggestionForm;
-
-/** Al cambiar de frecuencia se conserva solo lo que la nueva admite (el backend hace lo mismo). */
-function keepValidSuggestion(
-  values: SuggestionForm,
-  frequency: TaskFrequency | '',
-): SuggestionForm {
-  const kept = suggestionFormOf();
-  for (const input of frequency ? SUGGESTION_INPUTS[frequency] : []) {
-    if (input.options.some((option) => String(option.value) === values[input.field])) {
-      kept[input.field] = values[input.field];
-    }
-  }
-  return kept;
-}
-
-const ORDER_ERROR = `El orden de realización debe ser un número entero de 1 a ${EXECUTION_ORDER_MAX}.`;
-
-function validateDescription(value: string): string | null {
-  if (value.length < 3) return 'La descripción debe tener al menos 3 caracteres.';
-  if (value.length > DESCRIPTION_MAX)
-    return `La descripción no puede superar ${DESCRIPTION_MAX} caracteres.`;
-  if (/[<>]/.test(value)) return 'La descripción no puede contener HTML.';
-  return null;
-}
 
 interface TaskFormDialogProps {
   /** Sin `task`: creación. Con `task`: edición (solo se envían los campos que cambiaron). */
@@ -138,14 +102,8 @@ export function TaskFormDialog({
     if (!employeeId) return setErrorMessage('Elegí un responsable.');
     if (!frequency) return setErrorMessage('Elegí una frecuencia.');
 
-    const orderText = executionOrder.trim();
-    const order = orderText === '' ? null : Number(orderText);
-    if (
-      order !== null &&
-      !(/^\d+$/.test(orderText) && order >= 1 && order <= EXECUTION_ORDER_MAX)
-    ) {
-      return setErrorMessage(ORDER_ERROR);
-    }
+    const order = parseExecutionOrder(executionOrder);
+    if (order === undefined) return setErrorMessage(ORDER_ERROR);
     // Solo los datos de sugerencia que muestra la frecuencia elegida.
     const suggested = Object.fromEntries(
       SUGGESTION_INPUTS[frequency].map((input) => [

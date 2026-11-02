@@ -21,24 +21,10 @@ export function useGardenCache() {
     });
   }, [queryClient, userId]);
 
-  /**
-   * Siembra, trasplante, corrección, anulación, archivo o lo previsto: el
-   * listado de 🥕 Cultivos, las fichas, el catálogo de cultivos y 📝
-   * Registros. Nunca las actividades ni el Desempeño de la Huerta.
-   */
-  const afterCropChange = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.kitchenGarden.batchesAll(userId) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.kitchenGarden.batchAll(userId) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.kitchenGarden.crops(userId) });
-    void queryClient.invalidateQueries({
-      queryKey: queryKeys.kitchenGarden.cropRecordsAll(userId),
-    });
-  }, [queryClient, userId]);
-
   /** Participación agregada o (des)activada: nombres y opciones en todo el módulo. */
   const afterParticipantChange = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.kitchenGarden.all(userId) });
   }, [queryClient, userId]);
 
-  return { afterActivityChange, afterCropChange, afterParticipantChange };
+  return { afterActivityChange, afterParticipantChange };
 }

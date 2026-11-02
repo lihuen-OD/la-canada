@@ -629,7 +629,9 @@ Módulo propio, independiente de Tareas: cuatro tablas NUEVAS y vacías; ninguna
 - **Compatibilidad**: aditiva. El backend anterior ignora la tabla y la columna (sube fotos con `folder_id` nulo, que es «Sin carpeta»).
 - **Rediseño del 2026-10-30 (sin migración)**: toda foto nueva de la galería exige carpeta y mover siempre apunta a una carpeta (reglas del backend; `docs/ARCHITECTURE.md` §50.1). El modelo no cambia: `folder_id` sigue siendo nulo para las fotos anteriores («Fotos por organizar»), que no se asignan ni se modifican; `category` conserva sus valores (las fotos nuevas quedan en `MEMORY`, la categoría general). No se agregó una restricción de base para «carpeta obligatoria» porque distinguiría filas anteriores de nuevas solo por fecha; la regla vive en el único servicio que crea fotos de la galería.
 
-### 🥬 Huerta: cultivos y registros (`20261102120000_kitchen_garden_crops`, aplicada a `demo` el 2026-11-02; **pendiente en `production`**)
+### 🥬 Huerta: tablas de cultivos (`20261102120000_kitchen_garden_crops`, aplicada a `demo` el 2026-11-02; **pendiente en `production`**; sin uso desde la aplicación)
+
+> **Diseño reemplazado el 2026-11-02** por 📝 Registros (siguiente sección): estas tablas siguen existiendo y la migración no se modifica (ya aplicada en `demo`; su checksum debe coincidir), pero ningún código las lee ni las escribe. En `demo` están vacías. Sus modelos se conservan en `schema.prisma` para que un diff futuro no las borre.
 
 Tres tablas nuevas y tres tipos enum (`KitchenGardenSowingMethod` `DIRECT`/`SEEDBED`, `KitchenGardenCropRecordType` `SOWING`/`TRANSPLANT`, `KitchenGardenQuantityUnit` `SEEDS`/`GRAMS`/`SEEDLINGS`):
 
@@ -639,3 +641,12 @@ Tres tablas nuevas y tres tipos enum (`KitchenGardenSowingMethod` `DIRECT`/`SEED
 
 Generada offline con `prisma migrate diff --from-schema <antes> --to-schema <ahora> --script`, revisada (solo `CREATE TYPE`/`TABLE`/`INDEX`, FK de las tablas nuevas y CHECK; ningún `DROP`, `UPDATE`, `INSERT` ni cambio de tablas existentes) y cubierta por `kitchenGardenCropsMigration-static.test.ts`. Aplicada a `demo` el 2026-11-02 con `db:migrate:deploy` (guarda `DATABASE_TARGET=demo`; destino verificado: sin variables exportadas que sobrescriban el `.env`, el mismo endpoint en las dos conexiones y las marcas documentadas de `demo`), con autorización explícita del usuario y antes de fusionar la rama: el código de `demo` (24 migraciones locales) informa «Database schema is up to date» y no usa las tablas nuevas. Queda **pendiente en `production`**. Sin datos iniciales ni backfill: las tablas quedaron vacías.
 
+### 🥬 Huerta: 📝 Registros (`20261102180000_kitchen_garden_activity_kind_notes`, aplicada a `demo` el 2026-11-02; **pendiente en `production`**)
+
+Aditiva, sobre la tabla existente `kitchen_garden_activities` (ver `docs/ARCHITECTURE.md` §53):
+
+- Tipo enum nuevo `KitchenGardenActivityKind` (`SOWING`, `TRANSPLANT`, `OTHER`).
+- `kind KitchenGardenActivityKind` **nullable** (NULL = «Sin clasificar»: las actividades anteriores no se clasifican solas), `notes TEXT` nullable (`CHECK` 1–500 caracteres) y `version INTEGER NOT NULL DEFAULT 1` (`CHECK >= 1`; concurrencia optimista). Agregar la columna con un `DEFAULT` constante no ejecuta `UPDATE` ni reescribe filas.
+- Sin cambios en planificación, ejecuciones, participantes ni en las tablas de cultivos; sin datos, seed ni backfill. El tipo es obligatorio para las actividades nuevas por regla del backend (no por la base, para no tocar las existentes).
+
+Generada offline con `prisma migrate diff --from-schema <antes> --to-schema <ahora> --script` más los dos CHECK, cubierta por `kitchenGardenActivityKindMigration-static.test.ts`. Aplicada a `demo` el 2026-11-02 con `db:migrate:deploy` (destino verificado; 26 de 26): las 3 actividades reales quedaron con `kind` y `notes` NULL y `version` 1, y su huella (columnas anteriores, planificación, ejecuciones) no cambió. El código actual de `demo` (24 migraciones locales) sigue funcionando con la base migrada: no conoce las columnas nuevas y los valores por defecto cubren sus inserciones. **Orden en `production`**: `20261102120000_kitchen_garden_crops` y después `20261102180000_kitchen_garden_activity_kind_notes`, antes de publicar el backend de esta rama.

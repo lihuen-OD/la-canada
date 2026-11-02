@@ -1549,26 +1549,42 @@ model KitchenGardenParticipant {
   @@map("kitchen_garden_participants")
 }
 
+/// 🥬 Huerta — tipo de un registro (actividad) de la Huerta (2026-11-02).
+/// Opcional en la base: las actividades anteriores quedan «Sin clasificar»
+/// (nunca se deduce de la descripción); las nuevas lo exigen en el backend.
+enum KitchenGardenActivityKind {
+  SOWING
+  TRANSPLANT
+  OTHER
+}
+
 /// Actividad de la Huerta: mismas frecuencias, fecha de «Una vez», orden de
 /// realización y programación sugerida que una tarea (mismas reglas y los
-/// mismos CHECK), con un participante de la Huerta como responsable.
+/// mismos CHECK), con un participante de la Huerta como responsable. En la
+/// interfaz se llama «registro» (📝 Registros).
 model KitchenGardenActivity {
-  id                     String                   @id @default(uuid()) @db.Uuid
+  id                     String                     @id @default(uuid()) @db.Uuid
   description            String
-  participantId          String                   @map("participant_id") @db.Uuid
-  participant            KitchenGardenParticipant @relation(fields: [participantId], references: [id])
+  participantId          String                     @map("participant_id") @db.Uuid
+  participant            KitchenGardenParticipant   @relation(fields: [participantId], references: [id])
   frequency              TaskFrequency
-  active                 Boolean                  @default(true)
+  active                 Boolean                    @default(true)
   /// «Fecha para realizar» opcional, solo `ONE_TIME` (versionada en la planificación).
-  scheduledDate          DateTime?                @map("scheduled_date") @db.Date
+  scheduledDate          DateTime?                  @map("scheduled_date") @db.Date
   /// «Orden de realización» opcional (1–9999); solo ordena, no versiona.
-  executionOrder         Int?                     @map("execution_order") @db.SmallInt
+  executionOrder         Int?                       @map("execution_order") @db.SmallInt
   /// Programación SUGERIDA de las recurrentes (ver `tasks/taskSuggestion.ts`).
-  suggestedWeekday       Int?                     @map("suggested_weekday") @db.SmallInt
-  suggestedFirstHalfDay  Int?                     @map("suggested_first_half_day") @db.SmallInt
-  suggestedSecondHalfDay Int?                     @map("suggested_second_half_day") @db.SmallInt
-  suggestedMonthDay      Int?                     @map("suggested_month_day") @db.SmallInt
-  suggestedMonth         Int?                     @map("suggested_month") @db.SmallInt
+  suggestedWeekday       Int?                       @map("suggested_weekday") @db.SmallInt
+  suggestedFirstHalfDay  Int?                       @map("suggested_first_half_day") @db.SmallInt
+  suggestedSecondHalfDay Int?                       @map("suggested_second_half_day") @db.SmallInt
+  suggestedMonthDay      Int?                       @map("suggested_month_day") @db.SmallInt
+  suggestedMonth         Int?                       @map("suggested_month") @db.SmallInt
+  /// Siembra, trasplante u otra actividad; `null` = «Sin clasificar». No versiona.
+  kind                   KitchenGardenActivityKind?
+  /// Observaciones opcionales (1–500 caracteres). No versionan.
+  notes                  String?
+  /// Concurrencia optimista: sube con cada cambio de la fila (editar, activar o desactivar).
+  version                Int                        @default(1)
 
   executions        KitchenGardenExecution[]
   planningIntervals KitchenGardenPlanningInterval[]

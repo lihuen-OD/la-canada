@@ -3,6 +3,7 @@ import {
   REVERT_REASON_MAX_LENGTH,
   descriptionSchema,
   frequencySchema,
+  normalizeText,
   orderAndSuggestionFields,
   plainText,
   scheduledDateSchema,
@@ -22,29 +23,71 @@ export const addParticipantBodySchema = z.object({ userId: uuidSchema }).strict(
 
 export const participantStatusBodySchema = z.object({ active: z.boolean() }).strict();
 
+export const GARDEN_ACTIVITY_KINDS = ['SOWING', 'TRANSPLANT', 'OTHER'] as const;
+export const GARDEN_NOTES_MAX_LENGTH = 500;
+
+/** Tipo de un registro: siembra, trasplante u otra actividad (nunca se deduce de la descripción). */
+const kindSchema = z.enum(GARDEN_ACTIVITY_KINDS, {
+  message: 'Elegí el tipo: siembra, trasplante u otra actividad.',
+});
+
+/** Observaciones de una línea; vacías (o solo espacios) = sin observaciones (`null`). */
+const notesSchema = z.preprocess(
+  (value) => (typeof value === 'string' && normalizeText(value) === '' ? null : value),
+  plainText('El campo «Observaciones»', 1, GARDEN_NOTES_MAX_LENGTH).nullable(),
+);
+
+/**
+ * «Programar también el trasplante» al crear una siembra «Una vez»: otra
+ * actividad independiente (tipo trasplante, «Una vez»), creada en la misma
+ * transacción. Qué combina con qué lo valida el servicio.
+ */
+const transplantSchema = z
+  .object({
+    description: descriptionSchema,
+    participantId: uuidSchema,
+    scheduledDate: scheduledDateSchema.optional(),
+  })
+  .strict();
+
 export const createGardenActivityBodySchema = z
   .object({
+    kind: kindSchema,
     description: descriptionSchema,
     participantId: uuidSchema,
     frequency: frequencySchema,
     scheduledDate: scheduledDateSchema.optional(),
+    notes: notesSchema.optional(),
     ...orderAndSuggestionFields,
+    transplant: transplantSchema.optional(),
   })
   .strict();
 
-/** Omitidos = sin cambios; `null` = quitar (fecha, orden y sugerencia). */
+/**
+ * Omitidos = sin cambios; `null` = quitar (fecha, observaciones, orden y
+ * sugerencia). `version` es la que vio la pantalla: si otra persona cambió
+ * la actividad en el medio, 409 sin pisar nada. El tipo no se puede quitar.
+ */
 export const updateGardenActivityBodySchema = z
   .object({
+    version: z
+      .number({ message: 'Falta la versión del registro: recargá la página.' })
+      .int('Versión inválida.')
+      .min(1, 'Versión inválida.'),
+    kind: kindSchema.optional(),
     description: descriptionSchema.optional(),
     participantId: uuidSchema.optional(),
     frequency: frequencySchema.optional(),
     scheduledDate: scheduledDateSchema.optional(),
+    notes: notesSchema.optional(),
     ...orderAndSuggestionFields,
   })
   .strict()
-  .refine((body) => Object.values(body).some((value) => value !== undefined), {
-    message: 'No hay cambios para aplicar.',
-  });
+  .refine(
+    ({ version: _version, ...changes }) =>
+      Object.values(changes).some((value) => value !== undefined),
+    { message: 'No hay cambios para aplicar.' },
+  );
 
 export const gardenActivityStatusBodySchema = z.object({ active: z.boolean() }).strict();
 

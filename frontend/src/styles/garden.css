@@ -56,198 +56,116 @@
   gap: var(--space-1);
 }
 
-/* ── 🥕 Cultivos y 📝 Registros (2026-11-02) ────────────────────────────
-   Tarjetas de tanda, ficha, seguimiento cronológico, filtros de Registros y
-   los formularios. Mismo lenguaje que Tareas y Mascotas; solo tokens. */
+/* ── 📝 Registros (2026-11-02) ─────────────────────────────────────────────
+   Resumen compacto, grupos de la agenda (vencidas, para hoy, próximas, sin
+   fecha), completadas aparte, el tipo de cada registro y el formulario. */
 
-.crop-count {
-  margin: 0 0 var(--space-2);
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
-}
-
-.crop-list {
-  display: grid;
-  gap: var(--space-2);
-  margin: 0 0 var(--space-3);
+.garden-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin: 0;
   padding: 0;
   list-style: none;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
 }
 
-/* Una tanda: tarjeta tocable completa (enlace a la ficha). */
-.crop-card {
-  display: grid;
-  gap: var(--space-1);
-  min-width: 0;
-  min-height: var(--tap-target);
-  padding: var(--space-3);
+.garden-summary__item {
+  padding: var(--space-1) var(--space-2);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-control);
+  background: var(--color-surface);
+}
+
+.garden-summary__item strong {
   color: var(--color-text);
-  text-decoration: none;
-  transition: background var(--duration-fast) var(--ease-standard);
 }
 
-.crop-card:hover {
-  background: var(--color-surface-hover);
+.garden-summary__item.is-alert {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
 }
 
-.crop-card__title {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-1) var(--space-2);
-  min-width: 0;
-  overflow-wrap: anywhere;
+.garden-summary__item.is-alert strong {
+  color: var(--color-danger);
 }
 
-.crop-card__variety,
-.crop-card__meta,
-.crop-card__count {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
+.garden-section + .garden-section {
+  margin-top: var(--space-4);
 }
 
-.crop-card__meta {
-  overflow-wrap: anywhere;
-}
-
-.crop-card__status {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-/* Ficha de la tanda. */
-.crop-batch {
-  display: grid;
-  gap: var(--space-2);
-}
-
-.crop-batch__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.crop-batch__title {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-1) var(--space-2);
-  margin: 0;
+.garden-section__title {
+  margin: 0 0 var(--space-1);
   font-family: var(--font-display);
-  font-size: var(--font-size-lg);
-  overflow-wrap: anywhere;
-}
-
-.crop-batch__name {
-  font-family: var(--font-body);
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
+}
+
+.garden-section__count {
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: normal;
+}
+
+/* Dentro de un grupo la lista ocupa el ancho de la tarjeta, sin pisar el título. */
+.garden-section .task-list {
+  margin: 0 calc(var(--space-4) * -1);
+}
+
+.garden-section--done .garden-section__title {
   color: var(--color-text-muted);
 }
 
-.crop-batch__line {
-  margin: 0;
+.garden-all-done {
+  margin: var(--space-3) 0 0;
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
-  overflow-wrap: anywhere;
+  text-align: center;
 }
 
-.crop-batch__plan,
-.crop-batch__actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-/* Seguimiento: hechos en orden, con acciones compactas. */
-.crop-timeline {
-  display: grid;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.crop-event {
-  display: grid;
-  gap: var(--space-1);
-  min-width: 0;
-  padding: var(--space-3) 0;
-  border-bottom: var(--border-width) solid var(--color-border);
-}
-
-.crop-event:last-child {
-  border-bottom: 0;
-}
-
-.crop-event__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-1) var(--space-2);
-}
-
-.crop-event__type {
+/* Tipo del registro: texto del color de los datos; «Sin clasificar», discreto (nunca un error). */
+.garden-kind {
+  color: var(--color-text);
   font-weight: var(--font-weight-semibold);
 }
 
-.crop-event__date {
+.garden-kind--unclassified {
   color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
+  font-style: italic;
+  font-weight: normal;
 }
 
-.crop-event__line,
-.crop-event__people {
-  margin: 0;
-  font-size: var(--font-size-sm);
+.task-item__note {
+  margin: 0.125rem 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
   overflow-wrap: anywhere;
 }
 
-.crop-event__people {
-  color: var(--color-text-muted);
+.garden-record-form__group {
+  display: contents;
 }
 
-.crop-event__actions {
+.garden-transplant {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+}
+
+.garden-advanced {
+  border-top: var(--border-width) solid var(--color-border);
+  padding-top: var(--space-2);
+}
+
+.garden-advanced summary {
+  min-height: var(--tap-target);
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-}
-
-/* Registros: filtros en una columna en móvil; desde 768 px, en grilla. */
-.crop-filters {
-  display: grid;
-  gap: var(--space-2) var(--space-3);
-}
-
-@media (min-width: 768px) {
-  .crop-filters {
-    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
-  }
-}
-
-/* Formularios de siembra y trasplante: grupos sin borde, a lo ancho. */
-.crop-form__group {
-  display: grid;
-  gap: var(--space-3);
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.crop-form__choices .choice__hint {
-  font-size: var(--font-size-xs);
-}
-
-/* En pantallas angostas, los pares de campos van uno debajo del otro. */
-@media (max-width: 399px) {
-  .crop-form .field-row {
-    grid-template-columns: minmax(0, 1fr);
-  }
+  align-items: center;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
 }

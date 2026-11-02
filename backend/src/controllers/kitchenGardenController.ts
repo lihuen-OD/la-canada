@@ -21,28 +21,6 @@ import {
 } from '../kitchenGarden/gardenActivitiesService';
 import { getGardenPerformance } from '../kitchenGarden/gardenPerformanceService';
 import {
-  createGardenSowing,
-  createGardenTransplant,
-  getGardenBatch,
-  listGardenBatches,
-  listGardenCropRecords,
-  listGardenCrops,
-  setGardenBatchArchived,
-  updateGardenBatch,
-  updateGardenCropRecord,
-  voidGardenCropRecord,
-  type GardenCreateResult,
-} from '../kitchenGarden/gardenCropsService';
-import {
-  createSowingBodySchema,
-  createTransplantBodySchema,
-  listBatchesQuerySchema,
-  listCropRecordsQuerySchema,
-  updateBatchBodySchema,
-  updateCropRecordBodySchema,
-  voidCropRecordBodySchema,
-} from '../kitchenGarden/gardenCropSchemas';
-import {
   addParticipantBodySchema,
   completeGardenActivityBodySchema,
   createGardenActivityBodySchema,
@@ -115,10 +93,21 @@ export async function getActivities(req: Request, res: Response): Promise<void> 
   send(res, 200, await listGardenActivities(actor, filters));
 }
 
+/** Alta de un registro (y del trasplante programado junto a una siembra); acepta `Idempotency-Key`. */
 export async function postActivity(req: Request, res: Response): Promise<void> {
   const actor = await actorFrom(req);
   const input = parseOrThrow(createGardenActivityBodySchema, req.body, 'Datos inválidos.');
-  send(res, 201, await createGardenActivity(actor, input, requestMeta(req)));
+  send(
+    res,
+    201,
+    await createGardenActivity(
+      actor,
+      input,
+      requestMeta(req),
+      undefined,
+      req.header('idempotency-key') ?? undefined,
+    ),
+  );
 }
 
 export async function patchActivity(req: Request, res: Response): Promise<void> {
@@ -171,98 +160,4 @@ export async function getParticipantPerformance(req: Request, res: Response): Pr
   const actor = await actorFrom(req);
   const range = parseOrThrow(gardenPerformanceRangeSchema, req.query, 'Rango inválido.');
   send(res, 200, await getGardenPerformance(actor, range, idFrom(req)));
-}
-
-// ── 🥕 Cultivos y 📝 Registros (2026-11-02) ───────────────────────────────
-
-function sendCreated(res: Response, result: GardenCreateResult): void {
-  if (result.kind === 'replay') send(res, result.status, result.body);
-  else send(res, 201, result.body);
-}
-
-export async function getCrops(req: Request, res: Response): Promise<void> {
-  await actorFrom(req);
-  send(res, 200, await listGardenCrops());
-}
-
-export async function getBatches(req: Request, res: Response): Promise<void> {
-  const actor = await actorFrom(req);
-  const filters = parseOrThrow(listBatchesQuerySchema, req.query, 'Filtros inválidos.');
-  send(res, 200, await listGardenBatches(actor, filters));
-}
-
-export async function getBatch(req: Request, res: Response): Promise<void> {
-  const actor = await actorFrom(req);
-  send(res, 200, await getGardenBatch(actor, idFrom(req)));
-}
-
-/** «Registrar siembra»: tanda + siembra en una operación (acepta `Idempotency-Key`). */
-export async function postSowing(req: Request, res: Response): Promise<void> {
-  const actor = await actorFrom(req);
-  const input = parseOrThrow(createSowingBodySchema, req.body, 'Datos de siembra inválidos.');
-  sendCreated(
-    res,
-    await createGardenSowing(
-      actor,
-      input,
-      requestMeta(req),
-      undefined,
-      req.header('idempotency-key') ?? undefined,
-    ),
-  );
-}
-
-export async function patchBatch(req: Request, res: Response): Promise<void> {
-  const actor = await actorFrom(req);
-  const input = parseOrThrow(updateBatchBodySchema, req.body, 'Datos de la tanda inválidos.');
-  send(res, 200, await updateGardenBatch(actor, idFrom(req), input, requestMeta(req)));
-}
-
-export async function postBatchArchive(req: Request, res: Response): Promise<void> {
-  const actor = await actorFrom(req);
-  send(res, 200, await setGardenBatchArchived(actor, idFrom(req), true, requestMeta(req)));
-}
-
-export async function postBatchReopen(req: Request, res: Response): Promise<void> {
-  const actor = await actorFrom(req);
-  send(res, 200, await setGardenBatchArchived(actor, idFrom(req), false, requestMeta(req)));
-}
-
-/** «Registrar trasplante» desde la ficha (acepta `Idempotency-Key`). */
-export async function postTransplant(req: Request, res: Response): Promise<void> {
-  const actor = await actorFrom(req);
-  const input = parseOrThrow(
-    createTransplantBodySchema,
-    req.body,
-    'Datos de trasplante inválidos.',
-  );
-  sendCreated(
-    res,
-    await createGardenTransplant(
-      actor,
-      idFrom(req),
-      input,
-      requestMeta(req),
-      undefined,
-      req.header('idempotency-key') ?? undefined,
-    ),
-  );
-}
-
-export async function getCropRecords(req: Request, res: Response): Promise<void> {
-  const actor = await actorFrom(req);
-  const filters = parseOrThrow(listCropRecordsQuerySchema, req.query, 'Filtros inválidos.');
-  send(res, 200, await listGardenCropRecords(actor, filters));
-}
-
-export async function patchCropRecord(req: Request, res: Response): Promise<void> {
-  const actor = await actorFrom(req);
-  const input = parseOrThrow(updateCropRecordBodySchema, req.body, 'Datos del registro inválidos.');
-  send(res, 200, await updateGardenCropRecord(actor, idFrom(req), input, requestMeta(req)));
-}
-
-export async function postCropRecordVoid(req: Request, res: Response): Promise<void> {
-  const actor = await actorFrom(req);
-  const { reason } = parseOrThrow(voidCropRecordBodySchema, req.body, 'Indicá el motivo.');
-  send(res, 200, await voidGardenCropRecord(actor, idFrom(req), reason, requestMeta(req)));
 }

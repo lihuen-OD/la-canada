@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { TaskItem as TaskItemData } from '../../api/taskTypes';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
@@ -24,6 +25,14 @@ interface TaskItemProps {
   onRevert: (task: TaskItemData) => void;
   onEdit: (task: TaskItemData) => void;
   onToggleActive: (task: TaskItemData) => void;
+  /** Muestra ✏️ (por defecto, solo al ADMIN; 🥬 Huerta: también a los participantes activos). */
+  canEdit?: boolean;
+  /** Muestra desactivar/reactivar (por defecto, solo al ADMIN). */
+  canToggleActive?: boolean;
+  /** Etiquetas al inicio de la línea de datos (🥬 Huerta: el tipo del registro). */
+  tags?: ReactNode;
+  /** Texto secundario debajo de la descripción (🥬 Huerta: observaciones). */
+  note?: string | null;
 }
 
 /**
@@ -44,6 +53,10 @@ export function TaskItem({
   onRevert,
   onEdit,
   onToggleActive,
+  canEdit = isAdmin,
+  canToggleActive = isAdmin,
+  tags,
+  note,
 }: TaskItemProps) {
   const execution = task.currentExecution;
   const done = execution !== null;
@@ -90,7 +103,9 @@ export function TaskItem({
       {check}
       <div className="task-item__body">
         <p className="task-item__description">{task.description}</p>
+        {note ? <p className="task-item__note">{note}</p> : null}
         <div className="task-item__meta">
+          {tags}
           <Badge tone={FREQUENCY_TONE[task.frequency]}>{FREQUENCY_LABEL[task.frequency]}</Badge>
           {task.scheduleStatus ? (
             <Badge tone={SCHEDULE_STATUS_TONE[task.scheduleStatus]} dot>
@@ -143,20 +158,22 @@ export function TaskItem({
           ) : null}
         </div>
       </div>
-      {isAdmin ? (
+      {canEdit || canToggleActive ? (
         <div className="task-item__actions">
-          <Button
-            size="sm"
-            variant="ghost"
-            className="icon-button"
-            aria-label={`Editar: ${task.description}`}
-            title="Editar"
-            onClick={() => onEdit(task)}
-            disabled={busy}
-          >
-            <span aria-hidden="true">✏️</span>
-          </Button>
-          {task.active ? (
+          {canEdit ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="icon-button"
+              aria-label={`Editar: ${task.description}`}
+              title="Editar"
+              onClick={() => onEdit(task)}
+              disabled={busy}
+            >
+              <span aria-hidden="true">✏️</span>
+            </Button>
+          ) : null}
+          {!canToggleActive ? null : task.active ? (
             <Button
               size="sm"
               variant="danger"
