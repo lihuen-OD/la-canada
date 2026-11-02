@@ -579,6 +579,8 @@ Lo que esta rama **no** hace, por diseño:
 
 `animal_medical_records.next_due_date DATE NULL` (fecha programada, cargada a mano) y `fulfills_record_id UUID NULL` (FK `RESTRICT` → `animal_medical_records.id`, la atención que cumplió ese pendiente). Índices `(next_due_date)`, `(animal_id, next_due_date)` y único parcial `animal_medical_records_active_fulfillment_key (fulfills_record_id) WHERE voided_at IS NULL`. CHECK `next_due_date > record_date`, `type <> 'WEIGHT'` con fecha, y `fulfills_record_id <> id`. El estado (vigente/próxima/vence hoy/vencida/cumplida) no se persiste: se calcula en `pets/petDue.ts`. Los registros existentes quedan con ambas columnas en NULL (sin pendientes). Pendiente para production: aplicar con `db:migrate:deploy` junto con el resto de las migraciones de `demo`.
 
+**2026-11-02 — anular y corregir la próxima fecha también para EMPLOYEE**: **sin migración**. Usa las columnas existentes (`next_due_date`, `voided_at`, `voided_by_user_id`, `recorded_by_user_id`, `fulfills_record_id`) y `audit_logs` (`pet.record_next_due_updated`, `pet.record_voided`). La corrección bloquea la fila con `SELECT … FOR UPDATE` dentro de su transacción (ver `docs/ARCHITECTURE.md` §51).
+
 ### Tareas bimestrales/anuales y fecha de las «Una vez» (`20261023120000_task_frequency_bimonthly_annual` + `20261023120100_task_one_time_scheduled_date`, aplicadas a `demo`)
 
 - **Enum**: `ALTER TYPE "TaskFrequency" ADD VALUE 'BIMONTHLY'` y `'ANNUAL'`, en una migración propia (ningún valor nuevo se usa en la misma transacción en que se agrega). Quedan últimos en el enum de Postgres; el orden visible sale de `FREQUENCY_ORDER`.

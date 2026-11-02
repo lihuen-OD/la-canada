@@ -334,6 +334,7 @@ Desempeño se integra mediante navegación secundaria en chips `📋 Tareas | �
 - Tarjetas o listas por animal con tipo, datos principales y acceso al detalle.
 - Historial clínico claramente separado de la ficha general.
 - Foto opcional proveniente del sistema de archivos seguro.
+- Desde el 2026-11-02, «✕» (anular), «Programar / Corregir fecha próxima» y «Corregir fecha» (Próximas atenciones y 📅 Vencimientos) se muestran también al EMPLOYEE, con los mismos componentes, ubicación y textos que ya veía el ADMIN; ✏️, «Desactivar», «Eliminar» mascota y la gestión de tipos siguen siendo solo del ADMIN.
 
 ### Gallinero
 

@@ -163,8 +163,21 @@ export const createPetRecordBodySchema = z
     }
   });
 
-/** Completar o corregir la próxima fecha de un registro (ADMIN): solo ese dato. */
-export const updatePetRecordNextDueBodySchema = z.object({ nextDueDate: dateSchema }).strict();
+/**
+ * Completar o corregir la próxima fecha de un registro (ADMIN y EMPLOYEE):
+ * solo ese dato, más la fecha que mostraba la pantalla
+ * (`expectedNextDueDate`, `null` = sin fecha). Si ya no es esa, 409 en lugar
+ * de pisar la corrección de otra persona.
+ */
+export const updatePetRecordNextDueBodySchema = z
+  .object({
+    nextDueDate: dateSchema,
+    expectedNextDueDate: z
+      .string({ message: 'Falta la fecha que estaba programada. Recargá la página.' })
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha debe tener formato YYYY-MM-DD.')
+      .nullable(),
+  })
+  .strict();
 
 /** 📅 Vencimientos: filtros por mascota, tipo y estado, paginados en el backend. */
 export const listPetDueQuerySchema = z

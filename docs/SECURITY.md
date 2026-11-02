@@ -224,7 +224,7 @@ Endpoints autenticados y rango Zod de hasta 90 días. El backend fuerza sesión 
 - Credenciales `OBJECT_STORAGE_*` solo en el backend (nunca `VITE_*`, nunca en respuestas ni logs); la firma SigV4 se calcula en el proceso y el secreto nunca viaja.
 - La imagen se valida por su firma de bytes (JPG/PNG/WebP; SVG y otros formatos rechazados) y por tamaño antes de tocar la base; la clave del objeto la genera el backend (UUID), el nombre original es solo metadato saneado.
 - Lectura solo por el proxy autenticado, con `nosniff` y `Content-Security-Policy: default-src 'none'`; no hay URLs públicas ni firmadas persistidas. Cambiar o quitar una foto es solo de `ADMIN`, con baja lógica antes del borrado físico y auditoría.
-- Registros clínicos: persona y actor salen de la sesión; anular es solo `ADMIN` y nunca borra la fila.
+- Registros clínicos: persona y actor salen de la sesión; anular nunca borra la fila. *(Actualización 2026-11-02: anular y corregir la próxima fecha pasan a `ADMIN` y `EMPLOYEE` activos, sobre registros de cualquier autor, por pedido explícito. El rol y el actor siguen saliendo de la sesión validada por `requireAuth`, nunca del cliente; los cuerpos son `.strict()` y la corrección solo acepta la fecha nueva y la que se mostró; quién anula o corrige queda en `voided_by_user_id`/`AuditLog`. Mascotas, tipos y fotos siguen siendo solo `ADMIN`. Ver `docs/ARCHITECTURE.md` §51.)*
 
 ## Actualización — ☰ Más (Etapa 5X)
 

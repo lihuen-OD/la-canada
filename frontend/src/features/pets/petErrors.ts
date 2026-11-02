@@ -10,6 +10,8 @@ const MESSAGES: Readonly<Record<string, string>> = {
   IDEMPOTENCY_RECORD_PENDING:
     'El registro anterior todavía se está resolviendo. Esperá unos segundos y tocá «Consultar estado»: no se guardará dos veces.',
   IDEMPOTENCY_KEY_INVALID: 'No pudimos identificar el envío. Recargá los datos y volvé a intentar.',
+  PET_NEXT_DUE_CHANGED:
+    'Otra persona cambió esta fecha mientras la tenías abierta. Tocá «Cancelar» para ver la fecha actual y volvé a intentar.',
 };
 
 export function errorMessageOf(error: unknown): string {

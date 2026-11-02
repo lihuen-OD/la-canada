@@ -310,9 +310,12 @@ describe('🐾 Mascotas — ficha', () => {
     expect(history.getByText('💉 Vacuna')).toBeInTheDocument();
     expect(history.getByText('20/09/2026')).toBeInTheDocument();
     expect(history.getByText('Persona sintética')).toBeInTheDocument();
-    // EMPLOYEE: sin ✏️ ni ✕.
+    // EMPLOYEE: sin ✏️ de la ficha, pero con ✕ y la fecha próxima del historial.
     expect(screen.queryByRole('button', { name: /Editar/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Eliminar registro/ })).not.toBeInTheDocument();
+    expect(
+      history.getByRole('button', { name: 'Eliminar registro 💉 Vacuna del 20/09/2026' }),
+    ).toBeInTheDocument();
+    expect(history.getByRole('button', { name: 'Programar próxima fecha' })).toBeInTheDocument();
   });
 
   it('historial: sin persona, cada registro muestra al administrador que lo cargó', async () => {
@@ -395,6 +398,96 @@ describe('🐾 Mascotas — ficha', () => {
     await user.click(screen.getByRole('button', { name: `Editar ${PET.name}` }));
     const dialog = await screen.findByRole('dialog', { name: 'Editar mascota' });
     expect(within(dialog).getByLabelText('Nombre')).toHaveValue(PET.name);
+  });
+
+  it('EMPLOYEE anula un registro de otro autor: confirma, avisa qué pasa y actualiza la ficha', async () => {
+    const user = userEvent.setup();
+    api.fetchPetRecords.mockResolvedValue(
+      recordsResponse([
+        makeRecord({
+          id: 'r-admin',
+          description: 'Cargado por un administrador',
+          employee: null,
+          recordedBy: { displayName: 'Admin sintética Uno' },
+        }),
+      ]),
+    );
+    api.voidPetRecord.mockResolvedValue({});
+    renderPets(`/pets/${PET.id}`);
+    await user.click(
+      await screen.findByRole('button', { name: 'Eliminar registro 💉 Vacuna del 20/09/2026' }),
+    );
+    const confirm = await screen.findByRole('dialog', { name: '¿Eliminar este registro?' });
+    expect(confirm).toHaveTextContent(
+      '💉 Vacuna del 20/09/2026. Deja de contar en la ficha; queda en la auditoría.',
+    );
+    expect(confirm).not.toHaveTextContent(/volverá a quedar pendiente/);
+    const calls = { pet: api.fetchPet.mock.calls.length, due: api.fetchPetDue.mock.calls.length };
+    // Doble clic: una sola solicitud.
+    await user.dblClick(within(confirm).getByRole('button', { name: 'Eliminar' }));
+    await waitFor(() => expect(api.voidPetRecord).toHaveBeenCalledTimes(1));
+    expect(api.voidPetRecord).toHaveBeenCalledWith(PET.id, 'r-admin');
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: '¿Eliminar este registro?' })).toBeNull(),
+    );
+    // KPIs y próximas atenciones se vuelven a pedir.
+    await waitFor(() => expect(api.fetchPet.mock.calls.length).toBeGreaterThan(calls.pet));
+    await waitFor(() => expect(api.fetchPetDue.mock.calls.length).toBeGreaterThan(calls.due));
+  });
+
+  it('anular una atención que cumplía otra avisa que esa atención volverá a quedar pendiente', async () => {
+    const user = userEvent.setup();
+    api.fetchPetRecords.mockResolvedValue(
+      recordsResponse([
+        makeRecord({
+          id: 'r-aplicacion',
+          description: 'Aplicación',
+          fulfills: { id: 'r-original', type: 'VACCINE', recordDate: '2025-09-01', voided: false },
+        }),
+        makeRecord({
+          id: 'r-sin-original',
+          type: 'DEWORMING',
+          recordDate: '2026-09-10',
+          description: 'Original anulado',
+          fulfills: { id: 'r-anulado', type: 'DEWORMING', recordDate: '2025-09-10', voided: true },
+        }),
+      ]),
+    );
+    renderPets(`/pets/${PET.id}`);
+    await user.click(
+      await screen.findByRole('button', { name: 'Eliminar registro 💉 Vacuna del 20/09/2026' }),
+    );
+    let confirm = await screen.findByRole('dialog', { name: '¿Eliminar este registro?' });
+    expect(confirm).toHaveTextContent(
+      'Cumple la atención programada del 01/09/2025: esa atención volverá a quedar pendiente.',
+    );
+    await user.click(within(confirm).getByRole('button', { name: 'Cancelar' }));
+    expect(api.voidPetRecord).not.toHaveBeenCalled();
+    // Si el registro original ya se anuló, no hay nada que vuelva a quedar pendiente.
+    await user.click(
+      screen.getByRole('button', { name: 'Eliminar registro 🪱 Desparasitación del 10/09/2026' }),
+    );
+    confirm = await screen.findByRole('dialog', { name: '¿Eliminar este registro?' });
+    expect(confirm).not.toHaveTextContent(/volverá a quedar pendiente/);
+  });
+
+  it('anular un registro que otra persona ya anuló muestra el motivo y actualiza el historial', async () => {
+    const user = userEvent.setup();
+    api.voidPetRecord.mockRejectedValue(
+      new ApiError(409, 'El registro ya fue eliminado.', 'PET_RECORD_ALREADY_VOIDED'),
+    );
+    renderPets(`/pets/${PET.id}`);
+    await user.click(
+      await screen.findByRole('button', { name: 'Eliminar registro 💉 Vacuna del 20/09/2026' }),
+    );
+    const confirm = await screen.findByRole('dialog', { name: '¿Eliminar este registro?' });
+    const records = api.fetchPetRecords.mock.calls.length;
+    await user.click(within(confirm).getByRole('button', { name: 'Eliminar' }));
+    expect(await within(confirm).findByRole('alert')).toHaveTextContent(
+      'El registro ya fue eliminado.',
+    );
+    await waitFor(() => expect(api.fetchPetRecords.mock.calls.length).toBeGreaterThan(records));
+    expect(api.voidPetRecord).toHaveBeenCalledTimes(1);
   });
 
   it('mascota inexistente → mensaje claro (sin datos inventados)', async () => {
@@ -493,8 +586,89 @@ describe('🐾 Mascotas — próximas aplicaciones o controles', () => {
     expect(
       within(rows[2]!).getByRole('button', { name: /Registrar aplicación/ }),
     ).toBeInTheDocument();
-    // EMPLOYEE no corrige fechas.
-    expect(within(list).queryByRole('button', { name: /Corregir/ })).not.toBeInTheDocument();
+    // EMPLOYEE también corrige la fecha de cada atención programada.
+    expect(
+      within(list).getAllByRole('button', { name: /Corregir la fecha programada/ }),
+    ).toHaveLength(3);
+  });
+
+  it('EMPLOYEE corrige la fecha desde «Próximas atenciones»: manda la que vio y actualiza todo', async () => {
+    const user = userEvent.setup();
+    api.fetchPetDue.mockResolvedValue(dueResponse([SEXTUPLE]));
+    api.updatePetRecordNextDue.mockResolvedValue({ record: makeRecord(), changed: true });
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(['session', 'u-e', 'dashboard'], { petDue: null });
+    renderPets(`/pets/${PET.id}`, queryClient);
+    const list = await screen.findByRole('list', { name: 'Próximas atenciones' });
+    await user.click(
+      within(list).getByRole('button', { name: 'Corregir la fecha programada del 07/10/2026' }),
+    );
+    const dialog = await screen.findByRole('dialog', { name: 'Corregir fecha programada' });
+    expect(dialog).toHaveTextContent('Solo cambia la fecha de la próxima aplicación o control');
+    const field = within(dialog).getByLabelText('Fecha de próxima aplicación o control');
+    expect(field).toHaveValue('2026-10-07');
+    expect(field).toHaveAttribute('min', '2026-01-11');
+    const calls = {
+      due: api.fetchPetDue.mock.calls.length,
+      records: api.fetchPetRecords.mock.calls.length,
+    };
+    await user.clear(field);
+    await user.type(field, '2026-10-21');
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar fecha' }));
+    await waitFor(() =>
+      expect(api.updatePetRecordNextDue).toHaveBeenCalledWith(
+        PET.id,
+        SEXTUPLE.record.id,
+        '2026-10-21',
+        '2026-10-07',
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Corregir fecha programada' })).toBeNull(),
+    );
+    // Historial, próximas atenciones, Vencimientos e Inicio.
+    await waitFor(() => expect(api.fetchPetDue.mock.calls.length).toBeGreaterThan(calls.due));
+    await waitFor(() =>
+      expect(api.fetchPetRecords.mock.calls.length).toBeGreaterThan(calls.records),
+    );
+    expect(queryClient.getQueryState(['session', 'u-e', 'dashboard'])?.isInvalidated).toBe(true);
+  });
+
+  it('guardar la misma fecha cierra sin enviar nada', async () => {
+    const user = userEvent.setup();
+    api.fetchPetDue.mockResolvedValue(dueResponse([SEXTUPLE]));
+    renderPets(`/pets/${PET.id}`);
+    const list = await screen.findByRole('list', { name: 'Próximas atenciones' });
+    await user.click(within(list).getByRole('button', { name: /Corregir la fecha programada/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Corregir fecha programada' });
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar fecha' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Corregir fecha programada' })).toBeNull(),
+    );
+    expect(api.updatePetRecordNextDue).not.toHaveBeenCalled();
+  });
+
+  it('si otra persona cambió la fecha, avisa sin pisarla y actualiza lo que se ve', async () => {
+    const user = userEvent.setup();
+    api.fetchPetDue.mockResolvedValue(dueResponse([SEXTUPLE]));
+    api.updatePetRecordNextDue.mockRejectedValue(
+      new ApiError(409, 'Otra persona cambió esta fecha.', 'PET_NEXT_DUE_CHANGED'),
+    );
+    renderPets(`/pets/${PET.id}`);
+    const list = await screen.findByRole('list', { name: 'Próximas atenciones' });
+    await user.click(within(list).getByRole('button', { name: /Corregir la fecha programada/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Corregir fecha programada' });
+    const field = within(dialog).getByLabelText('Fecha de próxima aplicación o control');
+    await user.clear(field);
+    await user.type(field, '2026-10-21');
+    const due = api.fetchPetDue.mock.calls.length;
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar fecha' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'Otra persona cambió esta fecha mientras la tenías abierta. Tocá «Cancelar» para ver la fecha actual y volvé a intentar.',
+    );
+    await waitFor(() => expect(api.fetchPetDue.mock.calls.length).toBeGreaterThan(due));
+    // No se reenvía solo.
+    expect(api.updatePetRecordNextDue).toHaveBeenCalledTimes(1);
   });
 
   it('«Registrar aplicación» cumple SOLO el pendiente elegido: tipo fijo, fecha real y próxima fecha', async () => {
@@ -566,7 +740,7 @@ describe('🐾 Mascotas — próximas aplicaciones o controles', () => {
         makeRecord({
           id: 'r-aplicacion',
           description: 'Aplicación',
-          fulfills: { id: 'r-cumplida', type: 'VACCINE', recordDate: '2025-09-01' },
+          fulfills: { id: 'r-cumplida', type: 'VACCINE', recordDate: '2025-09-01', voided: false },
         }),
         makeRecord({ id: 'r-antiguo', description: 'Antiguo sin fecha' }),
       ]),
@@ -580,15 +754,35 @@ describe('🐾 Mascotas — próximas aplicaciones o controles', () => {
     expect(item('Antiguo sin fecha')).not.toHaveTextContent(/Próxima|Vencida/);
   });
 
-  it('ADMIN completa la fecha de un registro anterior con una acción acotada', async () => {
-    asAdmin();
+  it.each([
+    ['ADMIN', asAdmin],
+    ['EMPLOYEE', asEmployee],
+  ])('%s completa la fecha de un registro anterior con una acción acotada', async (_role, as) => {
+    as();
     const user = userEvent.setup();
     api.fetchPetRecords.mockResolvedValue(
-      recordsResponse([makeRecord({ id: 'r-antiguo', description: 'Antiguo sin fecha' })]),
+      recordsResponse([
+        makeRecord({ id: 'r-antiguo', description: 'Antiguo sin fecha' }),
+        makeRecord({ id: 'r-peso', type: 'WEIGHT', weightKg: '12.5', description: 'Peso' }),
+        makeRecord({
+          id: 'r-cumplida',
+          description: 'Cumplida',
+          nextDue: {
+            date: '2026-09-01',
+            status: 'FULFILLED',
+            daysUntil: -24,
+            fulfilledBy: { id: 'r-x', recordDate: '2026-09-03' },
+          },
+        }),
+      ]),
     );
-    api.updatePetRecordNextDue.mockResolvedValue({ record: makeRecord() });
+    api.updatePetRecordNextDue.mockResolvedValue({ record: makeRecord(), changed: true });
     renderPets(`/pets/${PET.id}`);
     const history = within(await screen.findByRole('list', { name: 'Registros clínicos' }));
+    // Ni ⚖️ Peso ni una atención ya cumplida ofrecen la fecha.
+    const item = (text: string) => history.getByText(text).closest('li') as HTMLElement;
+    expect(within(item('Peso')).queryByRole('button', { name: /fecha/ })).toBeNull();
+    expect(within(item('Cumplida')).queryByRole('button', { name: /fecha/ })).toBeNull();
     await user.click(history.getByRole('button', { name: 'Programar próxima fecha' }));
     const dialog = await screen.findByRole('dialog', { name: 'Completar fecha programada' });
     await user.type(
@@ -597,7 +791,12 @@ describe('🐾 Mascotas — próximas aplicaciones o controles', () => {
     );
     await user.click(within(dialog).getByRole('button', { name: 'Guardar fecha' }));
     await waitFor(() =>
-      expect(api.updatePetRecordNextDue).toHaveBeenCalledWith(PET.id, 'r-antiguo', '2026-12-01'),
+      expect(api.updatePetRecordNextDue).toHaveBeenCalledWith(
+        PET.id,
+        'r-antiguo',
+        '2026-12-01',
+        null,
+      ),
     );
     await waitFor(() => expect(api.fetchPetDue.mock.calls.length).toBeGreaterThanOrEqual(2));
   });
@@ -692,6 +891,34 @@ describe('🐾 Mascotas — 📅 Vencimientos', () => {
     await waitFor(() =>
       expect(api.fetchPetDue).toHaveBeenLastCalledWith(expect.objectContaining({ petId: PET.id })),
     );
+  });
+
+  it('EMPLOYEE corrige la fecha de una atención abierta desde Vencimientos (no la de una cumplida)', async () => {
+    const user = userEvent.setup();
+    api.fetchPetDue.mockResolvedValue(dueResponse([OVERDUE, FULFILLED]));
+    api.updatePetRecordNextDue.mockResolvedValue({ record: makeRecord(), changed: true });
+    renderPets('/pets/due');
+    const list = await screen.findByRole('list', { name: 'Atenciones programadas' });
+    const row = (text: string) => within(list).getByText(text).closest('li') as HTMLElement;
+    expect(
+      within(row('Cumplida sintética')).queryByRole('button', { name: /Corregir/ }),
+    ).toBeNull();
+    const calls = api.fetchPetDue.mock.calls.length;
+    await user.click(within(row('Vencida sintética')).getByRole('button', { name: /Corregir/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Corregir fecha programada' });
+    const field = within(dialog).getByLabelText('Fecha de próxima aplicación o control');
+    await user.clear(field);
+    await user.type(field, '2026-09-30');
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar fecha' }));
+    await waitFor(() =>
+      expect(api.updatePetRecordNextDue).toHaveBeenCalledWith(
+        PET.id,
+        'd-1',
+        '2026-09-30',
+        '2026-09-20',
+      ),
+    );
+    await waitFor(() => expect(api.fetchPetDue.mock.calls.length).toBeGreaterThan(calls));
   });
 
   it('estado vacío claro y «Registrar aplicación» lleva a la ficha con ese pendiente', async () => {

@@ -630,3 +630,9 @@ Cambios de esta revisión:
 - **Migración**: ninguna nueva. Pendientes en `production`, en orden: `20261030120000_task_execution_performed_on`, `20261030130000_news_replies`, `20261030140000_news_message_edit_delete`, `20261030150000_photo_folders`; luego backend y **de inmediato** frontend (un cliente anterior que sube sin carpeta recibe 400 con «recargá la página»).
 - **Validación**: lint, typecheck, build y format:check; backend 1568/1568; frontend 858/858; integración `photoFolders` + `more` contra `demo` 43/43 con fixtures sintéticos; revisión visual en 360, 390, 768 y 1366 px.
 
+## 🐾 Mascotas: anular registros y corregir la próxima fecha también para EMPLOYEE ✅ implementado y validado en `demo` (2026-11-02)
+
+- **Alcance** (pedido explícito del usuario, 2026-11-02): los `EMPLOYEE` activos anulan registros clínicos y programan o corrigen su próxima fecha como el ADMIN, sobre registros de cualquier autor, en historial, Próximas atenciones y 📅 Vencimientos. Mascotas, tipos, fotos y estado siguen siendo solo de ADMIN. Corrección acotada a `next_due_date`, con auditoría del actor, sin escritura si no hay cambios, bloqueo de fila y `expectedNextDueDate` (409 si otra persona la cambió); una atención cumplida tampoco se corrige desde el backend. Anulación lógica de siempre, con aviso de reapertura del pendiente. No recupera `db955b5`/`815a892`. Ver `docs/BUSINESS_RULES.md`, «🐾 Anular registros clínicos y corregir la próxima fecha», y `docs/ARCHITECTURE.md` §51.
+- **Migración**: ninguna. Las pendientes en `production` siguen siendo las de 5X.3/5X.4. Publicar backend y frontend juntos.
+- **Validación**: lint, typecheck, build y format:check; backend 1583/1583; frontend 866/866; integración contra `demo` 37/37 (`petRecordActions` 12, `pets`/`petDue`/`petDueHome` 25) con fixtures sintéticos y 0 residuos; revisión visual como EMPLOYEE y ADMIN en 360, 390, 768 y 1366 px.
+

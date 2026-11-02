@@ -907,3 +907,14 @@ export class PetDueAlreadyFulfilledError extends AppError {
     });
   }
 }
+
+/** La próxima fecha ya no es la que vio quien la corrige: otra persona la cambió antes. */
+export class PetNextDueChangedError extends AppError {
+  constructor() {
+    super(
+      'Otra persona cambió esta fecha mientras la tenías abierta. Revisá la fecha actual y volvé a intentar.',
+      409,
+      { code: 'PET_NEXT_DUE_CHANGED' },
+    );
+  }
+}

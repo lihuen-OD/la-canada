@@ -9,6 +9,7 @@ import {
   PetDueNotFoundError,
   PetMedicalRecordAlreadyVoidedError,
   PetMedicalRecordNotFoundError,
+  PetNextDueChangedError,
   AnimalInUseError,
   PetInactiveError,
   PetNotFoundError,
@@ -62,8 +63,10 @@ import type {
  * (paridad con el prototipo), decididos acá con el rol leído de la base:
  *  - ver listado, ficha, KPIs e historial, y registrar datos clínicos:
  *    todo usuario autenticado;
- *  - alta/edición de mascota, foto, alta/baja de tipos y eliminar
- *    (anular) registros clínicos: solo ADMIN.
+ *  - anular registros clínicos y completar o corregir su próxima fecha:
+ *    todo usuario autenticado, sobre registros de cualquier autor (el
+ *    seguimiento es compartido; ampliación autorizada el 2026-11-02);
+ *  - alta/edición de mascota, foto y alta/baja de tipos: solo ADMIN.
  *
  * La persona asociada a un registro sale de la sesión (su empleado, o
  * ninguna para un ADMIN sin empleado — como `currentUser` en el prototipo)
@@ -197,7 +200,7 @@ const recordSelect = {
   nextDueDate: true,
   employee: { select: { id: true, displayName: true, colorHex: true } },
   recordedBy: { select: userIdentitySelect },
-  fulfills: { select: { id: true, type: true, recordDate: true } },
+  fulfills: { select: { id: true, type: true, recordDate: true, voidedAt: true } },
   fulfillments: activeFulfillmentSelect,
 } as const;
 type RecordRow = Prisma.AnimalMedicalRecordGetPayload<{ select: typeof recordSelect }>;
@@ -236,12 +239,17 @@ function serializeRecord(row: RecordRow, today: LocalDate) {
     // es la sesión del alta (nunca quien lo anuló, que va en `voidedByUserId`).
     recordedBy: row.employee ? null : toUserIdentity(row.recordedBy),
     nextDue: serializeNextDue(row.nextDueDate, row.fulfillments[0], today),
-    /** El pendiente que esta atención cumplió (antecedente explícito). */
+    /**
+     * El pendiente que esta atención cumplió (antecedente explícito).
+     * `voided`: ese registro original se anuló, así que anular esta atención
+     * ya no lo vuelve a dejar pendiente.
+     */
     fulfills: row.fulfills
       ? {
           id: row.fulfills.id,
           type: row.fulfills.type,
           recordDate: dateText(row.fulfills.recordDate),
+          voided: row.fulfills.voidedAt !== null,
         }
       : null,
     createdAt: row.createdAt.toISOString(),
@@ -881,50 +889,73 @@ export async function createPetRecord(
 }
 
 /**
- * Completar o corregir la próxima fecha de un registro (solo ADMIN): acción
- * acotada y auditada que cambia ÚNICAMENTE `next_due_date` — nada más del
- * historial clínico. No aplica a registros anulados ni a ⚖️ Peso.
+ * Completar o corregir la próxima fecha de un registro (ADMIN y EMPLOYEE,
+ * sobre registros de cualquier autor): acción acotada y auditada que cambia
+ * ÚNICAMENTE `next_due_date` — autor, persona, fecha de la atención,
+ * descripción y vínculos quedan iguales. No aplica a registros anulados, a
+ * ⚖️ Peso ni a una atención ya cumplida. La misma fecha no escribe ni audita;
+ * si la fecha ya no es `expectedNextDueDate` (la que vio quien corrige), 409
+ * sin pisar la corrección de otra persona.
  */
 export async function updatePetRecordNextDue(
   actor: PetActor,
   petId: string,
   recordId: string,
-  input: { nextDueDate: string },
+  input: { nextDueDate: string; expectedNextDueDate: string | null },
   meta: RequestMeta,
   now = new Date(),
 ) {
-  requireAdmin(actor, 'Solo un administrador puede corregir la próxima fecha.');
   return prisma.$transaction(async (tx) => {
+    // La fila queda bloqueada hasta el fin de la transacción y su estado se
+    // lee después: otra corrección o una anulación esperan, y un cumplimiento
+    // simultáneo también (su FK toma `FOR KEY SHARE` sobre esta fila), así que
+    // nunca se corrige una atención que otra persona acaba de registrar.
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "animal_medical_records" WHERE "id" = ${recordId}::uuid FOR UPDATE`,
+    );
     const existing = await tx.animalMedicalRecord.findUnique({
       where: { id: recordId },
-      select: { animalId: true, type: true, recordDate: true, nextDueDate: true, voidedAt: true },
+      select: {
+        animalId: true,
+        type: true,
+        recordDate: true,
+        nextDueDate: true,
+        voidedAt: true,
+        fulfillments: activeFulfillmentSelect,
+      },
     });
     if (!existing || existing.animalId !== petId) throw new PetMedicalRecordNotFoundError();
     if (existing.voidedAt) throw new PetMedicalRecordAlreadyVoidedError();
     if (existing.type === 'WEIGHT') {
       throw new ValidationError('El peso no lleva fecha de próxima aplicación o control.');
     }
+    if (existing.fulfillments.length > 0) throw new PetDueAlreadyFulfilledError();
     const nextDue = resolveNextDue(input.nextDueDate, dueDateOf(existing.recordDate))!;
-    const { count } = await tx.animalMedicalRecord.updateMany({
-      where: { id: recordId, voidedAt: null },
-      data: { nextDueDate: toDbDate(nextDue) },
-    });
-    if (count === 0) throw new PetMedicalRecordAlreadyVoidedError();
-    await recordAuditLog(tx, {
-      actorUserId: actor.userId,
-      action: 'pet.record_next_due_updated',
-      entityType: 'AnimalMedicalRecord',
-      entityId: recordId,
-      previousState: { nextDueDate: existing.nextDueDate ? dateText(existing.nextDueDate) : null },
-      newState: { nextDueDate: formatLocalDate(nextDue) },
-      ipAddress: meta.ipAddress,
-      userAgent: meta.userAgent,
-    });
+    const previous = existing.nextDueDate ? dateText(existing.nextDueDate) : null;
+    const changed = formatLocalDate(nextDue) !== previous;
+    if (changed) {
+      if (previous !== input.expectedNextDueDate) throw new PetNextDueChangedError();
+      const { count } = await tx.animalMedicalRecord.updateMany({
+        where: { id: recordId, voidedAt: null },
+        data: { nextDueDate: toDbDate(nextDue) },
+      });
+      if (count === 0) throw new PetMedicalRecordAlreadyVoidedError();
+      await recordAuditLog(tx, {
+        actorUserId: actor.userId,
+        action: 'pet.record_next_due_updated',
+        entityType: 'AnimalMedicalRecord',
+        entityId: recordId,
+        previousState: { nextDueDate: previous },
+        newState: { nextDueDate: formatLocalDate(nextDue) },
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      });
+    }
     const row = await tx.animalMedicalRecord.findUniqueOrThrow({
       where: { id: recordId },
       select: recordSelect,
     });
-    return { record: serializeRecord(row, businessToday(now)) };
+    return { record: serializeRecord(row, businessToday(now)), changed };
   });
 }
 
@@ -1063,7 +1094,13 @@ export async function getPetDueAlerts(_actor: PetActor, now = new Date()) {
 
 export type PetDueAlerts = Awaited<ReturnType<typeof getPetDueAlerts>>;
 
-/** "✕" del historial (solo ADMIN, confirmación en el cliente): anulación lógica auditada. */
+/**
+ * "✕" del historial (ADMIN y EMPLOYEE, sobre registros de cualquier autor;
+ * confirmación en el cliente): anulación lógica auditada. Nunca borra la
+ * fila: conserva autor, persona y vínculos, y guarda quién anuló y cuándo.
+ * Condicionada a `voidedAt` nulo: un doble clic o dos personas a la vez dan
+ * una sola anulación y una sola auditoría (la otra, 409).
+ */
 export async function voidPetRecord(
   actor: PetActor,
   petId: string,
@@ -1071,7 +1108,6 @@ export async function voidPetRecord(
   meta: RequestMeta,
   now = new Date(),
 ) {
-  requireAdmin(actor, 'Solo un administrador puede eliminar registros.');
   return prisma.$transaction(async (tx) => {
     const existing = await tx.animalMedicalRecord.findUnique({
       where: { id: recordId },

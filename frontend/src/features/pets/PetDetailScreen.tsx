@@ -64,7 +64,7 @@ import { attributedName } from '../../utils/recordAttribution';
 const RECORDS_PAGE_SIZE = 20;
 const UPCOMING_PAGE_SIZE = 20;
 
-/** Corregir la fecha programada (ADMIN) desde la ficha o el historial. */
+/** Corregir la fecha programada (ADMIN y EMPLOYEE) desde la ficha o el historial. */
 type NextDueTarget = {
   record: { id: string; type: MedicalRecordType; recordDate: string };
   current: string | null;
@@ -73,7 +73,7 @@ type NextDueTarget = {
 /**
  * Ficha de una mascota (`pg-mascota-detalle` del prototipo): perfil con foto,
  * "✏️" (ADMIN), 4 KPIs, "➕ Nuevo registro" (todos) e historial clínico
- * filtrable por tipo, con "✕" (ADMIN) que anula el registro.
+ * filtrable por tipo, con "✕" que anula el registro (ADMIN y EMPLOYEE).
  */
 export function PetDetailScreen() {
   const { petId = '' } = useParams();
@@ -186,7 +186,6 @@ export function PetDetailScreen() {
       <UpcomingCard
         petId={pet.id}
         canRegister={pet.active}
-        isAdmin={isAdmin}
         fulfillParam={fulfillParam}
         onFulfillParamHandled={() => {
           const next = new URLSearchParams(searchParams);
@@ -213,7 +212,6 @@ export function PetDetailScreen() {
       )}
       <RecordHistory
         petId={pet.id}
-        isAdmin={isAdmin}
         onEditDate={setNextDueTarget}
         onSessionExpired={handleSessionExpired}
       />
@@ -332,7 +330,8 @@ function PetKpis({ detail }: { detail: PetDetailResponse }) {
 /**
  * «Próximas atenciones» de la ficha: los pendientes abiertos de ESTA mascota
  * (mismo endpoint que 📅 Vencimientos, filtrado por mascota), con
- * «Registrar aplicación / control» si admite registros nuevos. Desde
+ * «Registrar aplicación / control» si admite registros nuevos y «Corregir
+ * fecha» (ADMIN y EMPLOYEE). Desde
  * Vencimientos se llega con `?cumplir=<id>`: se abre el formulario con ese
  * pendiente ya elegido. Desde 🐾 Atenciones de mascotas (Inicio) se llega con
  * `#proximas-atenciones`: la tarjeta queda a la vista y con el foco.
@@ -340,7 +339,6 @@ function PetKpis({ detail }: { detail: PetDetailResponse }) {
 function UpcomingCard({
   petId,
   canRegister,
-  isAdmin,
   fulfillParam,
   onFulfillParamHandled,
   onRegister,
@@ -349,7 +347,6 @@ function UpcomingCard({
 }: {
   petId: string;
   canRegister: boolean;
-  isAdmin: boolean;
   fulfillParam: string | null;
   onFulfillParamHandled: () => void;
   onRegister: (item: PetDueItem) => void;
@@ -426,11 +423,7 @@ function UpcomingCard({
                   key={item.record.id}
                   item={item}
                   onRegister={canRegister ? () => onRegister(item) : undefined}
-                  onEditDate={
-                    isAdmin
-                      ? () => onEditDate({ record: item.record, current: item.nextDue.date })
-                      : undefined
-                  }
+                  onEditDate={() => onEditDate({ record: item.record, current: item.nextDue.date })}
                 />
               ))}
             </ul>
@@ -763,15 +756,28 @@ function RecordForm({
   );
 }
 
-/** Historial clínico filtrable y paginado; "✕" solo ADMIN (anulación con confirmación). */
+/**
+ * Confirmación de "✕": qué pasa al anular. Si la atención cumplía otra
+ * (vigente), esa vuelve a quedar pendiente.
+ */
+function voidDescription(record: PetRecord): string {
+  const base = `${RECORD_TAG_LABEL[record.type]} del ${formatDate(record.recordDate)}. Deja de contar en la ficha; queda en la auditoría.`;
+  return record.fulfills && !record.fulfills.voided
+    ? `${base} Cumple la atención programada del ${formatDate(record.fulfills.recordDate)}: esa atención volverá a quedar pendiente.`
+    : base;
+}
+
+/**
+ * Historial clínico filtrable y paginado; "✕" (anulación con confirmación) y
+ * «Programar / Corregir fecha próxima» para ADMIN y EMPLOYEE, sobre registros
+ * de cualquier autor.
+ */
 function RecordHistory({
   petId,
-  isAdmin,
   onEditDate,
   onSessionExpired,
 }: {
   petId: string;
-  isAdmin: boolean;
   onEditDate: (target: NextDueTarget) => void;
   onSessionExpired: () => void;
 }) {
@@ -841,17 +847,15 @@ function RecordHistory({
                       <span className="pet-history__tag">{RECORD_TAG_LABEL[record.type]}</span>
                       <span className="pet-history__date">{formatDate(record.recordDate)}</span>
                       {person ? <span className="pet-history__person">{person}</span> : null}
-                      {isAdmin ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="pet-history__void"
-                          aria-label={`Eliminar registro ${RECORD_TAG_LABEL[record.type]} del ${formatDate(record.recordDate)}`}
-                          onClick={() => setToVoid(record)}
-                        >
-                          <span aria-hidden="true">✕</span>
-                        </Button>
-                      ) : null}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="pet-history__void"
+                        aria-label={`Eliminar registro ${RECORD_TAG_LABEL[record.type]} del ${formatDate(record.recordDate)}`}
+                        onClick={() => setToVoid(record)}
+                      >
+                        <span aria-hidden="true">✕</span>
+                      </Button>
                     </div>
                     {record.weightKg || record.description ? (
                       <p className="pet-history__text">
@@ -879,9 +883,7 @@ function RecordHistory({
                         ) : null}
                       </p>
                     ) : null}
-                    {isAdmin &&
-                    record.type !== 'WEIGHT' &&
-                    record.nextDue?.status !== 'FULFILLED' ? (
+                    {record.type !== 'WEIGHT' && record.nextDue?.status !== 'FULFILLED' ? (
                       <Button
                         size="sm"
                         variant="ghost"
@@ -912,7 +914,7 @@ function RecordHistory({
       {toVoid ? (
         <ConfirmDialog
           title="¿Eliminar este registro?"
-          description={`${RECORD_TAG_LABEL[toVoid.type]} del ${formatDate(toVoid.recordDate)}. Deja de contar en la ficha; queda en la auditoría.`}
+          description={voidDescription(toVoid)}
           confirmLabel="Eliminar"
           tone="danger"
           onCancel={() => setToVoid(null)}

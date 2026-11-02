@@ -191,7 +191,7 @@ export async function postVoidPetRecord(req: Request, res: Response): Promise<vo
   send(res, 200, await voidPetRecord(actor, petId, recordId, requestMeta(req)));
 }
 
-/** Completar o corregir la próxima fecha (ADMIN; el servicio decide el permiso). */
+/** Completar o corregir la próxima fecha (ADMIN y EMPLOYEE; el servicio decide el permiso). */
 export async function patchPetRecordNextDue(req: Request, res: Response): Promise<void> {
   const actor = await actorFrom(req);
   const petId = idFrom(req.params.id, 'mascota');
