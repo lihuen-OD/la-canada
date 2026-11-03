@@ -6,6 +6,7 @@ import { PERFORMANCE_RANGE_DAYS, lateCompletionWindow } from '../../performance/
 import {
   canRevertExecution,
   executionFrequency,
+  isCompletedOneOffVisible,
   lateCompletionBounds,
   type RevertableExecution,
 } from '../../tasks/completionRules';
@@ -277,5 +278,38 @@ describe('executionFrequency — la frecuencia de la planificación, nunca solo 
     expect(executionFrequency([], execution('2026-10-28', ar('2026-10-28')), 'WEEKLY', TZ)).toBe(
       'DAILY',
     );
+  });
+});
+
+describe('«Una vez» y urgentes completadas: visibles hasta el fin de la semana de su finalización', () => {
+  // Semana de negocio del lunes 26/10 al domingo 01/11/2026 (Buenos Aires, UTC-3).
+  const visibleOn = (completedAt: Date | null, today: string) =>
+    isCompletedOneOffVisible(completedAt, day(today), TZ);
+
+  it('completada hoy, o antes en la misma semana: visible (tachada) hasta el domingo', () => {
+    expect(visibleOn(ar('2026-10-30', '09:15'), '2026-10-30')).toBe(true);
+    expect(visibleOn(ar('2026-10-26', '00:00'), '2026-10-30')).toBe(true);
+    expect(visibleOn(ar('2026-10-26', '00:00'), '2026-11-01')).toBe(true);
+    expect(visibleOn(ar('2026-11-01', '23:59'), '2026-11-01')).toBe(true);
+  });
+
+  it('desde el lunes siguiente, fuera; una semana anterior, también', () => {
+    expect(visibleOn(ar('2026-10-30', '09:15'), '2026-11-02')).toBe(false);
+    expect(visibleOn(ar('2026-10-25', '23:59'), '2026-10-26')).toBe(false);
+    expect(visibleOn(ar('2026-10-19', '10:00'), '2026-10-30')).toBe(false);
+  });
+
+  it('completada un domingo: se oculta al comenzar el lunes en Argentina, no a las 21 h (medianoche UTC)', () => {
+    // Domingo 01/11 a las 21:30 de Buenos Aires = lunes 02/11 00:30 UTC.
+    const sundayNight = new Date('2026-11-02T00:30:00Z');
+    expect(visibleOn(sundayNight, '2026-11-01')).toBe(true);
+    expect(visibleOn(sundayNight, '2026-11-02')).toBe(false);
+    // Lunes 02/11 a las 00:30 de Buenos Aires (03:30 UTC): semana nueva, visible toda la semana.
+    expect(visibleOn(new Date('2026-11-02T03:30:00Z'), '2026-11-08')).toBe(true);
+    expect(visibleOn(new Date('2026-11-02T02:59:59Z'), '2026-11-02')).toBe(false);
+  });
+
+  it('sin `completedAt` (filas anteriores) queda fuera, como antes', () => {
+    expect(visibleOn(null, '2026-10-30')).toBe(false);
   });
 });

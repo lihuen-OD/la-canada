@@ -1,4 +1,5 @@
 import type { ChickenCoopPeriodDays } from './chickenCoopTypes';
+import type { GardenHistoryFilters } from './kitchenGardenTypes';
 import type { EventType, PhotoScope, TeamFilter } from './moreTypes';
 import type { PerformanceDetailFilters } from './performanceTypes';
 import type { MedicalRecordType, PetDueFilters } from './petTypes';
@@ -79,14 +80,9 @@ export const queryKeys = {
       [...scope(userId), 'kitchenGarden', 'activities', status] as const,
     /** Listados de actividades: dependen del día de negocio. */
     activitiesAll: (userId: string) => [...scope(userId), 'kitchenGarden', 'activities'] as const,
-    history: (userId: string, week: string | null, participantId: string | null) =>
-      [
-        ...scope(userId),
-        'kitchenGarden',
-        'history',
-        week ?? 'current',
-        participantId ?? 'all',
-      ] as const,
+    /** 📅 Historial cronológico: cada combinación de filtros empieza en su primera página. */
+    historyEntries: (userId: string, filters: GardenHistoryFilters) =>
+      [...scope(userId), 'kitchenGarden', 'history', 'entries', filters] as const,
     historyAll: (userId: string) => [...scope(userId), 'kitchenGarden', 'history'] as const,
     performanceAll: (userId: string) => [...scope(userId), 'kitchenGarden', 'performance'] as const,
     performanceSummary: (userId: string, from: string, to: string) =>

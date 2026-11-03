@@ -797,6 +797,17 @@ export class DuplicateGardenActivityError extends AppError {
   }
 }
 
+/** Otra persona cambió el registro desde que se abrió (`version` distinta): no se pisa. */
+export class GardenActivityChangedError extends AppError {
+  constructor() {
+    super(
+      'Otra persona modificó este registro mientras lo editabas. Cerrá y volvé a abrirlo para ver los datos actuales.',
+      409,
+      { code: 'GARDEN_ACTIVITY_CHANGED' },
+    );
+  }
+}
+
 export class GardenParticipantNotFoundError extends AppError {
   constructor() {
     super('Participante no encontrado.', 404, { code: 'GARDEN_PARTICIPANT_NOT_FOUND' });

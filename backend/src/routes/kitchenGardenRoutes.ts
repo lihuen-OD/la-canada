@@ -4,6 +4,7 @@ import { requireJsonContentType } from '../middleware/requireJsonContentType';
 import {
   getActivities,
   getHistory,
+  getHistoryEntries,
   getParticipantCandidates,
   getParticipantPerformance,
   getParticipants,
@@ -44,6 +45,8 @@ kitchenGardenRouter.post(
   postActivityCompletion,
 );
 kitchenGardenRouter.post('/activities/:id/revert', requireJsonContentType, postActivityRevert);
+// Semanal (pantalla anterior; se conserva para clientes sin actualizar) y cronológico.
 kitchenGardenRouter.get('/history', getHistory);
+kitchenGardenRouter.get('/history/entries', getHistoryEntries);
 kitchenGardenRouter.get('/performance/summary', getPerformanceSummary);
 kitchenGardenRouter.get('/performance/participants/:id', getParticipantPerformance);

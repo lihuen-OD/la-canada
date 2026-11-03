@@ -38,6 +38,11 @@ function activitiesResponse(): GardenActivitiesResponse {
         description: 'Sembrar lechuga (sintética)',
         frequency: 'ONE_TIME',
         active: true,
+        kind: 'SOWING',
+        notes: null,
+        version: 1,
+        agenda: today < '2026-10-27' ? 'UPCOMING' : 'TODAY',
+        agendaDate: '2026-10-27',
         responsible: { id: 'p1', displayName: 'Pablo sintético', colorHex: null, active: true },
         periodKey: 'ONE_TIME',
         scheduledDate: '2026-10-27',
@@ -90,6 +95,50 @@ afterEach(() => {
 });
 
 describe('🥬 Huerta y el cambio de día', () => {
+  it('el lunes confirmado por el servidor, una «Una vez» completada la semana anterior sale del listado (sin sondeo)', async () => {
+    // Domingo 01/11 a las 23:59 de Argentina (ya lunes en UTC): sigue tachada.
+    vi.setSystemTime(ar('2026-11-01', '23:59:00'));
+    resetBusinessDayForTests();
+    gardenApi.fetchGardenActivities.mockImplementation(async () => {
+      const base = activitiesResponse();
+      const today = serverDay();
+      const completed = {
+        ...base.activities[0]!,
+        id: '00000000-0000-4000-8000-0000000b0002',
+        description: 'Desmalezar canteros (sintética)',
+        kind: 'OTHER' as const,
+        currentExecution: {
+          id: '00000000-0000-4000-8000-0000000e0002',
+          periodKey: 'ONE_TIME',
+          completedAt: ar('2026-10-29', '10:00:00').toISOString(),
+          assignedTo: { id: 'p1', displayName: 'Pablo sintético', colorHex: null },
+          completedBy: { id: 'p1', displayName: 'Pablo sintético', colorHex: null },
+          canRevert: true,
+        },
+        canComplete: false,
+      };
+      // El backend decide: hasta el domingo la incluye; desde el lunes, no.
+      return { ...base, activities: today < '2026-11-02' ? [completed] : [] };
+    });
+    render(
+      <StrictMode>
+        <BusinessDayRefresh />
+        <Routes>
+          <Route path="/kitchen-garden/*" element={<KitchenGardenModule />} />
+        </Routes>
+      </StrictMode>,
+      { route: '/kitchen-garden' },
+    );
+    expect(await screen.findByText('Desmalezar canteros (sintética)')).toBeInTheDocument();
+    const before = gardenApi.fetchGardenActivities.mock.calls.length;
+    deviceAt(ar('2026-11-02', '00:00:05'));
+    await waitFor(() =>
+      expect(screen.queryByText('Desmalezar canteros (sintética)')).not.toBeInTheDocument(),
+    );
+    expect(gardenApi.fetchGardenActivities).toHaveBeenCalledTimes(before + 1);
+    expect(tasksApi.fetchTasks).not.toHaveBeenCalled();
+  });
+
   it('al confirmarse el día nuevo, las actividades se revalidan una vez (Programada → Para hoy)', async () => {
     vi.setSystemTime(ar('2026-10-26', '23:59:00'));
     resetBusinessDayForTests();
@@ -105,7 +154,9 @@ describe('🥬 Huerta y el cambio de día', () => {
     expect(await screen.findByText('Programada')).toBeInTheDocument();
     const before = gardenApi.fetchGardenActivities.mock.calls.length;
     deviceAt(ar('2026-10-27', '00:00:05'));
-    expect(await screen.findByText('Para hoy')).toBeInTheDocument();
+    // El grupo «Para hoy» de 📝 Registros (y su etiqueta) llegan con el día nuevo.
+    expect(await screen.findByRole('heading', { name: /Para hoy/ })).toBeInTheDocument();
+    expect(screen.queryByText('Programada')).not.toBeInTheDocument();
     await waitFor(() => expect(gardenApi.fetchGardenActivities).toHaveBeenCalledTimes(before + 1));
     expect(tasksApi.fetchTasks).not.toHaveBeenCalled();
     expect(tasksApi.fetchTaskHistory).not.toHaveBeenCalled();

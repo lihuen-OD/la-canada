@@ -55,3 +55,230 @@
   flex-wrap: wrap;
   gap: var(--space-1);
 }
+
+/* ── 📝 Registros (2026-11-02) ─────────────────────────────────────────────
+   Resumen compacto, grupos de la agenda (vencidas, para hoy, próximas, sin
+   fecha), completadas aparte, el tipo de cada registro y el formulario. */
+
+.garden-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.garden-summary__item {
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+}
+
+.garden-summary__item strong {
+  color: var(--color-text);
+}
+
+.garden-summary__item.is-alert {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.garden-summary__item.is-alert strong {
+  color: var(--color-danger);
+}
+
+.garden-section + .garden-section {
+  margin-top: var(--space-4);
+}
+
+.garden-section__title {
+  margin: 0 0 var(--space-1);
+  font-family: var(--font-display);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+}
+
+.garden-section__count {
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: normal;
+}
+
+/* Dentro de un grupo la lista ocupa el ancho de la tarjeta, sin pisar el título. */
+.garden-section .task-list {
+  margin: 0 calc(var(--space-4) * -1);
+}
+
+.garden-section--done .garden-section__title {
+  color: var(--color-text-muted);
+}
+
+.garden-all-done {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+/* Tipo del registro: texto del color de los datos; «Sin clasificar», discreto (nunca un error). */
+.garden-kind {
+  color: var(--color-text);
+  font-weight: var(--font-weight-semibold);
+}
+
+.garden-kind--unclassified {
+  color: var(--color-text-muted);
+  font-style: italic;
+  font-weight: normal;
+}
+
+.task-item__note {
+  margin: 0.125rem 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+.garden-record-form__group {
+  display: contents;
+}
+
+.garden-transplant {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+}
+
+.garden-advanced {
+  border-top: var(--border-width) solid var(--color-border);
+  padding-top: var(--space-2);
+}
+
+.garden-advanced summary {
+  min-height: var(--tap-target);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.garden-section__hint {
+  margin: 0 0 var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+/* ── 📅 Historial cronológico (2026-11-02) ────────────────────────────────
+   Filtros arriba (período, fechas, búsqueda, persona, tipo), el rango
+   vigente y las realizaciones agrupadas por día, más recientes primero. */
+
+.garden-history__filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.garden-history__fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-3);
+}
+
+.garden-history__fields .field {
+  margin: 0;
+  min-width: 0;
+}
+
+.garden-history__search {
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 768px) {
+  .garden-history__fields {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .garden-history__search {
+    grid-column: auto;
+  }
+}
+
+.garden-history__range {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.garden-history__day + .garden-history__day {
+  margin-top: var(--space-4);
+}
+
+.garden-history__list {
+  display: grid;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.garden-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+}
+
+.garden-entry + .garden-entry {
+  border-top: var(--border-width) solid var(--color-surface-muted);
+}
+
+.garden-entry__body {
+  display: grid;
+  flex: 1;
+  gap: 0.1875rem;
+  min-width: 0;
+}
+
+.garden-entry__description {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.garden-entry__line {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+.garden-entry__line strong {
+  color: var(--color-text);
+}
+
+/* Deshecha: atenuada y tachada; nunca se confunde con una realización vigente. */
+.garden-entry--reverted .garden-entry__description {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+.garden-entry__reverted {
+  color: var(--color-danger);
+}
+
+.garden-history__note {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}

@@ -83,9 +83,10 @@ export async function getDashboard(actor: TaskActor, now = new Date()) {
 
   const [taskResult, performance, stockRows, eggAggregate, events, newsRows, petDue] =
     await Promise.all([
-      // El KPI «Tareas completadas» sigue contando las urgentes completadas
-      // (que el listado de Tareas oculta): la métrica no cambia.
-      listTasks(actor, { status: 'active' }, now, { keepCompletedUrgent: true }),
+      // El KPI «Tareas completadas» conserva su fórmula: cuenta todas las
+      // urgentes completadas y ninguna «Una vez» completada, sin la semana
+      // de visibilidad del listado de Tareas.
+      listTasks(actor, { status: 'active' }, now, { view: 'homeKpi' }),
       dashboardPerformance(actor, now),
       prisma.stockItem.findMany({
         where: { active: true },

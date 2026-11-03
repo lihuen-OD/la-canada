@@ -3,7 +3,7 @@ import { onlineManager } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '../test/render';
-import { PERSON_A, PERSON_B, emptyHistory, makeTask } from '../test/fixtures/tasks';
+import { PERSON_A, PERSON_B, emptyHistory, makeExecution, makeTask } from '../test/fixtures/tasks';
 import { resetBusinessDayForTests } from '../connectivity/businessDay';
 import type { TasksListResponse } from '../api/taskTypes';
 
@@ -376,5 +376,69 @@ describe('programación sugerida al cambiar de semana', () => {
         within(grid).getByRole('button', { name: /^26, hoy, \d+ tareas/ }),
       ).toBeInTheDocument(),
     );
+  });
+});
+
+describe('«Una vez» y urgentes completadas al cambiar de semana', () => {
+  it('siguen tachadas el domingo y salen recién cuando el servidor confirma el lunes, sin cerrar el formulario abierto', async () => {
+    // Completadas el domingo 25/10 a las 21:30 de Buenos Aires (ya lunes 26 en UTC).
+    const completedAt = ar('2026-10-25', '21:30:00').toISOString();
+    const done = (id: string, description: string, frequency: 'URGENT' | 'ONE_TIME') =>
+      makeTask({
+        id,
+        description,
+        frequency,
+        periodKey: frequency,
+        currentExecution: makeExecution({
+          id: `${id.slice(0, -2)}e9`,
+          periodKey: frequency,
+          completedAt,
+        }),
+        canComplete: false,
+      });
+    const URGENT_DONE = done(
+      '00000000-0000-4000-8000-0000000000u1',
+      'Urgente sintética del domingo',
+      'URGENT',
+    );
+    const ONE_TIME_DONE = done(
+      '00000000-0000-4000-8000-0000000000u2',
+      'Única sintética del domingo',
+      'ONE_TIME',
+    );
+    // El backend simulado aplica la regla con SU día: el domingo las devuelve, el lunes no.
+    api.fetchTasks.mockImplementation(async () => {
+      const response = tasksResponse();
+      return serverDay() < '2026-10-26'
+        ? { ...response, tasks: [...response.tasks, URGENT_DONE, ONE_TIME_DONE] }
+        : response;
+    });
+    serverOffsetMs = -5 * MINUTE; // dispositivo adelantado
+    await startAt(
+      ar('2026-10-25', '23:58:00'),
+      <>
+        <BusinessDayRefresh />
+        <TasksScreen />
+      </>,
+    );
+    const urgentRow = (await screen.findByText(URGENT_DONE.description)).closest('li');
+    expect(urgentRow).toHaveClass('task-item--done');
+    expect(screen.getByText(ONE_TIME_DONE.description)).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Nueva tarea' }));
+    await user.type(screen.getByLabelText('Descripción'), 'Borrador sintético');
+
+    deviceAt(ar('2026-10-26', '00:00:30')); // medianoche del dispositivo: el servidor sigue en domingo
+    await settle();
+    expect(screen.getByText(URGENT_DONE.description)).toBeInTheDocument();
+
+    deviceAt(ar('2026-10-26', '00:05:02')); // el servidor ya está en el lunes
+    await waitFor(() => expect(screen.queryByText(URGENT_DONE.description)).toBeNull());
+    expect(screen.queryByText(ONE_TIME_DONE.description)).toBeNull();
+    expect(screen.getByText(WEEKLY_SUGGESTED.description)).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Nueva tarea' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Descripción')).toHaveValue('Borrador sintético');
+    for (const write of [api.createTask, api.updateTask, api.completeTask, api.setTaskActive])
+      expect(write).not.toHaveBeenCalled();
   });
 });

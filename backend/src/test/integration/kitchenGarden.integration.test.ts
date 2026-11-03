@@ -8,7 +8,9 @@ import { generateRefreshToken, hashRefreshToken, signAccessToken } from '../../a
 import {
   completeGardenActivity,
   createGardenActivity,
+  getGardenWeeklyHistory,
   listGardenActivities,
+  revertGardenCompletion,
 } from '../../kitchenGarden/gardenActivitiesService';
 import { getGardenPerformance } from '../../kitchenGarden/gardenPerformanceService';
 import type { GardenActor } from '../../kitchenGarden/gardenParticipants';
@@ -51,6 +53,13 @@ const employeeIds: string[] = [];
 let realState: RealTaskState;
 let startedAt: Date;
 let huertaBefore: number[];
+/** Actividades reales (anteriores a la corrida): ninguna prueba las toca. */
+let realActivitiesBefore: unknown[];
+const realActivities = (at: Date) =>
+  prisma.kitchenGardenActivity.findMany({
+    where: { createdAt: { lt: at } },
+    orderBy: { id: 'asc' },
+  });
 
 const ar = (day: string, time = '12:00') => new Date(`${day}T${time}:00.000-03:00`);
 const as = (person: Person) => ({ Authorization: `Bearer ${person.token}` });
@@ -142,6 +151,7 @@ async function createActivity(
     .post(`${API}/activities`)
     .set(as(admin))
     .send({
+      kind: 'OTHER',
       description: `${TAG} ${description}`,
       participantId: responsible.participantId,
       frequency,
@@ -165,6 +175,7 @@ beforeAll(async () => {
   realState = await captureRealTaskState();
   startedAt = realState.startedAt;
   huertaBefore = await huertaCountsBefore(startedAt);
+  realActivitiesBefore = await realActivities(startedAt);
   app = createApp();
   admin = await createPerson('admin', 'ADMIN', {
     withEmployee: false,
@@ -210,6 +221,7 @@ afterAll(async () => {
   });
   await prisma.kitchenGardenActivity.deleteMany({ where: { id: { in: activityIds } } });
   await prisma.kitchenGardenParticipant.deleteMany({ where: { id: { in: participantIds } } });
+  await prisma.idempotencyRecord.deleteMany({ where: { actorUserId: { in: userIds } } });
   await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
   await prisma.userProfile.deleteMany({ where: { userId: { in: userIds } } });
   await prisma.user.deleteMany({ where: { id: { in: userIds } } });
@@ -225,6 +237,8 @@ afterAll(async () => {
     0,
   );
   expect(await huertaCountsBefore(startedAt)).toEqual(huertaBefore);
+  // Las actividades reales, idénticas (también `kind`, `notes`, `version` y `updatedAt`).
+  expect(await realActivities(startedAt)).toEqual(realActivitiesBefore);
 }, 90_000);
 
 describe('participantes (HTTP)', { timeout: 90_000 }, () => {
@@ -282,16 +296,22 @@ describe('participantes (HTTP)', { timeout: 90_000 }, () => {
 });
 
 describe('actividades, permisos y ejecuciones (HTTP)', { timeout: 90_000 }, () => {
-  it('solo ADMIN crea; el responsable debe ser participante activo; todos consultan', async () => {
+  it('quien no participa no crea; el responsable debe ser participante activo; todos consultan', async () => {
     const denied = await request(app)
       .post(`${API}/activities`)
-      .set(as(empA))
-      .send({ description: `${TAG} no`, participantId: empA.participantId, frequency: 'DAILY' });
+      .set(as(outsider))
+      .send({
+        kind: 'OTHER',
+        description: `${TAG} no`,
+        participantId: empA.participantId,
+        frequency: 'DAILY',
+      });
     expect(denied.status).toBe(403);
     const invalid = await request(app)
       .post(`${API}/activities`)
       .set(as(admin))
       .send({
+        kind: 'OTHER',
         description: `${TAG} fantasma`,
         participantId: crypto.randomUUID(),
         frequency: 'DAILY',
@@ -402,14 +422,11 @@ describe('historia, períodos y orden', { timeout: 120_000 }, () => {
     const activity = await createActivity('reasignable', empA, 'DAILY');
     const done = await complete(empA, activity.id);
     const executionId = done.body.activity.currentExecution.id as string;
-    expect(
-      (
-        await request(app)
-          .patch(`${API}/activities/${activity.id}`)
-          .set(as(admin))
-          .send({ participantId: empB.participantId })
-      ).status,
-    ).toBe(200);
+    const reassigned = await request(app)
+      .patch(`${API}/activities/${activity.id}`)
+      .set(as(admin))
+      .send({ version: activity.version, participantId: empB.participantId });
+    expect(reassigned.status).toBe(200);
     const history = await request(app).get(`${API}/history`).set(as(admin));
     const row = (
       history.body.recurring as {
@@ -424,7 +441,11 @@ describe('historia, períodos y orden', { timeout: 120_000 }, () => {
     const changed = await request(app)
       .patch(`${API}/activities/${activity.id}`)
       .set(as(admin))
-      .send({ frequency: 'WEEKLY', suggestedWeekday: 3 });
+      .send({
+        version: reassigned.body.activity.version,
+        frequency: 'WEEKLY',
+        suggestedWeekday: 3,
+      });
     expect(changed.status).toBe(200);
     const intervals = await prisma.kitchenGardenPlanningInterval.findMany({
       where: { activityId: activity.id },
@@ -452,6 +473,7 @@ describe('historia, períodos y orden', { timeout: 120_000 }, () => {
     const { activity } = await createGardenActivity(
       adminActor,
       {
+        kind: 'OTHER',
         description: `${TAG} quincenal`,
         participantId: empA.participantId!,
         frequency: 'SEMI_MONTHLY',
@@ -489,11 +511,12 @@ describe('historia, períodos y orden', { timeout: 120_000 }, () => {
     });
   });
 
-  it('«Una vez» con fecha: Programada, Para hoy y Vencida; completada sale del listado activo', async () => {
+  it('«Una vez» con fecha: Programada, Para hoy y Vencida; completada, tachada hasta el domingo y fuera el lunes', async () => {
     const adminActor = actorOf(admin, 'ADMIN');
     const { activity } = await createGardenActivity(
       adminActor,
       {
+        kind: 'OTHER',
         description: `${TAG} una vez con fecha`,
         participantId: empA.participantId!,
         frequency: 'ONE_TIME',
@@ -513,7 +536,8 @@ describe('historia, períodos y orden', { timeout: 120_000 }, () => {
     expect(await status(ar('2026-12-19', '23:59'))).toBe('SCHEDULED');
     expect(await status(ar('2026-12-20', '00:00'))).toBe('DUE_TODAY');
     expect(await status(ar('2026-12-21', '00:00'))).toBe('OVERDUE');
-    // Cumplimiento anticipado permitido; después sale del listado activo.
+    // Cumplimiento anticipado permitido (jueves 10/12): sigue, sin estado de
+    // fecha, hasta el domingo 13/12 y sale el lunes 14/12.
     await completeGardenActivity(
       actorOf(empA, 'EMPLOYEE'),
       activity.id,
@@ -521,7 +545,9 @@ describe('historia, períodos y orden', { timeout: 120_000 }, () => {
       META,
       ar('2026-12-10'),
     );
-    expect(await status(ar('2026-12-10', '18:00'))).toBeUndefined();
+    expect(await status(ar('2026-12-10', '18:00'))).toBeNull();
+    expect(await status(ar('2026-12-13', '23:59'))).toBeNull();
+    expect(await status(ar('2026-12-14', '00:00'))).toBeUndefined();
     const all = await listGardenActivities(
       adminActor,
       { participantId: empA.participantId, status: 'all' },
@@ -583,6 +609,7 @@ describe(
       const { activity } = await createGardenActivity(
         adminActor,
         {
+          kind: 'OTHER',
           description: `${TAG} desempeño diaria`,
           participantId: empA.participantId!,
           frequency: 'DAILY',
@@ -628,6 +655,551 @@ describe(
     });
   },
 );
+
+describe(
+  '📝 Registros: tipo, observaciones, versión y siembra + trasplante (HTTP)',
+  { timeout: 120_000 },
+  () => {
+    const patch = (person: Person, id: string, body: Record<string, unknown>) =>
+      request(app).patch(`${API}/activities/${id}`).set(as(person)).send(body);
+    const post = (person: Person, body: Record<string, unknown>, key?: string) => {
+      const call = request(app).post(`${API}/activities`).set(as(person));
+      return (key ? call.set('Idempotency-Key', key) : call).send(body);
+    };
+    const updateAudits = (entityId: string) =>
+      prisma.auditLog.count({
+        where: { entityId, action: 'kitchen_garden.activity_updated' },
+      });
+
+    it('una actividad anterior (sin tipo) conserva id, datos e historia; clasificarla no toca planificación, Historial ni Desempeño', async () => {
+      // Como las reales: creada antes del tipo (sin `kind` ni observaciones), con historia en 2001.
+      const legacy = await prisma.kitchenGardenActivity.create({
+        data: {
+          description: `${TAG} anterior Sembrar CHAUCHA`,
+          participantId: empA.participantId!,
+          frequency: 'WEEKLY',
+        },
+        select: { id: true },
+      });
+      await prisma.kitchenGardenPlanningInterval.create({
+        data: {
+          activityId: legacy.id,
+          participantId: empA.participantId!,
+          frequency: 'WEEKLY',
+          validFrom: ar('2001-07-02', '08:00'),
+        },
+      });
+      const adminActor = actorOf(admin, 'ADMIN');
+      await completeGardenActivity(
+        actorOf(empA, 'EMPLOYEE'),
+        legacy.id,
+        undefined,
+        META,
+        ar('2001-07-04', '10:00'),
+      );
+      const at2001 = ar('2001-07-15', '20:00');
+      const range = { from: '2001-07-02', to: '2001-07-15' };
+      const snapshot = async () => ({
+        intervals: await prisma.kitchenGardenPlanningInterval.findMany({
+          where: { activityId: legacy.id },
+          orderBy: { validFrom: 'asc' },
+        }),
+        executions: await prisma.kitchenGardenExecution.findMany({
+          where: { activityId: legacy.id },
+          orderBy: { completedAt: 'asc' },
+        }),
+        performance: await getGardenPerformance(adminActor, range, undefined, at2001),
+        history: await getGardenWeeklyHistory(adminActor, { week: '2001-07-02' }, at2001),
+      });
+      const before = await snapshot();
+      expect(before.executions).toHaveLength(1);
+
+      const listed = await request(app)
+        .get(`${API}/activities?participantId=${empA.participantId}`)
+        .set(as(empB));
+      const row = (listed.body.activities as ActivityBody[]).find((item) => item.id === legacy.id);
+      expect(row).toMatchObject({ kind: null, notes: null, version: 1, frequency: 'WEEKLY' });
+      expect(listed.body.viewer).toEqual({ canWrite: true, canManage: false });
+
+      // Otro participante (no el responsable) la clasifica y anota.
+      const classified = await patch(empB, legacy.id, {
+        version: 1,
+        kind: 'SOWING',
+        notes: 'Clasificada a mano',
+      });
+      expect(classified.status).toBe(200);
+      expect(classified.body.activity).toMatchObject({
+        id: legacy.id,
+        kind: 'SOWING',
+        notes: 'Clasificada a mano',
+        version: 2,
+        responsible: { id: empA.participantId },
+        frequency: 'WEEKLY',
+      });
+      const after = await snapshot();
+      expect(after).toEqual(before);
+      const audit = await prisma.auditLog.findFirstOrThrow({
+        where: { entityId: legacy.id, action: 'kitchen_garden.activity_updated' },
+      });
+      expect(audit).toMatchObject({
+        actorUserId: empB.userId,
+        previousState: { kind: null, notes: null, version: 1 },
+        newState: {
+          kind: 'SOWING',
+          notes: 'Clasificada a mano',
+          version: 2,
+          actorRole: 'EMPLOYEE',
+        },
+      });
+    });
+
+    it('sin cambios no escribe ni audita; dos ediciones con la misma versión: una gana y la otra recibe 409', async () => {
+      const activity = await createActivity('concurrencia', empA, 'ONE_TIME');
+      expect(activity).toMatchObject({ kind: 'OTHER', version: 1, agenda: 'NO_DATE' });
+      const same = await patch(empA, activity.id, {
+        version: 1,
+        description: activity.description,
+        kind: 'OTHER',
+      });
+      expect(same.status).toBe(200);
+      expect(same.body.activity.version).toBe(1);
+      expect(await updateAudits(activity.id)).toBe(0);
+
+      const results = await Promise.all([
+        patch(empA, activity.id, { version: 1, notes: 'Primera' }),
+        patch(empB, activity.id, { version: 1, notes: 'Segunda' }),
+      ]);
+      expect(results.map((result) => result.status).sort()).toEqual([200, 409]);
+      const loser = results.find((result) => result.status === 409)!;
+      expect(loser.body.error.code).toBe('GARDEN_ACTIVITY_CHANGED');
+      const stored = await prisma.kitchenGardenActivity.findUniqueOrThrow({
+        where: { id: activity.id },
+      });
+      expect(stored.version).toBe(2);
+      expect(['Primera', 'Segunda']).toContain(stored.notes);
+      expect(await updateAudits(activity.id)).toBe(1);
+    });
+
+    it('siembra «Una vez» + trasplante: se crean juntas (doble clic con la misma clave, una sola vez) y después son independientes', async () => {
+      const body = {
+        kind: 'SOWING',
+        description: `${TAG} Sembrar LECHUGA`,
+        participantId: empA.participantId,
+        frequency: 'ONE_TIME',
+        scheduledDate: '2026-11-05',
+        transplant: {
+          description: `${TAG} Trasplantar LECHUGA`,
+          participantId: empB.participantId,
+          scheduledDate: '2026-11-25',
+        },
+      };
+      const key = crypto.randomUUID();
+      const [first, second] = await Promise.all([post(empA, body, key), post(empA, body, key)]);
+      expect([first.status, second.status]).toEqual([201, 201]);
+      expect(second.body.activity.id).toBe(first.body.activity.id);
+      expect(second.body.transplant.id).toBe(first.body.transplant.id);
+      const created = await prisma.kitchenGardenActivity.findMany({
+        where: { description: { in: [body.description, body.transplant.description] } },
+      });
+      expect(created).toHaveLength(2);
+      expect(
+        await prisma.auditLog.count({
+          where: {
+            entityId: { in: created.map((row) => row.id) },
+            action: 'kitchen_garden.activity_created',
+          },
+        }),
+      ).toBe(2);
+      expect(first.body.transplant).toMatchObject({
+        kind: 'TRANSPLANT',
+        frequency: 'ONE_TIME',
+        scheduledDate: '2026-11-25',
+        responsible: { id: empB.participantId },
+        currentExecution: null,
+      });
+      // Misma clave con otro cuerpo → 409, sin crear nada.
+      const reused = await post(empA, { ...body, description: `${TAG} Sembrar OTRA` }, key);
+      expect(reused.status).toBe(409);
+
+      // Completar la siembra no completa el trasplante.
+      expect((await complete(empA, first.body.activity.id)).status).toBe(201);
+      const listed = await request(app)
+        .get(`${API}/activities?participantId=${empB.participantId}`)
+        .set(as(empB));
+      expect(
+        (listed.body.activities as ActivityBody[]).find(
+          (item) => item.id === first.body.transplant.id,
+        ),
+      ).toMatchObject({ currentExecution: null, canComplete: true });
+    });
+
+    it('rollback: si el trasplante no se puede crear, tampoco queda la siembra', async () => {
+      await createActivity('Trasplantar ZAPALLO', empB, 'ONE_TIME', { kind: 'TRANSPLANT' });
+      const sowing = (description: string, transplant: Record<string, unknown>) => ({
+        kind: 'SOWING',
+        description: `${TAG} ${description}`,
+        participantId: empA.participantId,
+        frequency: 'ONE_TIME',
+        scheduledDate: '2026-11-10',
+        transplant: { description: `${TAG} Trasplantar ZAPALLO`, ...transplant },
+      });
+      const duplicate = await post(
+        admin,
+        sowing('Sembrar ZAPALLO', { participantId: empB.participantId }),
+      );
+      expect(duplicate.status).toBe(409);
+      expect(duplicate.body.error.code).toBe('GARDEN_ACTIVITY_DUPLICATE');
+      const notParticipant = await post(
+        admin,
+        sowing('Sembrar ZAPALLO bis', { participantId: crypto.randomUUID() }),
+      );
+      expect(notParticipant.status).toBe(400);
+      const early = await post(
+        admin,
+        sowing('Sembrar ZAPALLO ter', {
+          participantId: empA.participantId,
+          scheduledDate: '2026-11-09',
+        }),
+      );
+      expect(early.status).toBe(400);
+      const recurring = await post(admin, {
+        ...sowing('Sembrar ZAPALLO semanal', { participantId: empA.participantId }),
+        frequency: 'WEEKLY',
+        scheduledDate: undefined,
+      });
+      expect(recurring.status).toBe(400);
+      expect(
+        await prisma.kitchenGardenActivity.count({
+          where: { description: { startsWith: `${TAG} Sembrar ZAPALLO` } },
+        }),
+      ).toBe(0);
+      expect(
+        await prisma.kitchenGardenActivity.count({
+          where: { description: `${TAG} Trasplantar ZAPALLO` },
+        }),
+      ).toBe(1);
+    });
+
+    it('permisos: un participante crea y edita lo de otro responsable; desactivar y editar desactivadas sigue siendo del ADMIN', async () => {
+      const forOther = await post(empA, {
+        kind: 'OTHER',
+        description: `${TAG} creada por A para B`,
+        participantId: empB.participantId,
+        frequency: 'ONE_TIME',
+      });
+      expect(forOther.status).toBe(201);
+      const id = forOther.body.activity.id as string;
+      expect((await patch(outsider, id, { version: 1, kind: 'SOWING' })).status).toBe(403);
+      const outsiderList = await request(app).get(`${API}/activities`).set(as(outsider));
+      expect(outsiderList.body.viewer).toEqual({ canWrite: false, canManage: false });
+      const deactivate = await request(app)
+        .patch(`${API}/activities/${id}/status`)
+        .set(as(empA))
+        .send({ active: false });
+      expect(deactivate.status).toBe(403);
+      const off = await request(app)
+        .patch(`${API}/activities/${id}/status`)
+        .set(as(admin))
+        .send({ active: false });
+      expect(off.body.activity.version).toBe(2);
+      // La edición abierta antes de desactivar no pisa nada.
+      expect((await patch(admin, id, { version: 1, notes: 'tarde' })).status).toBe(409);
+      expect((await patch(empA, id, { version: 2, notes: 'x' })).status).toBe(403);
+      expect((await patch(admin, id, { version: 2, notes: 'Desactivada' })).status).toBe(200);
+    });
+  },
+);
+
+describe('completadas durante su semana y 📅 Historial cronológico', { timeout: 300_000 }, () => {
+  const adminActor = () => actorOf(admin, 'ADMIN');
+  const empActor = () => actorOf(empA, 'EMPLOYEE');
+  const createAt = async (description: string, kind: string, frequency: string, at: Date) =>
+    (
+      await createGardenActivity(
+        adminActor(),
+        {
+          kind: kind as never,
+          description: `${TAG} ${description}`,
+          participantId: empA.participantId!,
+          frequency: frequency as never,
+        },
+        META,
+        at,
+      )
+    ).activity;
+  const shownAt = async (activityId: string, at: Date, status: 'active' | 'all' = 'active') =>
+    (
+      await listGardenActivities(
+        status === 'all' ? adminActor() : empActor(),
+        { participantId: empA.participantId, status },
+        at,
+      )
+    ).activities.find((item) => item.id === activityId);
+  const entries = (person: Person, query: Record<string, string>) =>
+    request(app).get(`${API}/history/entries`).query(query).set(as(person));
+
+  it('«Una vez» y urgente completadas: visibles su semana (domingo de Argentina aunque UTC sea lunes), fuera el lunes; deshacer y volver a completar', async () => {
+    // Semana del lunes 03/06/2002 (ventana sin datos reales).
+    const once = await createAt('única 2002', 'OTHER', 'ONE_TIME', ar('2002-06-01'));
+    const urgent = await createAt('urgente 2002', 'OTHER', 'URGENT', ar('2002-06-01'));
+    for (const activity of [once, urgent]) {
+      await completeGardenActivity(
+        empActor(),
+        activity.id,
+        undefined,
+        META,
+        ar('2002-06-05', '10:00'),
+      );
+    }
+    for (const activity of [once, urgent]) {
+      // Domingo 09/06 22:30 en Argentina = lunes 10/06 01:30 UTC.
+      expect(await shownAt(activity.id, ar('2002-06-09', '22:30'))).toMatchObject({
+        currentExecution: { completedBy: { id: empA.participantId } },
+        canComplete: false,
+      });
+      expect(await shownAt(activity.id, ar('2002-06-10', '00:00'))).toBeUndefined();
+      // El ADMIN las sigue viendo con `status=all`; nada se desactivó ni renovó.
+      expect(await shownAt(activity.id, ar('2002-06-10', '00:00'), 'all')).toMatchObject({
+        active: true,
+        currentExecution: { completedBy: { id: empA.participantId } },
+      });
+    }
+    // Deshacer la oculta la devuelve pendiente; la nueva finalización cuenta desde su registro.
+    const execution = await prisma.kitchenGardenExecution.findFirstOrThrow({
+      where: { activityId: once.id, revertedAt: null },
+    });
+    await revertGardenCompletion(
+      adminActor(),
+      once.id,
+      { executionId: execution.id, reason: 'Prueba sintética' },
+      META,
+      ar('2002-06-11', '09:00'),
+    );
+    expect(await shownAt(once.id, ar('2002-06-11', '09:30'))).toMatchObject({
+      currentExecution: null,
+      canComplete: true,
+    });
+    await completeGardenActivity(empActor(), once.id, undefined, META, ar('2002-06-11', '11:00'));
+    expect(await shownAt(once.id, ar('2002-06-16', '23:59'))).toMatchObject({
+      currentExecution: { completedAt: ar('2002-06-11', '11:00').toISOString() },
+    });
+    expect(await shownAt(once.id, ar('2002-06-17', '00:00'))).toBeUndefined();
+  });
+
+  it('deshacer una completada de una actividad desactivada no la reactiva', async () => {
+    const once = await createAt('desactivada 2002', 'OTHER', 'ONE_TIME', ar('2002-06-01'));
+    await completeGardenActivity(empActor(), once.id, undefined, META, ar('2002-06-05', '10:00'));
+    expect(
+      (
+        await request(app)
+          .patch(`${API}/activities/${once.id}/status`)
+          .set(as(admin))
+          .send({ active: false })
+      ).status,
+    ).toBe(200);
+    const execution = await prisma.kitchenGardenExecution.findFirstOrThrow({
+      where: { activityId: once.id, revertedAt: null },
+    });
+    await revertGardenCompletion(
+      adminActor(),
+      once.id,
+      { executionId: execution.id, reason: 'Prueba sintética' },
+      META,
+      ar('2002-06-06', '10:00'),
+    );
+    expect(
+      await prisma.kitchenGardenActivity.findUniqueOrThrow({ where: { id: once.id } }),
+    ).toMatchObject({
+      active: false,
+    });
+    expect(await shownAt(once.id, ar('2002-06-06', '10:30'))).toBeUndefined();
+  });
+
+  it('«Cosecha» se retiró: no se acepta al crear, editar ni filtrar; el trasplante sigue siendo solo de una siembra «Una vez»', async () => {
+    const harvest = await request(app)
+      .post(`${API}/activities`)
+      .set(as(empA))
+      .send({
+        kind: 'HARVEST',
+        description: `${TAG} Cosechar no`,
+        participantId: empA.participantId,
+        frequency: 'ONE_TIME',
+      });
+    expect(harvest.status).toBe(400);
+    const other = await createActivity('no pasa a cosecha', empA, 'ONE_TIME');
+    const edited = await request(app)
+      .patch(`${API}/activities/${other.id}`)
+      .set(as(empA))
+      .send({ version: other.version, kind: 'HARVEST' });
+    expect(edited.status).toBe(400);
+    expect(
+      await prisma.kitchenGardenActivity.findUniqueOrThrow({ where: { id: other.id } }),
+    ).toMatchObject({ kind: 'OTHER', version: other.version });
+    expect((await entries(empA, { kind: 'HARVEST' })).status).toBe(400);
+    const otherWithTransplant = await request(app)
+      .post(`${API}/activities`)
+      .set(as(empA))
+      .send({
+        kind: 'OTHER',
+        description: `${TAG} Otra con trasplante`,
+        participantId: empA.participantId,
+        frequency: 'ONE_TIME',
+        transplant: { description: `${TAG} Trasplantar no`, participantId: empA.participantId },
+      });
+    expect(otherWithTransplant.status).toBe(400);
+    expect(
+      await prisma.kitchenGardenActivity.count({
+        where: { description: { in: [`${TAG} Cosechar no`, `${TAG} Otra con trasplante`] } },
+      }),
+    ).toBe(0);
+  });
+
+  it('buscar una siembra o un trasplante de meses anteriores sin saber la semana (texto, tipo, fechas, persona)', async () => {
+    // Texto único de la corrida: se busca solo lo sintético.
+    const crop = `LECHUGA ${RUN}`;
+    const sowing = await createAt(`Sembrar ${crop}`, 'SOWING', 'ONE_TIME', ar('2026-06-01'));
+    const transplant = await createAt(
+      `Trasplantar ${crop}`,
+      'TRANSPLANT',
+      'ONE_TIME',
+      ar('2026-06-01'),
+    );
+    await completeGardenActivity(empActor(), sowing.id, undefined, META, ar('2026-06-15', '10:00'));
+    // Registrada por el ADMIN a nombre de la participante (quién la registró se ve aparte).
+    await completeGardenActivity(
+      adminActor(),
+      transplant.id,
+      empA.participantId,
+      META,
+      ar('2026-07-20', '09:00'),
+    );
+    const harvest = await request(app)
+      .post(`${API}/activities`)
+      .set(as(empA))
+      .send({
+        kind: 'OTHER',
+        description: `${TAG} Regar ${crop}`,
+        participantId: empA.participantId,
+        frequency: 'ONE_TIME',
+      });
+    expect(harvest.status).toBe(201);
+    expect((await complete(empA, harvest.body.activity.id)).status).toBe(201);
+    const q = crop;
+    const descriptions = (response: request.Response) =>
+      (response.body.entries as { activity: { description: string } }[]).map((entry) =>
+        entry.activity.description.slice(TAG.length + 1),
+      );
+
+    const recent = await entries(empA, { q });
+    expect(recent.status).toBe(200);
+    expect(recent.body.range.mode).toBe('recent');
+    expect(descriptions(recent)).toEqual([`Regar ${crop}`]);
+
+    const all = await entries(outsider, { q, all: 'true' });
+    expect(descriptions(all)).toEqual([`Regar ${crop}`, `Trasplantar ${crop}`, `Sembrar ${crop}`]);
+    const [, transplantEntry, sowingEntry] = all.body.entries;
+    expect(sowingEntry).toMatchObject({
+      completedOn: '2026-06-15',
+      activity: { kind: 'SOWING' },
+      completedBy: { id: empA.participantId },
+      recordedBy: null,
+      canRevert: false,
+    });
+    expect(transplantEntry.recordedBy.displayName).toBe(`Admin sintético ${RUN}`);
+
+    expect(descriptions(await entries(empA, { q, all: 'true', kind: 'SOWING' }))).toEqual([
+      `Sembrar ${crop}`,
+    ]);
+    expect(descriptions(await entries(empA, { q, all: 'true', kind: 'OTHER' }))).toEqual([
+      `Regar ${crop}`,
+    ]);
+    expect(descriptions(await entries(empA, { q, from: '2026-06-01', to: '2026-06-30' }))).toEqual([
+      `Sembrar ${crop}`,
+    ]);
+    expect(
+      descriptions(await entries(empA, { q, all: 'true', participantId: empB.participantId! })),
+    ).toEqual([]);
+    // La propia «Una vez» se puede deshacer (regla de siempre); otra persona, no.
+    const own = await entries(empA, { q, all: 'true', kind: 'SOWING' });
+    expect(own.body.entries[0].canRevert).toBe(true);
+    expect((await entries(empA, { q: 'x' })).status).toBe(400);
+    expect((await entries(empA, { from: '2026-06-02', to: '2026-06-01' })).status).toBe(400);
+  });
+
+  it('el texto se busca literal (sin comodines) y «Sin clasificar» encuentra las actividades sin tipo', async () => {
+    const percent = await createActivity('riego al 50% del cantero', empA, 'ONE_TIME');
+    const hundred = await createActivity('riego de 500 plantines', empA, 'ONE_TIME');
+    const legacy = await prisma.kitchenGardenActivity.create({
+      data: {
+        description: `${TAG} riego anterior sin tipo`,
+        participantId: empA.participantId!,
+        frequency: 'ONE_TIME',
+      },
+      select: { id: true },
+    });
+    await prisma.kitchenGardenPlanningInterval.create({
+      data: {
+        activityId: legacy.id,
+        participantId: empA.participantId!,
+        frequency: 'ONE_TIME',
+        validFrom: new Date(),
+      },
+    });
+    for (const id of [percent.id, hundred.id, legacy.id]) {
+      expect((await complete(empA, id)).status).toBe(201);
+    }
+    const ids = (response: request.Response) =>
+      (response.body.entries as { activity: { id: string } }[]).map((entry) => entry.activity.id);
+    expect(ids(await entries(empA, { q: `${TAG} riego al 50%` }))).toEqual([percent.id]);
+    expect(ids(await entries(empA, { q: `${TAG} riego`, kind: 'UNCLASSIFIED' }))).toEqual([
+      legacy.id,
+    ]);
+  });
+
+  it('«Ver más»: páginas de 20 por fecha e id, sin duplicados aunque todas tengan el mismo instante; deshechas solo a pedido', async () => {
+    const at = ar('2002-07-03', '10:00');
+    const created: string[] = [];
+    for (let index = 0; index < 22; index += 1) {
+      const activity = await createAt(
+        `pág ${String(index).padStart(2, '0')}`,
+        'OTHER',
+        'ONE_TIME',
+        ar('2002-07-01'),
+      );
+      await completeGardenActivity(empActor(), activity.id, undefined, META, at);
+      created.push(activity.id);
+    }
+    const q = `${TAG} pág`;
+    const first = await entries(empA, { q, all: 'true' });
+    expect(first.body.entries).toHaveLength(20);
+    expect(first.body.nextCursor).toEqual(expect.any(String));
+    const second = await entries(empA, { q, all: 'true', cursor: first.body.nextCursor });
+    expect(second.body.entries).toHaveLength(2);
+    expect(second.body.nextCursor).toBeNull();
+    const seen = [...first.body.entries, ...second.body.entries].map(
+      (entry: { id: string }) => entry.id,
+    );
+    expect(new Set(seen).size).toBe(22);
+    // Mismo instante: el desempate es el id, descendente.
+    expect(seen).toEqual([...seen].sort().reverse());
+
+    const target = await prisma.kitchenGardenExecution.findFirstOrThrow({
+      where: { activityId: created[0], revertedAt: null },
+    });
+    const undone = await request(app)
+      .post(`${API}/activities/${created[0]}/revert`)
+      .set(as(admin))
+      .send({ executionId: target.id, reason: 'Prueba sintética' });
+    expect(undone.status).toBe(200);
+    expect(
+      (await entries(empA, { q, all: 'true' })).body.entries.map((e: { id: string }) => e.id),
+    ).not.toContain(target.id);
+    const withReverted = await entries(empA, { q, all: 'true', includeReverted: 'true' });
+    expect(
+      withReverted.body.entries.find((entry: { id: string }) => entry.id === target.id),
+    ).toMatchObject({ reverted: { reason: 'Prueba sintética' }, canRevert: false });
+  });
+});
 
 describe('aislamiento de ✅ Tareas e Inicio (HTTP)', { timeout: 90_000 }, () => {
   it('ninguna lista, historial ni Desempeño de Tareas, ni Inicio, incluye la Huerta', async () => {
@@ -675,6 +1247,10 @@ describe('baja de participantes', { timeout: 120_000 }, () => {
       where: { participantId: empB.participantId, active: true },
       select: { id: true },
     });
+    // Todas las suyas (también las ya desactivadas): ninguna se borra.
+    const total = await prisma.kitchenGardenActivity.count({
+      where: { participantId: empB.participantId },
+    });
     for (const activity of own) {
       const off = await request(app)
         .patch(`${API}/activities/${activity.id}/status`)
@@ -699,7 +1275,7 @@ describe('baja de participantes', { timeout: 120_000 }, () => {
     const all = await request(app)
       .get(`${API}/activities?status=all&participantId=${empB.participantId}`)
       .set(as(admin));
-    expect((all.body.activities as ActivityBody[]).length).toBe(own.length);
+    expect((all.body.activities as ActivityBody[]).length).toBe(total);
     expect(
       await prisma.kitchenGardenExecution.count({
         where: {

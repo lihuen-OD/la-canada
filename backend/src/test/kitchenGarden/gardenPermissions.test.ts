@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * 🥬 Huerta — permisos y reglas de participantes con Prisma simulado: lo
- * administrativo es solo de ADMIN; completar es del participante activo
+ * 🥬 Huerta — permisos y reglas de participantes con Prisma simulado: crear
+ * y editar registros, ADMIN y participantes activos; lo demás administrativo
+ * (activar/desactivar, participantes), solo ADMIN; completar es del participante activo
  * responsable (o de un ADMIN indicando quién la realizó); la participación no
  * concede permisos de ADMIN; desactivar a quien tiene actividades activas se
  * rechaza sin reasignar ni borrar nada. La SQL real se prueba contra `demo`.
@@ -92,18 +93,30 @@ beforeEach(() => {
   db.kitchenGardenExecution.findMany.mockResolvedValue([]);
 });
 
-describe('administración: solo ADMIN (la participación no da permisos de ADMIN)', () => {
+describe('registros: crear y editar, ADMIN y participantes activos (no quien no participa)', () => {
   it.each([
     [
       'crear',
       () =>
         createGardenActivity(
-          PABLO,
-          { description: 'x y z', participantId: P, frequency: 'DAILY' },
+          OUTSIDER,
+          { kind: 'OTHER', description: 'x y z', participantId: P, frequency: 'DAILY' },
           META,
         ),
     ],
-    ['editar', () => updateGardenActivity(PABLO, ACTIVITY, { description: 'Otra' }, META)],
+    [
+      'editar',
+      () => updateGardenActivity(OUTSIDER, ACTIVITY, { version: 1, description: 'Otra' }, META),
+    ],
+  ])('%s sin participar → 403 sin tocar la base', async (_label, run) => {
+    await expect(run()).rejects.toMatchObject({ statusCode: 403 });
+    expect(db.$transaction).not.toHaveBeenCalled();
+    expect(db.auditLog.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('administración: solo ADMIN (la participación no da permisos de ADMIN)', () => {
+  it.each([
     ['desactivar', () => setGardenActivityActive(PABLO, ACTIVITY, false, META)],
     ['ver candidatos', () => listGardenCandidates(PABLO)],
     ['agregar participante', () => addGardenParticipant(PABLO, 'u-otro', META)],

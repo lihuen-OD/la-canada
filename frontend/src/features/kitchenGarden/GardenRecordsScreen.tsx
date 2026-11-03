@@ -2,12 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import {
   completeGardenActivity,
-  createGardenActivity,
   fetchGardenActivities,
   fetchGardenParticipants,
   revertGardenCompletion,
   setGardenActivityActive,
-  updateGardenActivity,
 } from '../../api/kitchenGardenApi';
 import type { GardenActivity } from '../../api/kitchenGardenTypes';
 import { ApiError } from '../../api/httpClient';
@@ -18,6 +16,7 @@ import type { TaskExecution, TaskItem as TaskItemData } from '../../api/taskType
 import { useAuth } from '../../auth/useAuth';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
+import { Chip } from '../../components/ui/Chip';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateMessage';
 import { AlertIcon, CheckCircleIcon } from '../../components/ui/icons';
@@ -25,20 +24,28 @@ import { ConfirmDialog } from '../admin/ConfirmDialog';
 import { CompleteTaskDialog } from '../tasks/CompleteTaskDialog';
 import { errorMessageOf, isSessionExpired } from '../tasks/dialogErrors';
 import { RevertTaskDialog } from '../tasks/RevertTaskDialog';
-import { FrequencyFilterBar, PersonFilterBar, ScheduleFilterBar } from '../tasks/TaskFilters';
-import type { FrequencyFilter, PersonFilter, ScheduleFilter } from '../tasks/TaskFilters';
-import { TaskFormDialog } from '../tasks/TaskFormDialog';
+import { PersonFilterBar } from '../tasks/TaskFilters';
+import type { PersonFilter } from '../tasks/TaskFilters';
 import { TaskItem } from '../tasks/TaskItem';
 import { AddParticipantDialog } from './AddParticipantDialog';
 import { GARDEN_NOUN, toPerson, toTaskItem } from './gardenAdapters';
+import { GardenRecordFormDialog } from './GardenRecordFormDialog';
 import { GARDEN_TITLE } from './gardenTitle';
 import { KitchenGardenSubnav } from './KitchenGardenSubnav';
+import {
+  AGENDA_SECTIONS,
+  KIND_ICON,
+  KIND_LABEL,
+  KIND_ORDER,
+  UNCLASSIFIED_LABEL,
+  type KindFilter,
+} from './recordLabels';
 import { useGardenCache } from './useGardenCache';
 
 type DialogState =
   | { type: 'none' }
   | { type: 'create' }
-  | { type: 'edit'; task: TaskItemData }
+  | { type: 'edit'; activity: GardenActivity }
   | { type: 'complete'; task: TaskItemData }
   | { type: 'revert'; activityId: string; description: string; execution: TaskExecution }
   | { type: 'toggle'; task: TaskItemData }
@@ -46,24 +53,31 @@ type DialogState =
 
 type Notice = { tone: 'positive' | 'danger'; text: string } | null;
 
-const STALE_DATA_NOTICE = 'No pudimos actualizar las actividades. Mostramos los últimos datos.';
+const STALE_DATA_NOTICE = 'No pudimos actualizar los registros. Mostramos los últimos datos.';
+/** Regla de ✅ Tareas aplicada a la Huerta (la decide el backend con la semana de `completedAt`). */
+const COMPLETED_HINT =
+  'Las «Una vez» y urgentes completadas siguen acá hasta el domingo de la semana en que se completaron; después se consultan en el Historial.';
+
+/** Pendiente del período vigente: activa y sin ejecución vigente (las completadas van aparte). */
+const isPending = (activity: GardenActivity) => activity.active && !activity.currentExecution;
 
 /**
- * 🥬 Huerta → Actividades: la misma experiencia que 📋 Tareas (filtros por
- * persona y frecuencia, «Hoy»/«Vencidas» en «Una vez», orden y sugerencias,
- * completar y deshacer con confirmación) sobre los datos PROPIOS de la Huerta
- * (`/kitchen-garden/*`, `queryKeys.kitchenGarden`). Se piden solo al entrar al
- * módulo. Permisos: el backend decide; acá solo se ocultan acciones.
+ * 🥬 Huerta → 📝 Registros: las actividades de siempre (mismos ids,
+ * responsables, frecuencias, planificación y ejecuciones) con su tipo y
+ * observaciones, agrupadas como las devuelve el backend: vencidas, para
+ * hoy, próximas y sin fecha; las completadas del período, aparte (no cuentan
+ * como pendientes). Resumen arriba y filtros por tipo y persona. Crear y
+ * editar: ADMIN y participantes activos; desactivar: solo ADMIN; completar y
+ * deshacer, las reglas de siempre. Datos propios (`/kitchen-garden/*`).
  */
-export function GardenActivitiesScreen() {
+export function GardenRecordsScreen() {
   const { user, logout } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
   const { userId, enabled } = useSessionScope();
   const { afterActivityChange, afterParticipantChange } = useGardenCache();
   const [showAll, setShowAll] = useState(false);
   const [person, setPerson] = useState<PersonFilter>('all');
-  const [frequency, setFrequency] = useState<FrequencyFilter>('all');
-  const [schedule, setSchedule] = useState<ScheduleFilter>('all');
+  const [kind, setKind] = useState<KindFilter>('all');
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
   const [notice, setNotice] = useState<Notice>(null);
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set());
@@ -92,6 +106,7 @@ export function GardenActivitiesScreen() {
 
   const activities = activitiesQuery.data?.activities;
   const participants = participantsQuery.data?.participants;
+  const canWrite = activitiesQuery.data?.viewer?.canWrite ?? isAdmin;
   const byId = useMemo(
     () => new Map((activities ?? []).map((activity) => [activity.id, activity])),
     [activities],
@@ -103,11 +118,7 @@ export function GardenActivitiesScreen() {
   const pendingByPerson = useMemo(() => {
     const counts = new Map<string, number>();
     for (const activity of activities ?? []) {
-      if (
-        activity.active &&
-        !activity.currentExecution &&
-        activity.scheduleStatus !== 'SCHEDULED'
-      ) {
+      if (isPending(activity) && activity.agenda !== 'UPCOMING' && activity.agenda !== 'NO_DATE') {
         counts.set(activity.responsible.id, (counts.get(activity.responsible.id) ?? 0) + 1);
       }
     }
@@ -158,13 +169,14 @@ export function GardenActivitiesScreen() {
     [afterActivityChange, endSession],
   );
 
+  const canCreate = canWrite && activeParticipants.length > 0;
   const header = (
     <PageHeader
       title={GARDEN_TITLE}
       actions={
-        isAdmin && activeParticipants.length > 0 ? (
+        canCreate ? (
           <Button className="desktop-add" onClick={() => setDialog({ type: 'create' })}>
-            + Nueva actividad
+            + Nuevo registro
           </Button>
         ) : null
       }
@@ -188,29 +200,96 @@ export function GardenActivitiesScreen() {
               }}
             />
           ) : (
-            <LoadingState label="Cargando actividades…" />
+            <LoadingState label="Cargando registros…" />
           )}
         </Card>
       </div>
     );
   }
 
+  const period = activitiesQuery.data!.period;
   const ofPerson = activities.filter(
     (activity) => person === 'all' || activity.responsible.id === person,
   );
-  const scheduleFilter = frequency === 'ONE_TIME' ? schedule : 'all';
   const visible = ofPerson.filter(
     (activity) =>
-      (frequency === 'all' || activity.frequency === frequency) &&
-      (scheduleFilter === 'all' || activity.scheduleStatus === scheduleFilter),
+      kind === 'all' || (kind === 'UNCLASSIFIED' ? activity.kind === null : activity.kind === kind),
   );
-  const scheduleCounts = {
-    DUE_TODAY: ofPerson.filter((activity) => activity.scheduleStatus === 'DUE_TODAY').length,
-    OVERDUE: ofPerson.filter((activity) => activity.scheduleStatus === 'OVERDUE').length,
+  const hasUnclassified = activities.some((activity) => activity.kind === null);
+  const pending = visible.filter(isPending);
+  const summary = {
+    overdue: pending.filter((activity) => activity.agenda === 'OVERDUE').length,
+    today: pending.filter((activity) => activity.agenda === 'TODAY').length,
+    soon: pending.filter(
+      (activity) =>
+        activity.agenda === 'UPCOMING' &&
+        activity.agendaDate !== null &&
+        (!period.soonUntil || activity.agendaDate <= period.soonUntil),
+    ).length,
   };
-  const timeZone = activitiesQuery.data!.period.timeZone;
-  const today = activitiesQuery.data!.period.today;
+  const done = visible.filter((activity) => activity.active && activity.currentExecution);
+  const inactive = visible.filter((activity) => !activity.active);
   const noParticipants = participants.length === 0;
+
+  const renderItem = (activity: GardenActivity) => (
+    <TaskItem
+      key={activity.id}
+      task={toTaskItem(activity)}
+      isAdmin={isAdmin}
+      canEdit={canWrite && (activity.active || isAdmin)}
+      canToggleActive={isAdmin}
+      busy={busyIds.has(activity.id)}
+      timeZone={period.timeZone}
+      today={period.today}
+      showAssignee={person === 'all'}
+      note={activity.notes}
+      tags={
+        activity.kind ? (
+          <span className="garden-kind">
+            <span aria-hidden="true">{KIND_ICON[activity.kind]} </span>
+            {KIND_LABEL[activity.kind]}
+          </span>
+        ) : (
+          <span className="garden-kind garden-kind--unclassified">{UNCLASSIFIED_LABEL}</span>
+        )
+      }
+      onComplete={(target) =>
+        isAdmin ? setDialog({ type: 'complete', task: target }) : completeOwn(target)
+      }
+      onRevert={(target) =>
+        target.currentExecution
+          ? setDialog({
+              type: 'revert',
+              activityId: target.id,
+              description: target.description,
+              execution: target.currentExecution,
+            })
+          : undefined
+      }
+      onEdit={() => setDialog({ type: 'edit', activity })}
+      onToggleActive={(target) => setDialog({ type: 'toggle', task: target })}
+    />
+  );
+
+  const section = (
+    title: string,
+    icon: string,
+    items: GardenActivity[],
+    extra = '',
+    hint?: string,
+  ) =>
+    items.length === 0 ? null : (
+      <section className={`garden-section ${extra}`.trim()} key={title} aria-label={title}>
+        <h2 className="garden-section__title">
+          <span aria-hidden="true">{icon} </span>
+          {title} <span className="garden-section__count">({items.length})</span>
+        </h2>
+        {hint ? <p className="garden-section__hint">{hint}</p> : null}
+        <ul className="task-list" role="list" aria-label={title}>
+          {items.map(renderItem)}
+        </ul>
+      </section>
+    );
 
   let content;
   if (noParticipants && activities.length === 0) {
@@ -221,8 +300,8 @@ export function GardenActivitiesScreen() {
           title="Todavía no hay participantes en la Huerta."
           description={
             isAdmin
-              ? 'Para empezar, agregá a las personas que trabajan en la Huerta. Después vas a poder crearles actividades.'
-              : 'Un administrador agrega a las personas que participan y sus actividades.'
+              ? 'Para empezar, agregá a las personas que trabajan en la Huerta. Después vas a poder cargar registros.'
+              : 'Un administrador agrega a las personas que participan.'
           }
         />
         {isAdmin ? (
@@ -239,18 +318,18 @@ export function GardenActivitiesScreen() {
       <>
         <EmptyState
           icon={<span aria-hidden="true">🌱</span>}
-          title="Todavía no hay actividades."
+          title="Todavía no hay registros."
           description={
-            isAdmin
-              ? activeParticipants.length > 0
-                ? 'Creá la primera con «Crear actividad».'
-                : 'Primero reactivá o agregá un participante: cada actividad necesita un responsable.'
-              : 'Un administrador las crea y asigna.'
+            canCreate
+              ? 'Cargá la primera siembra, trasplante u otra actividad con «Crear registro».'
+              : canWrite
+                ? 'Primero tiene que haber un participante activo: cada registro necesita un responsable.'
+                : 'Los participantes y los administradores cargan los registros.'
           }
         />
-        {isAdmin && activeParticipants.length > 0 ? (
+        {canCreate ? (
           <div className="garden-empty-action">
-            <Button onClick={() => setDialog({ type: 'create' })}>Crear actividad</Button>
+            <Button onClick={() => setDialog({ type: 'create' })}>Crear registro</Button>
           </div>
         ) : null}
       </>
@@ -259,44 +338,31 @@ export function GardenActivitiesScreen() {
     content = (
       <EmptyState
         icon={<span aria-hidden="true">🌱</span>}
-        title="No hay actividades con estos filtros."
-        description="Probá con otra persona o frecuencia."
+        title="No hay registros con estos filtros."
+        description="Probá con otro tipo o persona."
       />
     );
   } else {
     content = (
-      <ul className="task-list" role="list" aria-label="Actividades del período">
-        {visible.map((activity) => (
-          <TaskItem
-            key={activity.id}
-            task={toTaskItem(activity)}
-            isAdmin={isAdmin}
-            busy={busyIds.has(activity.id)}
-            timeZone={timeZone}
-            today={today}
-            showAssignee={person === 'all'}
-            onComplete={(target) =>
-              isAdmin ? setDialog({ type: 'complete', task: target }) : completeOwn(target)
-            }
-            onRevert={(target) =>
-              target.currentExecution
-                ? setDialog({
-                    type: 'revert',
-                    activityId: target.id,
-                    description: target.description,
-                    execution: target.currentExecution,
-                  })
-                : undefined
-            }
-            onEdit={(target) => setDialog({ type: 'edit', task: target })}
-            onToggleActive={(target) => setDialog({ type: 'toggle', task: target })}
-          />
-        ))}
-      </ul>
+      <>
+        {AGENDA_SECTIONS.map(({ agenda, title, icon }) =>
+          section(
+            title,
+            icon,
+            pending.filter((activity) => activity.agenda === agenda),
+          ),
+        )}
+        {section('Completadas', '✅', done, 'garden-section--done', COMPLETED_HINT)}
+        {section('Desactivadas', '⏸️', inactive, 'garden-section--done')}
+        {pending.length === 0 ? (
+          <p className="garden-all-done" role="status">
+            No quedan registros pendientes
+            {person === 'all' && kind === 'all' ? '' : ' con estos filtros'}.
+          </p>
+        ) : null}
+      </>
     );
   }
-
-  const target = (task: TaskItemData): GardenActivity | undefined => byId.get(task.id);
 
   return (
     <div className="tasks garden">
@@ -324,6 +390,24 @@ export function GardenActivitiesScreen() {
         ) : null}
       </div>
 
+      {activities.length > 0 ? (
+        <ul className="garden-summary" aria-label="Resumen de pendientes">
+          <li
+            className={
+              summary.overdue > 0 ? 'garden-summary__item is-alert' : 'garden-summary__item'
+            }
+          >
+            <strong>{summary.overdue}</strong> {summary.overdue === 1 ? 'vencida' : 'vencidas'}
+          </li>
+          <li className="garden-summary__item">
+            <strong>{summary.today}</strong> para hoy
+          </li>
+          <li className="garden-summary__item">
+            <strong>{summary.soon}</strong> en los próximos 7 días
+          </li>
+        </ul>
+      ) : null}
+
       {activities.length > 0 || activeParticipants.length > 0 ? (
         <div className="tasks__filters">
           {activeParticipants.length > 0 ? (
@@ -334,21 +418,21 @@ export function GardenActivitiesScreen() {
               onSelect={setPerson}
             />
           ) : null}
-          <FrequencyFilterBar
-            selected={frequency}
-            onSelect={(value) => {
-              setFrequency(value);
-              setSchedule('all');
-            }}
-          />
-          {frequency === 'ONE_TIME' ? (
-            <ScheduleFilterBar
-              selected={schedule}
-              counts={scheduleCounts}
-              onSelect={setSchedule}
-              noun={GARDEN_NOUN}
-            />
-          ) : null}
+          <div className="filter-scroller" role="group" aria-label="Filtrar por tipo">
+            <Chip selected={kind === 'all'} onSelect={() => setKind('all')}>
+              Todos
+            </Chip>
+            {KIND_ORDER.map((value) => (
+              <Chip key={value} selected={kind === value} onSelect={() => setKind(value)}>
+                {`${KIND_ICON[value]} ${KIND_LABEL[value]}`}
+              </Chip>
+            ))}
+            {hasUnclassified || kind === 'UNCLASSIFIED' ? (
+              <Chip selected={kind === 'UNCLASSIFIED'} onSelect={() => setKind('UNCLASSIFIED')}>
+                {UNCLASSIFIED_LABEL}
+              </Chip>
+            ) : null}
+          </div>
           {isAdmin ? (
             <label className="tasks__admin-toggle">
               <input
@@ -356,7 +440,7 @@ export function GardenActivitiesScreen() {
                 checked={showAll}
                 onChange={(event) => setShowAll(event.target.checked)}
               />
-              Incluir desactivadas y únicas ya completadas
+              Incluir desactivados y completados de semanas anteriores («Una vez» y urgentes)
             </label>
           ) : null}
         </div>
@@ -364,11 +448,11 @@ export function GardenActivitiesScreen() {
 
       <Card className={activitiesQuery.isPlaceholderData ? 'is-stale' : undefined}>{content}</Card>
 
-      {isAdmin && activeParticipants.length > 0 ? (
+      {canCreate ? (
         <Button
           className="app-fab"
-          aria-label="Nueva actividad"
-          title="Nueva actividad"
+          aria-label="Nuevo registro"
+          title="Nuevo registro"
           onClick={() => setDialog({ type: 'create' })}
         >
           ＋
@@ -376,24 +460,15 @@ export function GardenActivitiesScreen() {
       ) : null}
 
       {dialog.type === 'create' || dialog.type === 'edit' ? (
-        <TaskFormDialog
-          task={dialog.type === 'edit' ? dialog.task : undefined}
-          employees={activeParticipants}
-          noun={GARDEN_NOUN}
+        <GardenRecordFormDialog
+          activity={dialog.type === 'edit' ? dialog.activity : undefined}
+          participants={activeParticipants}
           onCancel={closeDialog}
-          onCreate={async ({ employeeId, ...body }) => {
-            await createGardenActivity({ ...body, participantId: employeeId }).catch(
-              rethrowForDialog,
-            );
-            afterSuccess('Actividad creada.');
-          }}
-          onUpdate={async (activityId, { employeeId, ...body }) => {
-            await updateGardenActivity(activityId, {
-              ...body,
-              ...(employeeId !== undefined ? { participantId: employeeId } : {}),
-            }).catch(rethrowForDialog);
-            afterSuccess('Actividad actualizada.');
-          }}
+          onSessionExpired={endSession}
+          onCreated={({ transplant }) =>
+            afterSuccess(transplant ? 'Siembra y trasplante creados.' : 'Registro creado.')
+          }
+          onUpdated={() => afterSuccess('Registro actualizado.')}
         />
       ) : null}
 
@@ -430,10 +505,10 @@ export function GardenActivitiesScreen() {
           title={`${dialog.task.active ? 'Desactivar' : 'Reactivar'} «${dialog.task.description}»`}
           description={
             dialog.task.active
-              ? 'La actividad deja de aparecer en el listado y no se puede completar. No se borra: su historial se conserva y podés reactivarla cuando quieras.'
-              : target(dialog.task)?.responsible.active === false
-                ? 'Su responsable ya no participa de la Huerta: reasignala (✏️) a un participante activo antes de reactivarla.'
-                : 'La actividad vuelve a aparecer en el listado y se puede completar.'
+              ? 'El registro deja de aparecer en el listado y no se puede completar. No se borra: su historial se conserva y podés reactivarlo cuando quieras.'
+              : byId.get(dialog.task.id)?.responsible.active === false
+                ? 'Su responsable ya no participa de la Huerta: reasignalo (✏️) a un participante activo antes de reactivarlo.'
+                : 'El registro vuelve a aparecer en el listado y se puede completar.'
           }
           confirmLabel={dialog.task.active ? 'Desactivar' : 'Reactivar'}
           tone={dialog.task.active ? 'danger' : 'default'}
@@ -442,7 +517,7 @@ export function GardenActivitiesScreen() {
             await setGardenActivityActive(dialog.task.id, !dialog.task.active).catch(
               rethrowForDialog,
             );
-            afterSuccess(dialog.task.active ? 'Actividad desactivada.' : 'Actividad reactivada.');
+            afterSuccess(dialog.task.active ? 'Registro desactivado.' : 'Registro reactivado.');
           }}
         />
       ) : null}

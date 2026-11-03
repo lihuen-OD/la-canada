@@ -7,6 +7,7 @@ import {
   formatLocalDate,
   parseLocalDate,
   startOfLocalDay,
+  startOfWeek,
   toLocalDate,
   type LocalDate,
 } from '../lib/businessTime';
@@ -67,6 +68,26 @@ export function canRevertExecution(
     execution.completedAt !== null &&
     compareLocalDates(toLocalDate(execution.completedAt, timeZone), today) === 0
   );
+}
+
+/**
+ * «Una vez» y urgentes completadas en el listado operativo: se ven tachadas
+ * durante la semana (lunes a domingo, en `timeZone`) en que se registró su
+ * finalización vigente y salen el lunes siguiente. Cuenta `completedAt` —
+ * nunca la creación de la tarea, su fecha para realizar ni `performedOn` —,
+ * así que completarla antes de tiempo no la retiene y una finalización nueva
+ * (después de deshacer) vuelve a contar desde su propio registro. Sin
+ * `completedAt` (filas anteriores a la columna), fuera, como antes. Es solo
+ * visibilidad: nunca se renuevan ni vuelven pendientes solas.
+ */
+export function isCompletedOneOffVisible(
+  completedAt: Date | null,
+  today: LocalDate,
+  timeZone: string,
+): boolean {
+  if (completedAt === null) return false;
+  const completedWeek = startOfWeek(toLocalDate(completedAt, timeZone));
+  return compareLocalDates(completedWeek, startOfWeek(today)) >= 0;
 }
 
 /** ¿Es `periodKey` una clave de `frequency`? (`URGENT`/`ONE_TIME` fijas; recurrentes con su forma y su día de inicio). */

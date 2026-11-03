@@ -20,11 +20,13 @@ import {
   updateGardenActivity,
 } from '../kitchenGarden/gardenActivitiesService';
 import { getGardenPerformance } from '../kitchenGarden/gardenPerformanceService';
+import { listGardenHistoryEntries } from '../kitchenGarden/gardenHistoryEntries';
 import {
   addParticipantBodySchema,
   completeGardenActivityBodySchema,
   createGardenActivityBodySchema,
   gardenActivityStatusBodySchema,
+  gardenHistoryEntriesQuerySchema,
   gardenHistoryQuerySchema,
   gardenIdParamSchema,
   gardenPerformanceRangeSchema,
@@ -93,10 +95,21 @@ export async function getActivities(req: Request, res: Response): Promise<void> 
   send(res, 200, await listGardenActivities(actor, filters));
 }
 
+/** Alta de un registro (y del trasplante programado junto a una siembra); acepta `Idempotency-Key`. */
 export async function postActivity(req: Request, res: Response): Promise<void> {
   const actor = await actorFrom(req);
   const input = parseOrThrow(createGardenActivityBodySchema, req.body, 'Datos inválidos.');
-  send(res, 201, await createGardenActivity(actor, input, requestMeta(req)));
+  send(
+    res,
+    201,
+    await createGardenActivity(
+      actor,
+      input,
+      requestMeta(req),
+      undefined,
+      req.header('idempotency-key') ?? undefined,
+    ),
+  );
 }
 
 export async function patchActivity(req: Request, res: Response): Promise<void> {
@@ -137,6 +150,13 @@ export async function getHistory(req: Request, res: Response): Promise<void> {
   const actor = await actorFrom(req);
   const params = parseOrThrow(gardenHistoryQuerySchema, req.query, 'Parámetros inválidos.');
   send(res, 200, await getGardenWeeklyHistory(actor, params));
+}
+
+/** 📅 Historial cronológico (más reciente primero, filtros y «Ver más» en el backend). */
+export async function getHistoryEntries(req: Request, res: Response): Promise<void> {
+  const actor = await actorFrom(req);
+  const params = parseOrThrow(gardenHistoryEntriesQuerySchema, req.query, 'Filtros inválidos.');
+  send(res, 200, await listGardenHistoryEntries(actor, params));
 }
 
 export async function getPerformanceSummary(req: Request, res: Response): Promise<void> {

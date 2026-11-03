@@ -124,6 +124,29 @@ export async function loadParticipantDirectory(
   return new Map(rows.map((row) => [row.id, entryOf(row)]));
 }
 
+/**
+ * Nombre visible de usuarios (quien registró o deshizo una ejecución) y su
+ * participación, si tiene: una sola sentencia para los ids de una página.
+ */
+export async function loadUserPeople(
+  userIds: readonly string[],
+): Promise<Map<string, { displayName: string; participantId: string | null }>> {
+  if (userIds.length === 0) return new Map();
+  const users = await prisma.user.findMany({
+    where: { id: { in: [...new Set(userIds)] } },
+    select: { id: true, ...userPublicSelect, kitchenGardenParticipant: { select: { id: true } } },
+  });
+  return new Map(
+    users.map((user) => [
+      user.id,
+      {
+        displayName: resolveVisibleName(user),
+        participantId: user.kitchenGardenParticipant?.id ?? null,
+      },
+    ]),
+  );
+}
+
 /** `GET /kitchen-garden/participants` — todos los autenticados (consulta). */
 export async function listGardenParticipants() {
   const directory = await loadParticipantDirectory();

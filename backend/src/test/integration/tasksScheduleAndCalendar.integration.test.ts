@@ -345,15 +345,20 @@ describe(
   '«Una vez» con fecha — completar, revertir y reprogramar (HTTP)',
   { timeout: 60_000 },
   () => {
-    it('completar ANTES de la fecha: sale del listado operativo; revertir la devuelve como programada', async () => {
+    it('completar ANTES de la fecha: sigue tachada esta semana con su fecha; revertir la devuelve como programada', async () => {
       const task = await createTask('anticipada', empA, 'ONE_TIME', businessDay(7));
       const done = await complete(employeeA, task.id);
       expect(done.status).toBe(201);
       expect(done.body.task).toMatchObject({ scheduleStatus: null, scheduledDate: businessDay(7) });
       expect(done.body.task.currentExecution.periodKey).toBe('ONE_TIME');
 
+      // Sigue tachada durante la semana de su finalización (después sale: §52).
       const operational = await request(app).get('/api/v1/tasks').set(as(employeeA));
-      expect(operational.body.tasks.map((row: TaskBody) => row.id)).not.toContain(task.id);
+      expect(operational.body.tasks.find((row: TaskBody) => row.id === task.id)).toMatchObject({
+        scheduledDate: businessDay(7),
+        scheduleStatus: null,
+        currentExecution: { periodKey: 'ONE_TIME' },
+      });
       const all = await request(app).get('/api/v1/tasks?status=all').set(as(admin));
       expect(all.body.tasks.find((row: TaskBody) => row.id === task.id)).toMatchObject({
         scheduleStatus: null,
@@ -793,7 +798,8 @@ describe('Desempeño e Inicio con "ahora" controlado (servicio)', () => {
     expect(week.occurrences!.filter((row) => row.taskId === moved.id)).toHaveLength(1);
     const home = await getDashboard(employeeActor(admin, own), now);
     expect(home.performance?.employees).toEqual([expect.objectContaining(expected)]);
-    const list = await listTasks(adminActor(), { status: 'active' }, now);
+    // La fórmula de Inicio (su propia vista: sin la semana de visibilidad de Tareas).
+    const list = await listTasks(adminActor(), { status: 'active' }, now, { view: 'homeKpi' });
     expect(home.kpis.tasksTotal).toBe(
       list.tasks.filter((row) => row.scheduleStatus !== 'SCHEDULED').length,
     );

@@ -1,24 +1,16 @@
 import type {
   GardenActivity,
   GardenExecution,
-  GardenHistoryActivity,
-  GardenHistoryResponse,
   GardenPerformanceResponse,
   GardenPerson,
 } from '../../api/kitchenGardenTypes';
 import type { PerformanceResponse } from '../../api/performanceTypes';
-import type {
-  HistoryTask,
-  TaskEmployee,
-  TaskExecution,
-  TaskHistoryResponse,
-  TaskItem,
-} from '../../api/taskTypes';
+import type { TaskEmployee, TaskExecution, TaskItem } from '../../api/taskTypes';
 import type { ItemNoun } from '../tasks/taskLabels';
 
 /**
  * 🥬 Huerta → formas de PRESENTACIÓN de los componentes compartidos con ✅
- * Tareas (`TaskItem`, `TaskFormDialog`, `TaskHistory`, `PerformanceScreen`).
+ * Tareas (`TaskItem`, `CompleteTaskDialog`, `RevertTaskDialog`, `PerformanceScreen`).
  * Solo traduce nombres de campo (participante ↔ «persona» del componente):
  * no calcula estados, fechas ni métricas, y nunca mezcla datos de Tareas.
  */
@@ -64,34 +56,6 @@ export function toTaskItem(activity: GardenActivity): TaskItem {
     suggestedDate: activity.suggestedDate,
     currentExecution: activity.currentExecution ? toExecution(activity.currentExecution) : null,
     canComplete: activity.canComplete,
-  };
-}
-
-const toHistoryTask = (activity: GardenHistoryActivity): HistoryTask => ({
-  id: activity.id,
-  description: activity.description,
-  frequency: activity.frequency,
-  active: activity.active,
-  assignee: toPerson(activity.responsible),
-  scheduledDate: activity.scheduledDate,
-});
-
-export function toTaskHistory(history: GardenHistoryResponse): TaskHistoryResponse {
-  return {
-    week: history.week,
-    summary: history.summary,
-    recurring: history.recurring.map((row) => ({
-      task: toHistoryTask(row.activity),
-      slots: row.slots.map((slot) => ({
-        periodKey: slot.periodKey,
-        expected: slot.expected,
-        execution: slot.execution ? toExecution(slot.execution) : null,
-      })),
-    })),
-    others: history.others.map((row) => ({
-      task: toHistoryTask(row.activity),
-      execution: toExecution(row.execution),
-    })),
   };
 }
 

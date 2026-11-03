@@ -54,13 +54,17 @@ const envSchema = z.object({
   // (backend/prisma.config.ts). El servidor nunca la necesita para arrancar
   // ni para servir requests: queda opcional acá a propósito.
   DIRECT_URL: z.string().optional(),
-  // Gate explícito (demo | production) que exigen los scripts locales con
+  // Gate explícito (demo | production | isolated) que exigen los scripts locales con
   // capacidad de escritura (seed, migraciones, tests de integración) antes
   // de tocar la base — ver backend/src/scripts/guardDbCommand.ts. El
   // servidor Express no lo necesita para arrancar: queda opcional acá:
   // el enforcement real vive en el guard de cada script, no en el arranque
   // general de la app.
-  DATABASE_TARGET: z.preprocess(emptyStringToUndefined, z.enum(['demo', 'production']).optional()),
+  // `isolated`: una rama de Neon dedicada a un desarrollo (`LA_CANADA_ENV_FILE`).
+  DATABASE_TARGET: z.preprocess(
+    emptyStringToUndefined,
+    z.enum(['demo', 'production', 'isolated']).optional(),
+  ),
 
   // Autenticación — OBLIGATORIA, misma razón y mismo patrón que
   // DATABASE_URL: las rutas de auth se montan siempre (`routes/index.ts`),
